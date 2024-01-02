@@ -58,6 +58,7 @@ mod kw {
 mod annotation {
     wast::annotation!(interface);
     wast::annotation!(witx);
+    wast::annotation!(alloc);
     wast::annotation!(resource);
 }
 
@@ -136,15 +137,17 @@ impl<'a> Parse<'a> for CommentSyntax<'a> {
             let mut comments = Vec::new();
             loop {
                 let (comment, c) = match cursor.comment() {
-                    Some(pair) => pair,
-                    None => break,
+                    | Some(pair) => pair,
+                    | None => break,
                 };
                 cursor = c;
-                comments.push(if comment.starts_with(";;") {
-                    &comment[2..]
-                } else {
-                    &comment[2..comment.len() - 2]
-                });
+                comments.push(
+                    if comment.starts_with(";;") {
+                        &comment[2..]
+                    } else {
+                        &comment[2..comment.len() - 2]
+                    },
+                );
             }
             Ok((comments, cursor))
         })?;
@@ -195,13 +198,14 @@ impl<'a> CommentSyntax<'a> {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Documented<'a, T> {
     pub comments: CommentSyntax<'a>,
-    pub item: T,
+    pub item:     T,
 }
 
 impl<'a, T: Parse<'a>> Parse<'a> for Documented<'a, T> {
     fn parse(parser: Parser<'a>) -> Result<Self> {
         let _r1 = parser.register_annotation("witx");
         let _r1 = parser.register_annotation("interface");
+        let _r1 = parser.register_annotation("alloc");
         let _r1 = parser.register_annotation("resource");
         let comments = parser.parse()?;
         let item = parser.parse()?;
@@ -268,7 +272,7 @@ impl<'a> Parse<'a> for DeclSyntax<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypenameSyntax<'a> {
     pub ident: wast::Id<'a>,
-    pub def: TypedefSyntax<'a>,
+    pub def:   TypedefSyntax<'a>,
 }
 
 impl<'a> Parse<'a> for TypenameSyntax<'a> {
@@ -295,7 +299,7 @@ pub enum TypedefSyntax<'a> {
     ConstPointer(Box<TypedefSyntax<'a>>),
     Builtin(BuiltinType),
     Ident {
-        name: wast::Id<'a>,
+        name:     wast::Id<'a>,
         resource: Option<ResourceSyntax<'a>>,
     },
     String,
@@ -307,7 +311,7 @@ impl<'a> Parse<'a> for TypedefSyntax<'a> {
         let mut l = parser.lookahead1();
         if l.peek::<wast::Id>() {
             Ok(TypedefSyntax::Ident {
-                name: parser.parse()?,
+                name:     parser.parse()?,
                 resource: if parser.peek2::<annotation::resource>() {
                     Some(parser.parse()?)
                 } else {
@@ -378,7 +382,7 @@ impl<'a> Parse<'a> for TypedefSyntax<'a> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnumSyntax<'a> {
-    pub repr: Option<BuiltinType>,
+    pub repr:    Option<BuiltinType>,
     pub members: Vec<Documented<'a, wast::Id<'a>>>,
 }
 
@@ -424,7 +428,7 @@ impl<'a> Parse<'a> for TupleSyntax<'a> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExpectedSyntax<'a> {
-    pub ok: Option<Box<TypedefSyntax<'a>>>,
+    pub ok:  Option<Box<TypedefSyntax<'a>>>,
     pub err: Option<Box<TypedefSyntax<'a>>>,
 }
 
@@ -450,8 +454,8 @@ impl<'a> Parse<'a> for ExpectedSyntax<'a> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConstSyntax<'a> {
-    pub ty: wast::Id<'a>,
-    pub name: wast::Id<'a>,
+    pub ty:    wast::Id<'a>,
+    pub name:  wast::Id<'a>,
     pub value: u64,
 }
 
@@ -468,7 +472,7 @@ impl<'a> Parse<'a> for ConstSyntax<'a> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FlagsSyntax<'a> {
-    pub repr: Option<BuiltinType>,
+    pub repr:  Option<BuiltinType>,
     pub flags: Vec<Documented<'a, wast::Id<'a>>>,
 }
 
@@ -510,26 +514,49 @@ impl<'a> Parse<'a> for RecordSyntax<'a> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResourceSyntax<'a> {
+pub struct AllocSyntax<'a> {
     pub name: wast::Id<'a>,
+}
+
+impl<'a> Parse<'a> for AllocSyntax<'a> {
+    fn parse(parser: Parser<'a>) -> Result<Self> {
+        parser.parens(|p| {
+            p.parse::<annotation::alloc>()?;
+
+            let name = p.parse()?;
+
+            Ok(AllocSyntax { name })
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResourceSyntax<'a> {
+    pub name:  wast::Id<'a>,
+    pub alloc: Option<AllocSyntax<'a>>,
 }
 
 impl<'a> Parse<'a> for ResourceSyntax<'a> {
     fn parse(parser: Parser<'a>) -> Result<Self> {
-        parser.parens(|p| {
-            p.parse::<annotation::resource>()?;
+        parser.parens(|parser| {
+            parser.parse::<annotation::resource>()?;
 
-            let name = p.parse()?;
+            let name = parser.parse()?;
+            let alloc = if parser.peek2::<annotation::alloc>() {
+                Some(parser.parse()?)
+            } else {
+                None
+            };
 
-            Ok(ResourceSyntax { name })
+            Ok(ResourceSyntax { name, alloc })
         })
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FieldSyntax<'a> {
-    pub name: wast::Id<'a>,
-    pub type_: TypedefSyntax<'a>,
+    pub name:     wast::Id<'a>,
+    pub type_:    TypedefSyntax<'a>,
     pub resource: Option<ResourceSyntax<'a>>,
 }
 
@@ -557,7 +584,7 @@ impl<'a> Parse<'a> for FieldSyntax<'a> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnionSyntax<'a> {
-    pub tag: Option<Box<TypedefSyntax<'a>>>,
+    pub tag:    Option<Box<TypedefSyntax<'a>>>,
     pub fields: Vec<Documented<'a, TypedefSyntax<'a>>>,
 }
 
@@ -583,7 +610,7 @@ impl<'a> Parse<'a> for UnionSyntax<'a> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VariantSyntax<'a> {
-    pub tag: Option<Box<TypedefSyntax<'a>>>,
+    pub tag:   Option<Box<TypedefSyntax<'a>>>,
     pub cases: Vec<Documented<'a, CaseSyntax<'a>>>,
 }
 
@@ -612,7 +639,7 @@ impl<'a> Parse<'a> for VariantSyntax<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CaseSyntax<'a> {
     pub name: wast::Id<'a>,
-    pub ty: Option<TypedefSyntax<'a>>,
+    pub ty:   Option<TypedefSyntax<'a>>,
 }
 
 impl<'a> Parse<'a> for CaseSyntax<'a> {
@@ -620,7 +647,7 @@ impl<'a> Parse<'a> for CaseSyntax<'a> {
         parser.parse::<kw::case>()?;
         Ok(CaseSyntax {
             name: parser.parse()?,
-            ty: if parser.is_empty() {
+            ty:   if parser.is_empty() {
                 None
             } else {
                 Some(parser.parse()?)
@@ -641,7 +668,7 @@ impl<'a> Parse<'a> for HandleSyntax {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModuleSyntax<'a> {
-    pub name: wast::Id<'a>,
+    pub name:  wast::Id<'a>,
     pub decls: Vec<Documented<'a, ModuleDeclSyntax<'a>>>,
 }
 
@@ -680,9 +707,9 @@ impl<'a> Parse<'a> for ModuleDeclSyntax<'a> {
 
 #[derive(Debug, Clone)]
 pub struct ModuleImportSyntax<'a> {
-    pub name: &'a str,
+    pub name:     &'a str,
     pub name_loc: wast::Span,
-    pub type_: ImportTypeSyntax,
+    pub type_:    ImportTypeSyntax,
 }
 
 impl<'a> Parse<'a> for ModuleImportSyntax<'a> {
@@ -704,7 +731,8 @@ impl PartialEq for ModuleImportSyntax<'_> {
     }
 }
 
-impl Eq for ModuleImportSyntax<'_> {}
+impl Eq for ModuleImportSyntax<'_> {
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ImportTypeSyntax {
@@ -720,11 +748,11 @@ impl Parse<'_> for ImportTypeSyntax {
 
 #[derive(Debug, Clone)]
 pub struct InterfaceFuncSyntax<'a> {
-    pub export: &'a str,
+    pub export:     &'a str,
     pub export_loc: wast::Span,
-    pub params: Vec<Documented<'a, FieldSyntax<'a>>>,
-    pub results: Vec<Documented<'a, FieldSyntax<'a>>>,
-    pub noreturn: bool,
+    pub params:     Vec<Documented<'a, FieldSyntax<'a>>>,
+    pub results:    Vec<Documented<'a, FieldSyntax<'a>>>,
+    pub noreturn:   bool,
 }
 
 impl<'a> Parse<'a> for InterfaceFuncSyntax<'a> {
@@ -744,21 +772,21 @@ impl<'a> Parse<'a> for InterfaceFuncSyntax<'a> {
         while !parser.is_empty() {
             let func_field = parser.parse::<Documented<InterfaceFuncField>>()?;
             match func_field.item {
-                InterfaceFuncField::Param(item) => {
+                | InterfaceFuncField::Param(item) => {
                     params.push(Documented {
                         comments: func_field.comments,
                         item,
                     });
-                }
-                InterfaceFuncField::Result(item) => {
+                },
+                | InterfaceFuncField::Result(item) => {
                     results.push(Documented {
                         comments: func_field.comments,
                         item,
                     });
-                }
-                InterfaceFuncField::Noreturn => {
+                },
+                | InterfaceFuncField::Noreturn => {
                     noreturn = true;
-                }
+                },
             }
         }
 
@@ -785,8 +813,8 @@ impl<'a> Parse<'a> for InterfaceFuncField<'a> {
                 parser.parse::<kw::param>()?;
 
                 Ok(InterfaceFuncField::Param(FieldSyntax {
-                    name: parser.parse()?,
-                    type_: parser.parse()?,
+                    name:     parser.parse()?,
+                    type_:    parser.parse()?,
                     resource: if p.peek2::<annotation::resource>() {
                         Some(p.parse()?)
                     } else {
@@ -797,8 +825,8 @@ impl<'a> Parse<'a> for InterfaceFuncField<'a> {
                 parser.parse::<kw::result>()?;
 
                 Ok(InterfaceFuncField::Result(FieldSyntax {
-                    name: parser.parse()?,
-                    type_: parser.parse()?,
+                    name:     parser.parse()?,
+                    type_:    parser.parse()?,
                     resource: if p.peek2::<annotation::resource>() {
                         Some(p.parse()?)
                     } else {
@@ -831,4 +859,5 @@ impl PartialEq for InterfaceFuncSyntax<'_> {
     }
 }
 
-impl Eq for InterfaceFuncSyntax<'_> {}
+impl Eq for InterfaceFuncSyntax<'_> {
+}

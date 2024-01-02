@@ -34,8 +34,8 @@
     (result $error
       (expected
         (tuple
-          $size (@resource $argv_size)
-          $size (@resource $argv_buf_size)
+          $size (@resource $argv_size     (@alloc $argv))
+          $size (@resource $argv_buf_size (@alloc $argv_buf))
         )
         (error $errno)
       )

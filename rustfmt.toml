@@ -1,0 +1,11 @@
+edition = "2021"
+
+combine_control_expr = false
+empty_item_single_line = false
+enum_discrim_align_threshold = 20
+imports_granularity = "Crate"
+imports_layout = "HorizontalVertical"
+match_arm_leading_pipes = "Always"
+match_block_trailing_comma = true
+struct_field_align_threshold = 50
+unstable_features = true

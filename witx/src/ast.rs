@@ -1,10 +1,10 @@
-use petgraph::graph::DiGraph;
-use petgraph::stable_graph::NodeIndex;
-use petgraph::Direction;
+use petgraph::{graph::DiGraph, stable_graph::NodeIndex, Direction};
 
 use crate::Abi;
-use std::collections::{HashMap, HashSet};
-use std::rc::{Rc, Weak};
+use std::{
+    collections::{HashMap, HashSet},
+    rc::{Rc, Weak},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Id(String);
@@ -44,10 +44,10 @@ impl From<&str> for Id {
 
 #[derive(Debug, Clone)]
 pub struct Document {
-    definitions: Vec<Definition>,
-    entries: HashMap<Id, Entry>,
+    definitions:   Vec<Definition>,
+    entries:       HashMap<Id, Entry>,
     resources_map: HashMap<Id, NodeIndex>,
-    resources: DiGraph<Resource, ResourceRelation>,
+    resources:     DiGraph<Resource, ResourceRelation>,
 }
 
 impl Document {
@@ -73,14 +73,14 @@ impl Document {
 
     pub fn typename(&self, name: &Id) -> Option<Rc<NamedType>> {
         self.entries.get(name).and_then(|e| match e {
-            Entry::Typename(nt) => Some(nt.upgrade().expect("always possible to upgrade entry")),
-            _ => None,
+            | Entry::Typename(nt) => Some(nt.upgrade().expect("always possible to upgrade entry")),
+            | _ => None,
         })
     }
     pub fn typenames<'a>(&'a self) -> impl Iterator<Item = Rc<NamedType>> + 'a {
         self.definitions.iter().filter_map(|d| match d {
-            Definition::Typename(nt) => Some(nt.clone()),
-            _ => None,
+            | Definition::Typename(nt) => Some(nt.clone()),
+            | _ => None,
         })
     }
     /// All of the (unique) types used as "err" variant of results returned from
@@ -98,11 +98,11 @@ impl Document {
                         }
                     })
                     .filter_map(|t| match &*t {
-                        Type::Variant(v) => {
+                        | Type::Variant(v) => {
                             let (_ok, err) = v.as_expected()?;
                             Some(err?.clone())
-                        }
-                        _ => None,
+                        },
+                        | _ => None,
                     })
                     .collect::<HashSet<TypeRef>>()
             })
@@ -111,21 +111,21 @@ impl Document {
     }
     pub fn module(&self, name: &Id) -> Option<Rc<Module>> {
         self.entries.get(&name).and_then(|e| match e {
-            Entry::Module(m) => Some(m.upgrade().expect("always possible to upgrade entry")),
-            _ => None,
+            | Entry::Module(m) => Some(m.upgrade().expect("always possible to upgrade entry")),
+            | _ => None,
         })
     }
     pub fn modules<'a>(&'a self) -> impl Iterator<Item = Rc<Module>> + 'a {
         self.definitions.iter().filter_map(|d| match d {
-            Definition::Module(m) => Some(m.clone()),
-            _ => None,
+            | Definition::Module(m) => Some(m.clone()),
+            | _ => None,
         })
     }
 
     pub fn constants<'a>(&'a self) -> impl Iterator<Item = &'a Constant> + 'a {
         self.definitions.iter().filter_map(|d| match d {
-            Definition::Constant(c) => Some(c),
-            _ => None,
+            | Definition::Constant(c) => Some(c),
+            | _ => None,
         })
     }
 }
@@ -137,7 +137,8 @@ impl PartialEq for Document {
         self.entries == rhs.entries
     }
 }
-impl Eq for Document {}
+impl Eq for Document {
+}
 
 impl std::hash::Hash for Document {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
@@ -161,8 +162,8 @@ pub enum Entry {
 impl Entry {
     pub fn kind(&self) -> &'static str {
         match self {
-            Entry::Typename { .. } => "typename",
-            Entry::Module { .. } => "module",
+            | Entry::Typename { .. } => "typename",
+            | Entry::Module { .. } => "module",
         }
     }
 }
@@ -170,21 +171,21 @@ impl Entry {
 impl PartialEq for Entry {
     fn eq(&self, rhs: &Entry) -> bool {
         match (self, rhs) {
-            (Entry::Typename(t), Entry::Typename(t_rhs)) => {
+            | (Entry::Typename(t), Entry::Typename(t_rhs)) => {
                 t.upgrade()
                     .expect("possible to upgrade entry when part of document")
                     == t_rhs
                         .upgrade()
                         .expect("possible to upgrade entry when part of document")
-            }
-            (Entry::Module(m), Entry::Module(m_rhs)) => {
+            },
+            | (Entry::Module(m), Entry::Module(m_rhs)) => {
                 m.upgrade()
                     .expect("possible to upgrade entry when part of document")
                     == m_rhs
                         .upgrade()
                         .expect("possible to upgrade entry when part of document")
-            }
-            _ => false,
+            },
+            | _ => false,
         }
     }
 }
@@ -198,25 +199,31 @@ pub enum TypeRef {
 impl TypeRef {
     pub fn type_(&self) -> &Rc<Type> {
         match self {
-            TypeRef::Name(named) => named.type_(),
-            TypeRef::Value(v) => v,
+            | TypeRef::Name(named) => named.type_(),
+            | TypeRef::Value(v) => v,
         }
     }
 
     pub fn named(&self) -> bool {
         match self {
-            TypeRef::Name(_) => true,
-            TypeRef::Value(_) => false,
+            | TypeRef::Name(_) => true,
+            | TypeRef::Value(_) => false,
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ResourceRef {
+    pub name:  Id,
+    pub alloc: Option<Id>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct NamedType {
-    pub name: Id,
-    pub tref: TypeRef,
-    pub docs: String,
-    pub resource: Option<Id>,
+    pub name:     Id,
+    pub tref:     TypeRef,
+    pub docs:     String,
+    pub resource: Option<ResourceRef>,
 }
 
 impl NamedType {
@@ -259,13 +266,13 @@ impl Type {
     pub fn kind(&self) -> &'static str {
         use Type::*;
         match self {
-            Record(_) => "record",
-            Variant(_) => "variant",
-            Handle(_) => "handle",
-            List(_) => "list",
-            Pointer(_) => "pointer",
-            ConstPointer(_) => "constpointer",
-            Builtin(_) => "builtin",
+            | Record(_) => "record",
+            | Variant(_) => "variant",
+            | Handle(_) => "handle",
+            | List(_) => "list",
+            | Pointer(_) => "pointer",
+            | ConstPointer(_) => "constpointer",
+            | Builtin(_) => "builtin",
         }
     }
 }
@@ -329,12 +336,12 @@ pub enum IntRepr {
 impl IntRepr {
     pub fn to_builtin(&self) -> BuiltinType {
         match self {
-            IntRepr::U8 => BuiltinType::U8 { lang_c_char: false },
-            IntRepr::U16 => BuiltinType::U16,
-            IntRepr::U32 => BuiltinType::U32 {
+            | IntRepr::U8 => BuiltinType::U8 { lang_c_char: false },
+            | IntRepr::U16 => BuiltinType::U16,
+            | IntRepr::U32 => BuiltinType::U32 {
                 lang_ptr_size: false,
             },
-            IntRepr::U64 => BuiltinType::U64,
+            | IntRepr::U64 => BuiltinType::U64,
         }
     }
 }
@@ -380,15 +387,15 @@ pub struct RecordMember {
 impl RecordDatatype {
     pub fn is_tuple(&self) -> bool {
         match self.kind {
-            RecordKind::Tuple => true,
-            _ => false,
+            | RecordKind::Tuple => true,
+            | _ => false,
         }
     }
 
     pub fn bitflags_repr(&self) -> Option<IntRepr> {
         match self.kind {
-            RecordKind::Bitflags(i) => Some(i),
-            _ => None,
+            | RecordKind::Bitflags(i) => Some(i),
+            | _ => None,
         }
     }
 }
@@ -410,7 +417,7 @@ pub struct Variant {
     /// variant is stored in memory.
     pub tag_repr: IntRepr,
     /// The possible cases that values of this variant type can take.
-    pub cases: Vec<Case>,
+    pub cases:    Vec<Case>,
 }
 
 impl Variant {
@@ -477,10 +484,10 @@ pub struct HandleDatatype {}
 
 #[derive(Debug, Clone)]
 pub struct Module {
-    pub name: Id,
+    pub name:    Id,
     definitions: Vec<ModuleDefinition>,
-    entries: HashMap<Id, ModuleEntry>,
-    pub docs: String,
+    entries:     HashMap<Id, ModuleEntry>,
+    pub docs:    String,
 }
 
 impl Module {
@@ -499,26 +506,28 @@ impl Module {
     }
     pub fn import(&self, name: &Id) -> Option<Rc<ModuleImport>> {
         self.entries.get(name).and_then(|e| match e {
-            ModuleEntry::Import(d) => Some(d.upgrade().expect("always possible to upgrade entry")),
-            _ => None,
+            | ModuleEntry::Import(d) => {
+                Some(d.upgrade().expect("always possible to upgrade entry"))
+            },
+            | _ => None,
         })
     }
     pub fn imports<'a>(&'a self) -> impl Iterator<Item = Rc<ModuleImport>> + 'a {
         self.definitions.iter().filter_map(|d| match d {
-            ModuleDefinition::Import(d) => Some(d.clone()),
-            _ => None,
+            | ModuleDefinition::Import(d) => Some(d.clone()),
+            | _ => None,
         })
     }
     pub fn func(&self, name: &Id) -> Option<Rc<InterfaceFunc>> {
         self.entries.get(name).and_then(|e| match e {
-            ModuleEntry::Func(d) => Some(d.upgrade().expect("always possible to upgrade entry")),
-            _ => None,
+            | ModuleEntry::Func(d) => Some(d.upgrade().expect("always possible to upgrade entry")),
+            | _ => None,
         })
     }
     pub fn funcs<'a>(&'a self) -> impl Iterator<Item = Rc<InterfaceFunc>> + 'a {
         self.definitions.iter().filter_map(|d| match d {
-            ModuleDefinition::Func(d) => Some(d.clone()),
-            _ => None,
+            | ModuleDefinition::Func(d) => Some(d.clone()),
+            | _ => None,
         })
     }
 }
@@ -530,7 +539,8 @@ impl PartialEq for Module {
         self.name == rhs.name && self.entries == rhs.entries && self.docs == rhs.docs
     }
 }
-impl Eq for Module {}
+impl Eq for Module {
+}
 
 impl std::hash::Hash for Module {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
@@ -555,30 +565,30 @@ pub enum ModuleEntry {
 impl PartialEq for ModuleEntry {
     fn eq(&self, rhs: &ModuleEntry) -> bool {
         match (self, rhs) {
-            (ModuleEntry::Import(i), ModuleEntry::Import(i_rhs)) => {
+            | (ModuleEntry::Import(i), ModuleEntry::Import(i_rhs)) => {
                 i.upgrade()
                     .expect("always possible to upgrade moduleentry when part of module")
                     == i_rhs
                         .upgrade()
                         .expect("always possible to upgrade moduleentry when part of module")
-            }
-            (ModuleEntry::Func(i), ModuleEntry::Func(i_rhs)) => {
+            },
+            | (ModuleEntry::Func(i), ModuleEntry::Func(i_rhs)) => {
                 i.upgrade()
                     .expect("always possible to upgrade moduleentry when part of module")
                     == i_rhs
                         .upgrade()
                         .expect("always possible to upgrade moduleentry when part of module")
-            }
-            _ => false,
+            },
+            | _ => false,
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ModuleImport {
-    pub name: Id,
+    pub name:    Id,
     pub variant: ModuleImportVariant,
-    pub docs: String,
+    pub docs:    String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -588,12 +598,12 @@ pub enum ModuleImportVariant {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct InterfaceFunc {
-    pub abi: Abi,
-    pub name: Id,
-    pub params: Vec<InterfaceFuncParam>,
-    pub results: Vec<InterfaceFuncParam>,
+    pub abi:      Abi,
+    pub name:     Id,
+    pub params:   Vec<InterfaceFuncParam>,
+    pub results:  Vec<InterfaceFuncParam>,
     pub noreturn: bool,
-    pub docs: String,
+    pub docs:     String,
 }
 
 impl InterfaceFunc {
@@ -602,31 +612,31 @@ impl InterfaceFunc {
 
         if let Some(result) = self.results.first() {
             match &result.tref {
-                TypeRef::Name(_) => panic!("result cannot be a name"),
-                TypeRef::Value(ty) => match ty.as_ref() {
-                    Type::Variant(variant) => {
+                | TypeRef::Name(_) => panic!("result cannot be a name"),
+                | TypeRef::Value(ty) => match ty.as_ref() {
+                    | Type::Variant(variant) => {
                         let (ok_tref, _err_tref) = match variant.as_expected() {
-                            None => panic!("result is a non-expected variant"),
-                            Some(pair) => pair,
+                            | None => panic!("result is a non-expected variant"),
+                            | Some(pair) => pair,
                         };
 
                         if let Some(ok_tref) = ok_tref {
                             match ok_tref {
-                                TypeRef::Name(_named_type) => v.push(ok_tref.clone()),
-                                TypeRef::Value(ty) => match ty.as_ref() {
-                                    Type::Record(record) if record.kind == RecordKind::Tuple => {
+                                | TypeRef::Name(_named_type) => v.push(ok_tref.clone()),
+                                | TypeRef::Value(ty) => match ty.as_ref() {
+                                    | Type::Record(record) if record.kind == RecordKind::Tuple => {
                                         for member in &record.members {
                                             v.push(member.tref.clone());
                                         }
-                                    }
-                                    _ => {
+                                    },
+                                    | _ => {
                                         v.push(ok_tref.clone());
-                                    }
+                                    },
                                 },
                             }
                         }
-                    }
-                    _ => panic!("result must be a variant"),
+                    },
+                    | _ => panic!("result must be a variant"),
                 },
             }
         }
@@ -637,18 +647,18 @@ impl InterfaceFunc {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct InterfaceFuncParam {
-    pub name: Id,
-    pub tref: TypeRef,
-    pub docs: String,
-    pub resource: Option<Id>,
+    pub name:     Id,
+    pub tref:     TypeRef,
+    pub docs:     String,
+    pub resource: Option<ResourceRef>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Constant {
-    pub ty: Id,
-    pub name: Id,
+    pub ty:    Id,
+    pub name:  Id,
     pub value: u64,
-    pub docs: String,
+    pub docs:  String,
 }
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
@@ -677,4 +687,6 @@ impl Resource {
 }
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
-pub enum ResourceRelation {}
+pub enum ResourceRelation {
+    Alloc,
+}

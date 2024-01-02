@@ -402,7 +402,7 @@ passed to the program by the user.
  ;) (@interface func (export "args_get") (param $argv (@witx pointer (@witx pointer u8)) (@resource $argv)) (param $argv_buf (@witx pointer u8) (@resource $argv_buf)) (result $error (variant (@witx tag u32) (case $ok) (case $err $errno)))) (;; Return command-line argument data sizes.
  ;) (@interface func (export "args_sizes_get") (;; Returns the number of arguments and the size of the argument string
 data, or an error.
- ;) (result $error (variant (@witx tag u32) (case $ok (tuple $size (@resource $argv_size) $size (@resource $argv_buf_size))) (case $err $errno)))) (;; Read environment variable data.
+ ;) (result $error (variant (@witx tag u32) (case $ok (tuple $size (@resource $argv_size (@alloc $argv)) $size (@resource $argv_buf_size (@alloc $argv_buf)))) (case $err $errno)))) (;; Read environment variable data.
 The sizes of the buffers should match that returned by `environ_sizes_get`.
 Key/value pairs are expected to be joined with `=`s, and terminated with `\0`s.
  ;) (@interface func (export "environ_get") (param $environ (@witx pointer (@witx pointer u8))) (param $environ_buf (@witx pointer u8)) (result $error (variant (@witx tag u32) (case $ok) (case $err $errno)))) (;; Return environment variable data sizes.

@@ -1,4 +1,4 @@
-use wazzi_witx::{Id, Resource, TypeRef};
+use wazzi_witx::{Id, ResourceRef, TypeRef};
 
 fn document() -> wazzi_witx::Document {
     wazzi_witx::load(&[
@@ -8,13 +8,13 @@ fn document() -> wazzi_witx::Document {
     .unwrap()
 }
 
-fn unwrap_tref_resource(tref: &TypeRef) -> &Id {
+fn unwrap_tref_resource(tref: &TypeRef) -> &ResourceRef {
     match tref {
-        TypeRef::Name(named_type) => match &named_type.resource {
-            Some(resource) => resource,
-            None => panic!("tref is not a resource: {:#?}", tref),
+        | TypeRef::Name(named_type) => match &named_type.resource {
+            | Some(resource) => resource,
+            | None => panic!("tref is not a resource: {:#?}", tref),
         },
-        _ => panic!(),
+        | _ => panic!(),
     }
 }
 
@@ -37,17 +37,13 @@ fn argv() {
     let args_get = module.func(&Id::new("args_get")).unwrap();
     let args_sizes_get = module.func(&Id::new("args_sizes_get")).unwrap();
     let args_sizes_get_results = args_sizes_get.unpack_expected_result();
-    let argv_size_resource_name = unwrap_tref_resource(&args_sizes_get_results[0]);
-    let argv_buf_size_resource_name = unwrap_tref_resource(&args_sizes_get_results[1]);
-    let argv_size_resource = doc.resource(argv_size_resource_name).unwrap();
-    let argv_buf_size_resource = doc.resource(argv_buf_size_resource_name).unwrap();
+    let argv_size_resource_ref = unwrap_tref_resource(&args_sizes_get_results[0]);
+    let argv_buf_size_resource_ref = unwrap_tref_resource(&args_sizes_get_results[1]);
+    let argv_size_resource = doc.resource(&argv_size_resource_ref.name).unwrap();
+    let argv_buf_size_resource = doc.resource(&argv_buf_size_resource_ref.name).unwrap();
     let argv_size_can_fulfill = argv_size_resource.can_fulfill(&doc);
+    let argv_buf_size_can_fulfill = argv_buf_size_resource.can_fulfill(&doc);
 
-    assert_eq!(
-        argv_size_can_fulfill,
-        vec![&Resource {
-            name: Id::new("argv"),
-            tref: todo!()
-        }]
-    );
+    assert_eq!(argv_size_can_fulfill[0].name, Id::new("argv"));
+    assert_eq!(argv_buf_size_can_fulfill[0].name, Id::new("argv_buf"));
 }

@@ -1,61 +1,111 @@
+use petgraph::{graph::DiGraph, stable_graph::NodeIndex};
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+    rc::Rc,
+};
+use thiserror::Error;
+
 use crate::{
     io::{Filesystem, WitxIo},
     parser::{
-        CommentSyntax, DeclSyntax, Documented, EnumSyntax, ExpectedSyntax, FlagsSyntax,
-        HandleSyntax, ImportTypeSyntax, ModuleDeclSyntax, RecordSyntax, TupleSyntax, TypedefSyntax,
-        UnionSyntax, VariantSyntax,
+        CommentSyntax,
+        DeclSyntax,
+        Documented,
+        EnumSyntax,
+        ExpectedSyntax,
+        FlagsSyntax,
+        HandleSyntax,
+        ImportTypeSyntax,
+        ModuleDeclSyntax,
+        RecordSyntax,
+        TupleSyntax,
+        TypedefSyntax,
+        UnionSyntax,
+        VariantSyntax,
     },
-    Abi, BuiltinType, Case, Constant, Definition, Document, Entry, HandleDatatype, Id, IntRepr,
-    InterfaceFunc, InterfaceFuncParam, Location, Module, ModuleDefinition, ModuleEntry,
-    ModuleImport, ModuleImportVariant, NamedType, RecordDatatype, RecordKind, RecordMember,
-    Resource, ResourceRelation, Type, TypeRef, Variant,
+    Abi,
+    BuiltinType,
+    Case,
+    Constant,
+    Definition,
+    Document,
+    Entry,
+    HandleDatatype,
+    Id,
+    IntRepr,
+    InterfaceFunc,
+    InterfaceFuncParam,
+    Location,
+    Module,
+    ModuleDefinition,
+    ModuleEntry,
+    ModuleImport,
+    ModuleImportVariant,
+    NamedType,
+    RecordDatatype,
+    RecordKind,
+    RecordMember,
+    Resource,
+    ResourceRef,
+    ResourceRelation,
+    Type,
+    TypeRef,
+    Variant,
 };
-use petgraph::{graph::DiGraph, stable_graph::NodeIndex};
-use std::collections::{HashMap, HashSet};
-use std::path::Path;
-use std::rc::Rc;
-use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum ValidationError {
     #[error("Unknown name `{name}`")]
-    UnknownName { name: String, location: Location },
+    UnknownName {
+        name:     String,
+        location: Location,
+    },
     #[error("Redefinition of name `{name}`")]
     NameAlreadyExists {
-        name: String,
-        at_location: Location,
+        name:              String,
+        at_location:       Location,
         previous_location: Location,
     },
     #[error("Wrong kind of name `{name}`: expected {expected}, got {got}")]
     WrongKindName {
-        name: String,
+        name:     String,
         location: Location,
         expected: &'static str,
-        got: &'static str,
+        got:      &'static str,
     },
     #[error("Recursive definition of name `{name}`")]
-    Recursive { name: String, location: Location },
+    Recursive {
+        name:     String,
+        location: Location,
+    },
     #[error("Invalid representation `{repr:?}`")]
     InvalidRepr {
-        repr: BuiltinType,
+        repr:     BuiltinType,
         location: Location,
     },
     #[error("ABI error: {reason}")]
-    Abi { reason: String, location: Location },
+    Abi {
+        reason:   String,
+        location: Location,
+    },
     #[error("Anonymous structured types (struct, union, enum, flags, handle) are not permitted")]
     AnonymousRecord { location: Location },
     #[error("Union expected {expected} variants, found {found}")]
     UnionSizeMismatch {
         expected: usize,
-        found: usize,
+        found:    usize,
         location: Location,
     },
     #[error("Invalid union tag: {reason}")]
-    InvalidUnionTag { reason: String, location: Location },
+    InvalidUnionTag {
+        reason:   String,
+        location: Location,
+    },
     #[error("Invalid union field `{name}`: {reason}")]
     InvalidUnionField {
-        name: String,
-        reason: String,
+        name:     String,
+        reason:   String,
         location: Location,
     },
 }
@@ -64,7 +114,7 @@ impl ValidationError {
     pub fn report_with(&self, witxio: &dyn WitxIo) -> String {
         use ValidationError::*;
         match self {
-            UnknownName { location, .. }
+            | UnknownName { location, .. }
             | WrongKindName { location, .. }
             | Recursive { location, .. }
             | InvalidRepr { location, .. }
@@ -74,8 +124,8 @@ impl ValidationError {
             | InvalidUnionField { location, .. }
             | InvalidUnionTag { location, .. } => {
                 format!("{}\n{}", location.highlight_source_with(witxio), &self)
-            }
-            NameAlreadyExists {
+            },
+            | NameAlreadyExists {
                 at_location,
                 previous_location,
                 ..
@@ -106,8 +156,8 @@ impl IdentValidation {
     fn introduce(&mut self, syntax: &str, location: Location) -> Result<Id, ValidationError> {
         if let Some(introduced) = self.names.get(syntax) {
             Err(ValidationError::NameAlreadyExists {
-                name: syntax.to_string(),
-                at_location: location,
+                name:              syntax.to_string(),
+                at_location:       location,
                 previous_location: introduced.clone(),
             })
         } else {
@@ -130,7 +180,7 @@ impl IdentValidation {
 
 pub struct ResourceValidationScope {
     scope: IdentValidation,
-    map: HashMap<Id, NodeIndex>,
+    map:   HashMap<Id, NodeIndex>,
     graph: DiGraph<Resource, ResourceRelation>,
 }
 
@@ -138,23 +188,23 @@ impl ResourceValidationScope {
     fn new() -> Self {
         Self {
             scope: IdentValidation::new(),
-            map: HashMap::new(),
+            map:   HashMap::new(),
             graph: DiGraph::new(),
         }
     }
 }
 
 pub struct DocValidation {
-    scope: IdentValidation,
-    entries: HashMap<Id, Entry>,
+    scope:           IdentValidation,
+    entries:         HashMap<Id, Entry>,
     constant_scopes: HashMap<Id, IdentValidation>,
-    bool_ty: TypeRef,
+    bool_ty:         TypeRef,
 
     resource_scope: ResourceValidationScope,
 }
 
 pub struct DocValidationScope<'a> {
-    doc: &'a mut DocValidation,
+    doc:  &'a mut DocValidation,
     text: &'a str,
     path: &'a Path,
 }
@@ -162,12 +212,12 @@ pub struct DocValidationScope<'a> {
 impl DocValidation {
     pub fn new() -> Self {
         Self {
-            scope: IdentValidation::new(),
-            entries: HashMap::new(),
+            scope:           IdentValidation::new(),
+            entries:         HashMap::new(),
             constant_scopes: HashMap::new(),
-            bool_ty: TypeRef::Value(Rc::new(Type::Variant(Variant {
+            bool_ty:         TypeRef::Value(Rc::new(Type::Variant(Variant {
                 tag_repr: IntRepr::U32,
-                cases: vec![
+                cases:    vec![
                     Case {
                         name: Id::new("false"),
                         tref: None,
@@ -180,7 +230,7 @@ impl DocValidation {
                     },
                 ],
             }))),
-            resource_scope: ResourceValidationScope::new(),
+            resource_scope:  ResourceValidationScope::new(),
         }
     }
 
@@ -207,9 +257,9 @@ impl<'a> DocValidationScope<'a> {
         // Wast Span gives 0-indexed lines and columns. Location is 1-indexed.
         let (line, column) = span.linecol_in(self.text);
         Location {
-            line: line + 1,
+            line:   line + 1,
             column: column + 1,
-            path: self.path.to_path_buf(),
+            path:   self.path.to_path_buf(),
         }
     }
 
@@ -230,7 +280,7 @@ impl<'a> DocValidationScope<'a> {
         definitions: &mut Vec<Definition>,
     ) -> Result<(), ValidationError> {
         match decl {
-            DeclSyntax::Typename(decl) => {
+            | DeclSyntax::Typename(decl) => {
                 let name = self.introduce(&decl.ident)?;
                 let docs = comments.docs();
                 let tref =
@@ -245,9 +295,9 @@ impl<'a> DocValidationScope<'a> {
                     .entries
                     .insert(name.clone(), Entry::Typename(Rc::downgrade(&rc_datatype)));
                 definitions.push(Definition::Typename(rc_datatype));
-            }
+            },
 
-            DeclSyntax::Module(syntax) => {
+            | DeclSyntax::Module(syntax) => {
                 let name = self.introduce(&syntax.name)?;
                 let mut module_validator = ModuleValidation::new(self);
                 let decls = syntax
@@ -267,9 +317,9 @@ impl<'a> DocValidationScope<'a> {
                     .entries
                     .insert(name, Entry::Module(Rc::downgrade(&rc_module)));
                 definitions.push(Definition::Module(rc_module));
-            }
+            },
 
-            DeclSyntax::Const(syntax) => {
+            | DeclSyntax::Const(syntax) => {
                 let ty = Id::new(syntax.item.ty.name());
                 let loc = self.location(syntax.item.name.span());
                 let scope = self
@@ -286,7 +336,7 @@ impl<'a> DocValidationScope<'a> {
                     value: syntax.item.value,
                     docs: syntax.comments.docs(),
                 }));
-            }
+            },
         }
         Ok(())
     }
@@ -299,14 +349,14 @@ impl<'a> DocValidationScope<'a> {
         span: wast::Span,
     ) -> Result<TypeRef, ValidationError> {
         match syntax {
-            TypedefSyntax::Ident {
+            | TypedefSyntax::Ident {
                 name: syntax,
                 resource,
             } => {
                 let i = self.get(syntax)?;
 
                 match self.doc.entries.get(&i) {
-                    Some(Entry::Typename(weak_ref)) => {
+                    | Some(Entry::Typename(weak_ref)) => {
                         let mut named_type_rc =
                             weak_ref.upgrade().expect("weak backref to defined type");
 
@@ -315,12 +365,25 @@ impl<'a> DocValidationScope<'a> {
                                 resource_syntax.name.name(),
                                 self.location(resource_syntax.name.span()),
                             )?;
+                            let alloc = if let Some(alloc) = &resource_syntax.alloc {
+                                Some(
+                                    self.doc
+                                        .resource_scope
+                                        .scope
+                                        .get(alloc.name.name(), self.location(alloc.name.span()))?,
+                                )
+                            } else {
+                                None
+                            };
 
                             named_type_rc = Rc::new(NamedType {
-                                name: named_type_rc.name.clone(),
-                                tref: named_type_rc.tref.clone(),
-                                docs: named_type_rc.docs.clone(),
-                                resource: Some(resource_name.clone()),
+                                name:     named_type_rc.name.clone(),
+                                tref:     named_type_rc.tref.clone(),
+                                docs:     named_type_rc.docs.clone(),
+                                resource: Some(ResourceRef {
+                                    name:  resource_name.clone(),
+                                    alloc: alloc.clone(),
+                                }),
                             });
 
                             let node_id = self.doc.resource_scope.graph.add_node(Resource {
@@ -329,23 +392,34 @@ impl<'a> DocValidationScope<'a> {
                             });
 
                             self.doc.resource_scope.map.insert(resource_name, node_id);
+
+                            if let Some(alloc) = alloc {
+                                let alloc_resource_id =
+                                    *self.doc.resource_scope.map.get(&alloc).unwrap();
+
+                                self.doc.resource_scope.graph.add_edge(
+                                    node_id,
+                                    alloc_resource_id,
+                                    ResourceRelation::Alloc,
+                                );
+                            }
                         }
 
                         Ok(TypeRef::Name(named_type_rc))
-                    }
-                    Some(e) => Err(ValidationError::WrongKindName {
-                        name: i.as_str().to_string(),
+                    },
+                    | Some(e) => Err(ValidationError::WrongKindName {
+                        name:     i.as_str().to_string(),
                         location: self.location(syntax.span()),
                         expected: "datatype",
-                        got: e.kind(),
+                        got:      e.kind(),
                     }),
-                    None => Err(ValidationError::Recursive {
-                        name: i.as_str().to_string(),
+                    | None => Err(ValidationError::Recursive {
+                        name:     i.as_str().to_string(),
                         location: self.location(syntax.span()),
                     }),
                 }
-            }
-            TypedefSyntax::Enum { .. }
+            },
+            | TypedefSyntax::Enum { .. }
             | TypedefSyntax::Flags { .. }
             | TypedefSyntax::Record { .. }
             | TypedefSyntax::Union { .. }
@@ -355,41 +429,43 @@ impl<'a> DocValidationScope<'a> {
                 Err(ValidationError::AnonymousRecord {
                     location: self.location(span),
                 })
-            }
-            other => Ok(TypeRef::Value(Rc::new(match other {
-                TypedefSyntax::Enum(syntax) => Type::Variant(self.validate_enum(&syntax, span)?),
-                TypedefSyntax::Tuple(syntax) => {
+            },
+            | other => Ok(TypeRef::Value(Rc::new(match other {
+                | TypedefSyntax::Enum(syntax) => Type::Variant(self.validate_enum(&syntax, span)?),
+                | TypedefSyntax::Tuple(syntax) => {
                     Type::Record(self.validate_tuple(definitions, &syntax, span)?)
-                }
-                TypedefSyntax::Expected(syntax) => {
+                },
+                | TypedefSyntax::Expected(syntax) => {
                     Type::Variant(self.validate_expected(definitions, &syntax, span)?)
-                }
-                TypedefSyntax::Flags(syntax) => Type::Record(self.validate_flags(&syntax, span)?),
-                TypedefSyntax::Record(syntax) => {
+                },
+                | TypedefSyntax::Flags(syntax) => Type::Record(self.validate_flags(&syntax, span)?),
+                | TypedefSyntax::Record(syntax) => {
                     Type::Record(self.validate_record(definitions, &syntax, span)?)
-                }
-                TypedefSyntax::Union(syntax) => {
+                },
+                | TypedefSyntax::Union(syntax) => {
                     Type::Variant(self.validate_union(definitions, &syntax, span)?)
-                }
-                TypedefSyntax::Variant(syntax) => {
+                },
+                | TypedefSyntax::Variant(syntax) => {
                     Type::Variant(self.validate_variant(definitions, &syntax, span)?)
-                }
-                TypedefSyntax::Handle(syntax) => Type::Handle(self.validate_handle(syntax, span)?),
-                TypedefSyntax::List(syntax) => {
+                },
+                | TypedefSyntax::Handle(syntax) => {
+                    Type::Handle(self.validate_handle(syntax, span)?)
+                },
+                | TypedefSyntax::List(syntax) => {
                     Type::List(self.validate_datatype(definitions, syntax, false, span)?)
-                }
-                TypedefSyntax::Pointer(syntax) => {
+                },
+                | TypedefSyntax::Pointer(syntax) => {
                     Type::Pointer(self.validate_datatype(definitions, syntax, false, span)?)
-                }
-                TypedefSyntax::ConstPointer(syntax) => {
+                },
+                | TypedefSyntax::ConstPointer(syntax) => {
                     Type::ConstPointer(self.validate_datatype(definitions, syntax, false, span)?)
-                }
-                TypedefSyntax::Builtin(builtin) => Type::Builtin(*builtin),
-                TypedefSyntax::String => {
+                },
+                | TypedefSyntax::Builtin(builtin) => Type::Builtin(*builtin),
+                | TypedefSyntax::String => {
                     Type::List(TypeRef::Value(Rc::new(Type::Builtin(BuiltinType::Char))))
-                }
-                TypedefSyntax::Bool => return Ok(self.doc.bool_ty.clone()),
-                TypedefSyntax::Ident { .. } => unreachable!(),
+                },
+                | TypedefSyntax::Bool => return Ok(self.doc.bool_ty.clone()),
+                | TypedefSyntax::Ident { .. } => unreachable!(),
             }))),
         }
     }
@@ -401,8 +477,8 @@ impl<'a> DocValidationScope<'a> {
     ) -> Result<Variant, ValidationError> {
         let mut enum_scope = IdentValidation::new();
         let tag_repr = match &syntax.repr {
-            Some(repr) => self.validate_int_repr(repr, span)?,
-            None => IntRepr::U32,
+            | Some(repr) => self.validate_int_repr(repr, span)?,
+            | None => IntRepr::U32,
         };
         let cases = syntax
             .members
@@ -455,16 +531,16 @@ impl<'a> DocValidationScope<'a> {
         span: wast::Span,
     ) -> Result<Variant, ValidationError> {
         let ok_ty = match &syntax.ok {
-            Some(ok) => Some(self.validate_datatype(definitions, ok, false, span)?),
-            None => None,
+            | Some(ok) => Some(self.validate_datatype(definitions, ok, false, span)?),
+            | None => None,
         };
         let err_ty = match &syntax.err {
-            Some(err) => Some(self.validate_datatype(definitions, err, false, span)?),
-            None => None,
+            | Some(err) => Some(self.validate_datatype(definitions, err, false, span)?),
+            | None => None,
         };
         Ok(Variant {
             tag_repr: IntRepr::U32,
-            cases: vec![
+            cases:    vec![
                 Case {
                     name: Id::new("ok"),
                     tref: ok_ty,
@@ -485,8 +561,8 @@ impl<'a> DocValidationScope<'a> {
         span: wast::Span,
     ) -> Result<RecordDatatype, ValidationError> {
         let repr = match syntax.repr {
-            Some(ty) => self.validate_int_repr(&ty, span)?,
-            None => IntRepr::U32,
+            | Some(ty) => self.validate_int_repr(&ty, span)?,
+            | None => IntRepr::U32,
         };
         let mut flags_scope = IdentValidation::new();
         let mut members = Vec::new();
@@ -544,7 +620,7 @@ impl<'a> DocValidationScope<'a> {
             if names.len() != syntax.fields.len() {
                 return Err(ValidationError::UnionSizeMismatch {
                     expected: names.len(),
-                    found: syntax.fields.len(),
+                    found:    syntax.fields.len(),
                     location: self.location(span),
                 });
             }
@@ -557,8 +633,8 @@ impl<'a> DocValidationScope<'a> {
             .map(|(i, case)| {
                 Ok(Case {
                     name: match &names {
-                        Some(names) => names[i].clone(),
-                        None => Id::new(i.to_string()),
+                        | Some(names) => names[i].clone(),
+                        | None => Id::new(i.to_string()),
                     },
                     tref: Some(self.validate_datatype(definitions, &case.item, false, span)?),
                     docs: case.comments.docs(),
@@ -580,7 +656,7 @@ impl<'a> DocValidationScope<'a> {
             if names.len() != syntax.cases.len() {
                 return Err(ValidationError::UnionSizeMismatch {
                     expected: names.len(),
-                    found: syntax.cases.len(),
+                    found:    syntax.cases.len(),
                     location: self.location(span),
                 });
             }
@@ -598,22 +674,22 @@ impl<'a> DocValidationScope<'a> {
                 if let Some(names) = &mut name_set {
                     if !names.remove(&name) {
                         return Err(ValidationError::InvalidUnionField {
-                            name: name.as_str().to_string(),
+                            name:     name.as_str().to_string(),
                             location: self.location(case.item.name.span()),
-                            reason: format!("does not correspond to variant in tag `tag`"),
+                            reason:   format!("does not correspond to variant in tag `tag`"),
                         });
                     }
                 }
                 Ok(Case {
                     name: Id::new(case.item.name.name()),
                     tref: match &case.item.ty {
-                        Some(ty) => Some(self.validate_datatype(
+                        | Some(ty) => Some(self.validate_datatype(
                             definitions,
                             ty,
                             false,
                             case.item.name.span(),
                         )?),
-                        None => None,
+                        | None => None,
                     },
                     docs: case.comments.docs(),
                 })
@@ -641,35 +717,35 @@ impl<'a> DocValidationScope<'a> {
         span: wast::Span,
     ) -> Result<(IntRepr, Option<Vec<Id>>), ValidationError> {
         let ty = match tag {
-            Some(tag) => self.validate_datatype(definitions, tag, false, span)?,
-            None => return Ok((IntRepr::U32, None)),
+            | Some(tag) => self.validate_datatype(definitions, tag, false, span)?,
+            | None => return Ok((IntRepr::U32, None)),
         };
         match &**ty.type_() {
-            Type::Variant(e) => {
+            | Type::Variant(e) => {
                 let mut names = Vec::new();
                 for c in e.cases.iter() {
                     if c.tref.is_some() {
                         return Err(ValidationError::InvalidUnionTag {
                             location: self.location(span),
-                            reason: format!("all variant cases should have empty payloads"),
+                            reason:   format!("all variant cases should have empty payloads"),
                         });
                     }
                     names.push(c.name.clone());
                 }
                 return Ok((e.tag_repr, Some(names)));
-            }
-            Type::Builtin(BuiltinType::U8 { .. }) => return Ok((IntRepr::U8, None)),
-            Type::Builtin(BuiltinType::U16) => return Ok((IntRepr::U16, None)),
-            Type::Builtin(BuiltinType::U32 { .. }) => return Ok((IntRepr::U32, None)),
-            Type::Builtin(BuiltinType::U64) => return Ok((IntRepr::U64, None)),
-            _ => {}
+            },
+            | Type::Builtin(BuiltinType::U8 { .. }) => return Ok((IntRepr::U8, None)),
+            | Type::Builtin(BuiltinType::U16) => return Ok((IntRepr::U16, None)),
+            | Type::Builtin(BuiltinType::U32 { .. }) => return Ok((IntRepr::U32, None)),
+            | Type::Builtin(BuiltinType::U64) => return Ok((IntRepr::U64, None)),
+            | _ => {},
         }
 
         Err(ValidationError::WrongKindName {
-            name: "tag".to_string(),
+            name:     "tag".to_string(),
             location: self.location(span),
             expected: "enum or builtin",
-            got: ty.type_().kind(),
+            got:      ty.type_().kind(),
         })
     }
 
@@ -687,12 +763,12 @@ impl<'a> DocValidationScope<'a> {
         span: wast::Span,
     ) -> Result<IntRepr, ValidationError> {
         match type_ {
-            BuiltinType::U8 { .. } => Ok(IntRepr::U8),
-            BuiltinType::U16 => Ok(IntRepr::U16),
-            BuiltinType::U32 { .. } => Ok(IntRepr::U32),
-            BuiltinType::U64 => Ok(IntRepr::U64),
-            _ => Err(ValidationError::InvalidRepr {
-                repr: type_.clone(),
+            | BuiltinType::U8 { .. } => Ok(IntRepr::U8),
+            | BuiltinType::U16 => Ok(IntRepr::U16),
+            | BuiltinType::U32 { .. } => Ok(IntRepr::U32),
+            | BuiltinType::U64 => Ok(IntRepr::U64),
+            | _ => Err(ValidationError::InvalidRepr {
+                repr:     type_.clone(),
                 location: self.location(span),
             }),
         }
@@ -700,8 +776,8 @@ impl<'a> DocValidationScope<'a> {
 }
 
 struct ModuleValidation<'a, 'b> {
-    doc: &'a mut DocValidationScope<'b>,
-    scope: IdentValidation,
+    doc:         &'a mut DocValidationScope<'b>,
+    scope:       IdentValidation,
     pub entries: HashMap<Id, ModuleEntry>,
 }
 
@@ -720,11 +796,11 @@ impl<'a, 'b> ModuleValidation<'a, 'b> {
         definitions: &mut Vec<Definition>,
     ) -> Result<ModuleDefinition, ValidationError> {
         match &decl.item {
-            ModuleDeclSyntax::Import(syntax) => {
+            | ModuleDeclSyntax::Import(syntax) => {
                 let loc = self.doc.location(syntax.name_loc);
                 let name = self.scope.introduce(syntax.name, loc)?;
                 let variant = match syntax.type_ {
-                    ImportTypeSyntax::Memory => ModuleImportVariant::Memory,
+                    | ImportTypeSyntax::Memory => ModuleImportVariant::Memory,
                 };
                 let rc_import = Rc::new(ModuleImport {
                     name: name.clone(),
@@ -734,17 +810,8 @@ impl<'a, 'b> ModuleValidation<'a, 'b> {
                 self.entries
                     .insert(name, ModuleEntry::Import(Rc::downgrade(&rc_import)));
                 Ok(ModuleDefinition::Import(rc_import))
-            }
-            ModuleDeclSyntax::Func(syntax) => {
-                // let def_map = definitions
-                //     .iter()
-                //     .filter_map(|d| match d {
-                //         Definition::Typename(named_type) => {
-                //             Some((named_type.name.as_str().to_owned(), named_type.clone()))
-                //         }
-                //         _ => None,
-                //     })
-                //     .collect::<HashMap<_, _>>();
+            },
+            | ModuleDeclSyntax::Func(syntax) => {
                 let loc = self.doc.location(syntax.export_loc);
                 let name = self.scope.introduce(syntax.export, loc)?;
                 let mut argnames = IdentValidation::new();
@@ -774,7 +841,7 @@ impl<'a, 'b> ModuleValidation<'a, 'b> {
                                 .map
                                 .insert(name.clone(), node_id);
 
-                            Some(name)
+                            Some(ResourceRef { name, alloc: None })
                         } else {
                             None
                         };
@@ -803,16 +870,35 @@ impl<'a, 'b> ModuleValidation<'a, 'b> {
 
                         if let TypeRef::Value(ty) = &tref {
                             match ty.as_ref() {
-                                Type::Variant(variant) => {
-                                    if let Some((Some(ok_tref), _err_tref)) = variant.as_expected()
-                                    {
+                                | Type::Variant(variant) if variant.as_expected().is_some() => {
+                                    let (ok_tref, _err_tref) = variant.as_expected().unwrap();
+
+                                    if let Some(ok_tref) = ok_tref {
+                                        match ok_tref {
+                                            | TypeRef::Name(named_type) => {},
+                                            | TypeRef::Value(ty) => match ty.as_ref() {
+                                                | Type::Record(record) if record.is_tuple() => {
+                                                    for member in &record.members {
+                                                        if let TypeRef::Name(named_type) =
+                                                            &member.tref
+                                                        {
+                                                            if let Some(resource) =
+                                                                &named_type.resource
+                                                            {
+                                                            }
+                                                        }
+                                                    }
+                                                },
+                                                | _ => unimplemented!(),
+                                            },
+                                        }
                                     }
-                                }
-                                _ => {
+                                },
+                                | _ => {
                                     if let Some(_resource_syntax) = &f.item.resource {
                                         unimplemented!()
                                     }
-                                }
+                                },
                             }
                         }
 
@@ -845,7 +931,7 @@ impl<'a, 'b> ModuleValidation<'a, 'b> {
                 self.entries
                     .insert(name, ModuleEntry::Func(Rc::downgrade(&rc_func)));
                 Ok(ModuleDefinition::Func(rc_func))
-            }
+            },
         }
     }
 }

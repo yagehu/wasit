@@ -44,7 +44,7 @@ pub enum SExpr {
 impl fmt::Display for SExpr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            SExpr::Vec(vs) => {
+            | SExpr::Vec(vs) => {
                 write!(f, "(")?;
                 let mut vss = Vec::new();
                 for v in vs {
@@ -52,12 +52,12 @@ impl fmt::Display for SExpr {
                 }
                 f.write_str(&vss.join(" "))?;
                 write!(f, ")")
-            }
-            SExpr::Word(w) => write!(f, "{}", w),
-            SExpr::Ident(i) => write!(f, "${}", i),
-            SExpr::Quote(q) => write!(f, "\"{}\"", q),
-            SExpr::Annot(a) => write!(f, "@{}", a),
-            SExpr::Docs(d, s) => write!(
+            },
+            | SExpr::Word(w) => write!(f, "{}", w),
+            | SExpr::Ident(i) => write!(f, "${}", i),
+            | SExpr::Quote(q) => write!(f, "\"{}\"", q),
+            | SExpr::Annot(a) => write!(f, "@{}", a),
+            | SExpr::Docs(d, s) => write!(
                 f,
                 "(;; {} ;) {}",
                 d,
@@ -101,26 +101,41 @@ impl Id {
 impl BuiltinType {
     pub fn to_sexpr(&self) -> SExpr {
         match self {
-            BuiltinType::Char => SExpr::word("char"),
-            BuiltinType::U8 { lang_c_char: true } => {
+            | BuiltinType::Char => SExpr::word("char"),
+            | BuiltinType::U8 { lang_c_char: true } => {
                 SExpr::Vec(vec![SExpr::annot("witx"), SExpr::word("char8")])
-            }
-            BuiltinType::U8 { lang_c_char: false } => SExpr::word("u8"),
-            BuiltinType::U16 => SExpr::word("u16"),
-            BuiltinType::U32 {
+            },
+            | BuiltinType::U8 { lang_c_char: false } => SExpr::word("u8"),
+            | BuiltinType::U16 => SExpr::word("u16"),
+            | BuiltinType::U32 {
                 lang_ptr_size: false,
             } => SExpr::word("u32"),
-            BuiltinType::U32 {
+            | BuiltinType::U32 {
                 lang_ptr_size: true,
             } => SExpr::Vec(vec![SExpr::annot("witx"), SExpr::word("usize")]),
-            BuiltinType::U64 => SExpr::word("u64"),
-            BuiltinType::S8 => SExpr::word("s8"),
-            BuiltinType::S16 => SExpr::word("s16"),
-            BuiltinType::S32 => SExpr::word("s32"),
-            BuiltinType::S64 => SExpr::word("s64"),
-            BuiltinType::F32 => SExpr::word("f32"),
-            BuiltinType::F64 => SExpr::word("f64"),
+            | BuiltinType::U64 => SExpr::word("u64"),
+            | BuiltinType::S8 => SExpr::word("s8"),
+            | BuiltinType::S16 => SExpr::word("s16"),
+            | BuiltinType::S32 => SExpr::word("s32"),
+            | BuiltinType::S64 => SExpr::word("s64"),
+            | BuiltinType::F32 => SExpr::word("f32"),
+            | BuiltinType::F64 => SExpr::word("f64"),
         }
+    }
+}
+
+impl ResourceRef {
+    pub fn to_sexpr(&self) -> SExpr {
+        let mut v = vec![SExpr::annot("resource"), SExpr::ident(self.name.as_str())];
+
+        if let Some(alloc) = &self.alloc {
+            v.push(SExpr::Vec(vec![
+                SExpr::annot("alloc"),
+                SExpr::ident(alloc.as_str()),
+            ]));
+        }
+
+        SExpr::Vec(v)
     }
 }
 
@@ -138,19 +153,16 @@ impl NamedType {
 impl TypeRef {
     pub fn to_sexpr(&self) -> Vec<SExpr> {
         match self {
-            TypeRef::Name(n) => {
+            | TypeRef::Name(n) => {
                 let mut v = vec![n.name.to_sexpr()];
 
                 if let Some(resource) = &n.resource {
-                    v.push(SExpr::Vec(vec![
-                        SExpr::annot("resource"),
-                        SExpr::ident(resource.as_str()),
-                    ]));
+                    v.push(resource.to_sexpr());
                 }
 
                 v
-            }
-            TypeRef::Value(v) => vec![v.to_sexpr()],
+            },
+            | TypeRef::Value(v) => vec![v.to_sexpr()],
         }
     }
 }
@@ -158,31 +170,31 @@ impl TypeRef {
 impl Type {
     pub fn to_sexpr(&self) -> SExpr {
         match self {
-            Type::Record(a) => a.to_sexpr(),
-            Type::Variant(a) => a.to_sexpr(),
-            Type::Handle(a) => a.to_sexpr(),
-            Type::List(a) => {
+            | Type::Record(a) => a.to_sexpr(),
+            | Type::Variant(a) => a.to_sexpr(),
+            | Type::Handle(a) => a.to_sexpr(),
+            | Type::List(a) => {
                 let mut v = vec![SExpr::word("list")];
 
                 v.append(&mut a.to_sexpr());
 
                 SExpr::Vec(v)
-            }
-            Type::Pointer(p) => {
+            },
+            | Type::Pointer(p) => {
                 let mut v = vec![SExpr::annot("witx"), SExpr::word("pointer")];
 
                 v.append(&mut p.to_sexpr());
 
                 SExpr::Vec(v)
-            }
-            Type::ConstPointer(p) => {
+            },
+            | Type::ConstPointer(p) => {
                 let mut v = vec![SExpr::annot("witx"), SExpr::word("const_pointer")];
 
                 v.append(&mut p.to_sexpr());
 
                 SExpr::Vec(v)
-            }
-            Type::Builtin(b) => b.to_sexpr(),
+            },
+            | Type::Builtin(b) => b.to_sexpr(),
         }
     }
 }
@@ -190,7 +202,7 @@ impl Type {
 impl RecordDatatype {
     pub fn to_sexpr(&self) -> SExpr {
         match self.kind {
-            RecordKind::Tuple => {
+            | RecordKind::Tuple => {
                 let mut tuple = vec![SExpr::word("tuple")];
 
                 for m in self.members.iter() {
@@ -209,8 +221,8 @@ impl RecordDatatype {
                     // }
                 }
                 SExpr::Vec(tuple)
-            }
-            RecordKind::Bitflags(repr) => {
+            },
+            | RecordKind::Bitflags(repr) => {
                 let mut flags = vec![SExpr::word("flags")];
                 flags.push(SExpr::Vec(vec![
                     SExpr::word("@witx"),
@@ -223,8 +235,8 @@ impl RecordDatatype {
                         .flat_map(|m| SExpr::docs(&m.docs, vec![m.name.to_sexpr()])),
                 );
                 SExpr::Vec(flags)
-            }
-            RecordKind::Other => {
+            },
+            | RecordKind::Other => {
                 let header = vec![SExpr::word("record")];
                 let members = self
                     .members
@@ -238,7 +250,7 @@ impl RecordDatatype {
                     })
                     .collect::<Vec<SExpr>>();
                 SExpr::Vec([header, members].concat())
-            }
+            },
         }
     }
 }
@@ -286,10 +298,10 @@ impl HandleDatatype {
 impl IntRepr {
     pub fn to_sexpr(&self) -> SExpr {
         match self {
-            IntRepr::U8 => SExpr::word("u8"),
-            IntRepr::U16 => SExpr::word("u16"),
-            IntRepr::U32 => SExpr::word("u32"),
-            IntRepr::U64 => SExpr::word("u64"),
+            | IntRepr::U8 => SExpr::word("u8"),
+            | IntRepr::U16 => SExpr::word("u16"),
+            | IntRepr::U32 => SExpr::word("u32"),
+            | IntRepr::U64 => SExpr::word("u64"),
         }
     }
 }
@@ -310,7 +322,7 @@ impl Module {
 impl ModuleImport {
     pub fn to_sexpr(&self) -> Vec<SExpr> {
         let variant = match self.variant {
-            ModuleImportVariant::Memory => SExpr::Vec(vec![SExpr::word("memory")]),
+            | ModuleImportVariant::Memory => SExpr::Vec(vec![SExpr::word("memory")]),
         };
         SExpr::docs(
             &self.docs,
@@ -342,10 +354,7 @@ impl InterfaceFunc {
                 v.append(&mut f.tref.to_sexpr());
 
                 if let Some(resource) = &f.resource {
-                    v.push(SExpr::Vec(vec![
-                        SExpr::annot("resource"),
-                        SExpr::ident(resource.as_str()),
-                    ]));
+                    v.push(resource.to_sexpr());
                 }
 
                 SExpr::docs(&f.docs, vec![SExpr::Vec(v)])
