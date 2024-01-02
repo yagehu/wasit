@@ -1,0 +1,5 @@
+;; Ensure that all current witx definitions in this repository load, parse,
+;; roundtrip, and are documentable.
+
+(witx
+  (load "../../../spec/preview1/witx/wasi_snapshot_preview1.witx"))
