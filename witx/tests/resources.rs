@@ -45,5 +45,7 @@ fn argv() {
     let argv_buf_size_can_fulfill = argv_buf_size_resource.can_fulfill(&doc);
 
     assert_eq!(argv_size_can_fulfill[0].name, Id::new("argv"));
+    assert_eq!(argv_size_can_fulfill[0].tref, args_get.params[0].tref);
     assert_eq!(argv_buf_size_can_fulfill[0].name, Id::new("argv_buf"));
+    assert_eq!(argv_buf_size_can_fulfill[0].tref, args_get.params[1].tref);
 }

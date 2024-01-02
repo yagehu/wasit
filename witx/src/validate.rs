@@ -868,39 +868,39 @@ impl<'a, 'b> ModuleValidation<'a, 'b> {
                             f.item.name.span(),
                         )?;
 
-                        if let TypeRef::Value(ty) = &tref {
-                            match ty.as_ref() {
-                                | Type::Variant(variant) if variant.as_expected().is_some() => {
-                                    let (ok_tref, _err_tref) = variant.as_expected().unwrap();
+                        // if let TypeRef::Value(ty) = &tref {
+                        //     match ty.as_ref() {
+                        //         | Type::Variant(variant) if variant.as_expected().is_some() => {
+                        //             let (ok_tref, _err_tref) = variant.as_expected().unwrap();
 
-                                    if let Some(ok_tref) = ok_tref {
-                                        match ok_tref {
-                                            | TypeRef::Name(named_type) => {},
-                                            | TypeRef::Value(ty) => match ty.as_ref() {
-                                                | Type::Record(record) if record.is_tuple() => {
-                                                    for member in &record.members {
-                                                        if let TypeRef::Name(named_type) =
-                                                            &member.tref
-                                                        {
-                                                            if let Some(resource) =
-                                                                &named_type.resource
-                                                            {
-                                                            }
-                                                        }
-                                                    }
-                                                },
-                                                | _ => unimplemented!(),
-                                            },
-                                        }
-                                    }
-                                },
-                                | _ => {
-                                    if let Some(_resource_syntax) = &f.item.resource {
-                                        unimplemented!()
-                                    }
-                                },
-                            }
-                        }
+                        //             if let Some(ok_tref) = ok_tref {
+                        //                 match ok_tref {
+                        //                     | TypeRef::Name(named_type) => {},
+                        //                     | TypeRef::Value(ty) => match ty.as_ref() {
+                        //                         | Type::Record(record) if record.is_tuple() => {
+                        //                             for member in &record.members {
+                        //                                 if let TypeRef::Name(named_type) =
+                        //                                     &member.tref
+                        //                                 {
+                        //                                     if let Some(resource) =
+                        //                                         &named_type.resource
+                        //                                     {
+                        //                                     }
+                        //                                 }
+                        //                             }
+                        //                         },
+                        //                         | _ => unimplemented!(),
+                        //                     },
+                        //                 }
+                        //             }
+                        //         },
+                        //         | _ => {
+                        //             if let Some(_resource_syntax) = &f.item.resource {
+                        //                 unimplemented!()
+                        //             }
+                        //         },
+                        //     }
+                        // }
 
                         Ok(InterfaceFuncParam {
                             name: argnames.introduce(
