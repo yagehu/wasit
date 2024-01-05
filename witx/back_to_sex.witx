@@ -542,7 +542,7 @@ applications from depending on making assumptions about indexes, since this
 is error-prone in multi-threaded contexts. The returned file descriptor is
 guaranteed to be less than 2**31.
 Note: This is similar to `openat` in POSIX.
- ;) (@interface func (export "path_open") (param $fd $fd) (;; Flags determining the method of how the path is resolved.
+ ;) (@interface func (export "path_open") (param $fd $fd (@resource $fd)) (;; Flags determining the method of how the path is resolved.
  ;) (param $dirflags $lookupflags) (;; The relative path of the file or directory to open, relative to the
 `path_open::fd` directory.
  ;) (param $path (list char)) (;; The method by which to open the file.

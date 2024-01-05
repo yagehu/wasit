@@ -1,11 +1,29 @@
 [workspace.package]
 edition = "2021"
+publish = false
 
 [workspace]
 resolver = "2"
 members = [
+    "executor",
+    "runners",
+    "wasi",
     "witx",
 ]
 
 [workspace.dependencies]
+wazzi-executor.path = "executor"
+wazzi-runners.path = "runners"
+wazzi-wasi.path = "wasi"
+wazzi-witx.path = "witx"
+
+arbitrary = "1"
+capnp = "0.18"
+capnpc = "0.18"
+color-eyre = "0.6"
+ntest = "0.9"
 petgraph = "0.6"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+tracing = "0.1"

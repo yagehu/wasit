@@ -349,61 +349,13 @@ impl<'a> DocValidationScope<'a> {
         span: wast::Span,
     ) -> Result<TypeRef, ValidationError> {
         match syntax {
-            | TypedefSyntax::Ident {
-                name: syntax,
-                resource,
-            } => {
+            | TypedefSyntax::Ident(syntax) => {
                 let i = self.get(syntax)?;
 
                 match self.doc.entries.get(&i) {
                     | Some(Entry::Typename(weak_ref)) => {
-                        let mut named_type_rc =
+                        let named_type_rc =
                             weak_ref.upgrade().expect("weak backref to defined type");
-
-                        if let Some(resource_syntax) = resource {
-                            let resource_name = self.doc.resource_scope.scope.introduce(
-                                resource_syntax.name.name(),
-                                self.location(resource_syntax.name.span()),
-                            )?;
-                            let alloc = if let Some(alloc) = &resource_syntax.alloc {
-                                Some(
-                                    self.doc
-                                        .resource_scope
-                                        .scope
-                                        .get(alloc.name.name(), self.location(alloc.name.span()))?,
-                                )
-                            } else {
-                                None
-                            };
-
-                            named_type_rc = Rc::new(NamedType {
-                                name:     named_type_rc.name.clone(),
-                                tref:     named_type_rc.tref.clone(),
-                                docs:     named_type_rc.docs.clone(),
-                                resource: Some(ResourceRef {
-                                    name:  resource_name.clone(),
-                                    alloc: alloc.clone(),
-                                }),
-                            });
-
-                            let node_id = self.doc.resource_scope.graph.add_node(Resource {
-                                name: resource_name.clone(),
-                                tref: TypeRef::Name(named_type_rc.clone()),
-                            });
-
-                            self.doc.resource_scope.map.insert(resource_name, node_id);
-
-                            if let Some(alloc) = alloc {
-                                let alloc_resource_id =
-                                    *self.doc.resource_scope.map.get(&alloc).unwrap();
-
-                                self.doc.resource_scope.graph.add_edge(
-                                    node_id,
-                                    alloc_resource_id,
-                                    ResourceRelation::Alloc,
-                                );
-                            }
-                        }
 
                         Ok(TypeRef::Name(named_type_rc))
                     },
@@ -504,16 +456,60 @@ impl<'a> DocValidationScope<'a> {
         span: wast::Span,
     ) -> Result<RecordDatatype, ValidationError> {
         let members = syntax
-            .types
+            .members
             .iter()
             .enumerate()
-            .map(|(i, ty)| {
-                let tref = self.validate_datatype(definitions, ty, false, span)?;
+            .map(|(i, member)| {
+                let tref = self.validate_datatype(definitions, &member.type_, false, span)?;
+                let resource = if let Some(resource_syntax) = &member.resource {
+                    let resource_name = self.doc.resource_scope.scope.introduce(
+                        resource_syntax.name.name(),
+                        self.location(resource_syntax.name.span()),
+                    )?;
+                    let alloc = if let Some(alloc) = &resource_syntax.alloc {
+                        Some(
+                            self.doc
+                                .resource_scope
+                                .scope
+                                .get(alloc.name.name(), self.location(alloc.name.span()))?,
+                        )
+                    } else {
+                        None
+                    };
+
+                    let node_id = self.doc.resource_scope.graph.add_node(Resource {
+                        name: resource_name.clone(),
+                        tref: tref.clone(),
+                    });
+
+                    self.doc
+                        .resource_scope
+                        .map
+                        .insert(resource_name.clone(), node_id);
+
+                    if let Some(alloc) = &alloc {
+                        let alloc_resource_id = *self.doc.resource_scope.map.get(&alloc).unwrap();
+
+                        self.doc.resource_scope.graph.add_edge(
+                            node_id,
+                            alloc_resource_id,
+                            ResourceRelation::Alloc,
+                        );
+                    }
+
+                    Some(ResourceRef {
+                        name: resource_name,
+                        alloc,
+                    })
+                } else {
+                    None
+                };
 
                 Ok(RecordMember {
                     name: Id::new(i.to_string()),
                     tref,
                     docs: String::new(),
+                    resource,
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -573,6 +569,7 @@ impl<'a> DocValidationScope<'a> {
                 name,
                 docs,
                 tref: self.doc.bool_ty.clone(),
+                resource: None,
             });
         }
         Ok(RecordDatatype {
@@ -598,7 +595,13 @@ impl<'a> DocValidationScope<'a> {
                     self.validate_datatype(definitions, &f.item.type_, false, f.item.name.span())?;
                 let docs = f.comments.docs();
 
-                Ok(RecordMember { name, tref, docs })
+                // huyage: resource
+                Ok(RecordMember {
+                    name,
+                    tref,
+                    docs,
+                    resource: None,
+                })
             })
             .collect::<Result<Vec<RecordMember>, _>>()?;
 

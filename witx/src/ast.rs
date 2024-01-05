@@ -379,9 +379,10 @@ pub enum RecordKind {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RecordMember {
-    pub name: Id,
-    pub tref: TypeRef,
-    pub docs: String,
+    pub name:     Id,
+    pub tref:     TypeRef,
+    pub docs:     String,
+    pub resource: Option<ResourceRef>,
 }
 
 impl RecordDatatype {
@@ -607,7 +608,7 @@ pub struct InterfaceFunc {
 }
 
 impl InterfaceFunc {
-    pub fn unpack_expected_result(&self) -> Vec<TypeRef> {
+    pub fn unpack_expected_result(&self) -> Vec<(TypeRef, Option<ResourceRef>)> {
         let mut v = Vec::new();
 
         if let Some(result) = self.results.first() {
@@ -622,15 +623,17 @@ impl InterfaceFunc {
 
                         if let Some(ok_tref) = ok_tref {
                             match ok_tref {
-                                | TypeRef::Name(_named_type) => v.push(ok_tref.clone()),
+                                | TypeRef::Name(named_type) => {
+                                    v.push((named_type.tref.clone(), named_type.resource.clone()))
+                                },
                                 | TypeRef::Value(ty) => match ty.as_ref() {
                                     | Type::Record(record) if record.kind == RecordKind::Tuple => {
                                         for member in &record.members {
-                                            v.push(member.tref.clone());
+                                            v.push((member.tref.clone(), member.resource.clone()));
                                         }
                                     },
                                     | _ => {
-                                        v.push(ok_tref.clone());
+                                        v.push((ok_tref.clone(), None));
                                     },
                                 },
                             }

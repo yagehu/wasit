@@ -298,10 +298,7 @@ pub enum TypedefSyntax<'a> {
     Pointer(Box<TypedefSyntax<'a>>),
     ConstPointer(Box<TypedefSyntax<'a>>),
     Builtin(BuiltinType),
-    Ident {
-        name:     wast::Id<'a>,
-        resource: Option<ResourceSyntax<'a>>,
-    },
+    Ident(wast::Id<'a>),
     String,
     Bool,
 }
@@ -310,14 +307,7 @@ impl<'a> Parse<'a> for TypedefSyntax<'a> {
     fn parse(parser: Parser<'a>) -> Result<Self> {
         let mut l = parser.lookahead1();
         if l.peek::<wast::Id>() {
-            Ok(TypedefSyntax::Ident {
-                name:     parser.parse()?,
-                resource: if parser.peek2::<annotation::resource>() {
-                    Some(parser.parse()?)
-                } else {
-                    None
-                },
-            })
+            Ok(TypedefSyntax::Ident(parser.parse()?))
         } else if l.peek::<BuiltinType>() {
             Ok(TypedefSyntax::Builtin(parser.parse()?))
         } else if l.peek::<kw::string>() {
@@ -409,20 +399,39 @@ impl<'a> Parse<'a> for EnumSyntax<'a> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TupleSyntax<'a> {
-    pub types: Vec<TypedefSyntax<'a>>,
+    pub members: Vec<TupleMemberSyntax<'a>>,
 }
 
 impl<'a> Parse<'a> for TupleSyntax<'a> {
     fn parse(parser: Parser<'a>) -> Result<Self> {
         parser.parse::<kw::tuple>()?;
 
-        let mut types = Vec::new();
+        let mut members = Vec::new();
 
         while !parser.is_empty() {
-            types.push(parser.parse()?);
+            members.push(parser.parse()?);
         }
 
-        Ok(TupleSyntax { types })
+        Ok(TupleSyntax { members })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TupleMemberSyntax<'a> {
+    pub type_:    TypedefSyntax<'a>,
+    pub resource: Option<ResourceSyntax<'a>>,
+}
+
+impl<'a> Parse<'a> for TupleMemberSyntax<'a> {
+    fn parse(parser: Parser<'a>) -> Result<Self> {
+        let type_ = parser.parse()?;
+        let resource = if parser.peek2::<annotation::resource>() {
+            Some(parser.parse()?)
+        } else {
+            None
+        };
+
+        Ok(TupleMemberSyntax { type_, resource })
     }
 }
 

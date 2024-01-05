@@ -154,11 +154,7 @@ impl TypeRef {
     pub fn to_sexpr(&self) -> Vec<SExpr> {
         match self {
             | TypeRef::Name(n) => {
-                let mut v = vec![n.name.to_sexpr()];
-
-                if let Some(resource) = &n.resource {
-                    v.push(resource.to_sexpr());
-                }
+                let v = vec![n.name.to_sexpr()];
 
                 v
             },
@@ -208,17 +204,21 @@ impl RecordDatatype {
                 for m in self.members.iter() {
                     tuple.append(&mut SExpr::docs(&m.docs, m.tref.to_sexpr()));
 
-                    // if let Some(resource) = &m.resource {
-                    //     match resource {
-                    //         TypeRef::Name(named_type) => {
-                    //             tuple.push(SExpr::Vec(vec![
-                    //                 SExpr::annot("resource"),
-                    //                 SExpr::ident(named_type.name.as_str()),
-                    //             ]));
-                    //         }
-                    //         TypeRef::Value(_) => unimplemented!(),
-                    //     }
-                    // }
+                    if let Some(resource) = &m.resource {
+                        let mut v = vec![
+                            SExpr::annot("resource"),
+                            SExpr::ident(resource.name.as_str()),
+                        ];
+
+                        if let Some(alloc) = &resource.alloc {
+                            v.push(SExpr::Vec(vec![
+                                SExpr::annot("alloc"),
+                                SExpr::ident(alloc.as_str()),
+                            ]));
+                        }
+
+                        tuple.push(SExpr::Vec(v));
+                    }
                 }
                 SExpr::Vec(tuple)
             },

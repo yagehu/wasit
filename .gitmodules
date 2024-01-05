@@ -1,0 +1,6 @@
+[submodule "runtimes/wasmtime"]
+	path = runtimes/wasmtime
+	url = git@github.com:yagehu/wasmtime.git
+[submodule "wasi-sdk"]
+	path = wasi-sdk
+	url = git@github.com:yagehu/wasi-sdk.git

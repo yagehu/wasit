@@ -1,0 +1,14 @@
+[package]
+name = "wazzi-executor"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+build = "build.rs"
+
+[build-dependencies]
+capnpc.workspace = true
+
+[dependencies]
+wazzi-runners.workspace = true
+
+capnp.workspace = true
