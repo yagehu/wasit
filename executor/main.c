@@ -24,10 +24,8 @@ struct resource_map_entry {
 
 noreturn void fail(const char* err);
 
-void handle_call(
-    struct resource_map_entry ** resource_map,
-    const struct Call call
-);
+void handle_decl(struct resource_map_entry ** resource_map, const struct DeclRequest);
+void handle_call(struct resource_map_entry ** resource_map, const struct CallRequest);
 
 void * handle_param(struct resource_map_entry ** resource_map, struct ParamSpec spec, int32_t * len);
 void * result_pre(struct resource_map_entry ** resource_map, struct ResultSpec result);
@@ -52,13 +50,30 @@ int main(void) {
         int ret = capn_init_fp(&capn, f, 0 /* packed */);
         if (ret != 0) continue;
 
-        Call_ptr root;
-        struct Call call;
+        Request_ptr root;
+        struct Request request;
 
         root.p = capn_getp(capn_root(&capn), 0 /* off */, 1 /* resolve */);
-        read_Call(&call, root);
+        read_Request(&request, root);
 
-        handle_call(&resource_map, call);
+        switch (request.which) {
+            case Request_decl: {
+                struct DeclRequest decl_request;
+
+                read_DeclRequest(&decl_request, request.decl);
+                handle_decl(&resource_map, decl_request);
+
+                break;
+            }
+            case Request_call: {
+                struct CallRequest call_request;
+
+                read_CallRequest(&call_request, request.call);
+                handle_call(&resource_map, call_request);
+
+                break;
+            }
+        }
 
         capn_free(&capn);
     }
@@ -71,9 +86,51 @@ noreturn void fail(const char* err) {
     exit(1);
 }
 
+void handle_decl(
+    struct resource_map_entry ** resource_map,
+    const struct DeclRequest decl
+) {
+    struct capn capn;
+
+    capn_init_malloc(&capn);
+
+    struct capn_ptr        capn_ptr = capn_root(&capn);
+    struct capn_segment ** segment  = &capn_ptr.seg;
+    struct DeclResponse    decl_response;
+    struct Value           value;
+    struct resource        resource;
+
+    read_Value(&value, decl.value);
+
+    switch (value.which) {
+        case Value__bool:
+        case Value_string:
+        case Value_bitflags: fail("only handle can be declared");
+        case Value_handle: {
+            uint32_t * ptr = malloc(sizeof(uint32_t));
+
+            * ptr = value.handle;
+            resource.ptr  = ptr;
+            resource.size = sizeof(uint32_t);
+        }
+    }
+
+    hmput(*resource_map, decl.resourceId, resource);
+
+    DeclResponse_ptr decl_response_ptr = new_DeclResponse(*segment);
+
+    write_DeclResponse(&decl_response, decl_response_ptr);
+
+    const int ret = capn_setp(capn_ptr, 0, decl_response_ptr.p);
+    if (ret != 0) fail("failed to capn_setp");
+
+    capn_write_fd(&capn, write, out_fd, 0 /* packed */);
+    capn_free(&capn);
+}
+
 void handle_call(
     struct resource_map_entry ** resource_map,
-    const struct Call call
+    const struct CallRequest call
 ) {
     struct capn capn;
 
@@ -181,6 +238,9 @@ void * handle_param(
             return resource_entry->value.ptr;
         }
         case ParamSpec_value: {
+            const struct Value value;
+
+            spec.value
             fail("unimplemented: ParamSpec_value");
 
             break;

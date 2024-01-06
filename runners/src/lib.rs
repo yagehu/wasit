@@ -6,6 +6,7 @@ use std::{
 };
 
 pub trait WasiRunner {
+    fn base_dir_fd(&self) -> u32;
     fn prepare_command(&self, wasm_path: PathBuf, base_dir: Option<PathBuf>) -> process::Command;
 
     #[tracing::instrument(skip(self))]
@@ -40,6 +41,10 @@ impl<'p> Wasmtime<'p> {
 }
 
 impl WasiRunner for Wasmtime<'_> {
+    fn base_dir_fd(&self) -> u32 {
+        3
+    }
+
     fn prepare_command(&self, wasm_path: PathBuf, base_dir: Option<PathBuf>) -> process::Command {
         let mut command = process::Command::new(&self.path);
         let mut args = vec![OsString::from("run")];

@@ -49,7 +49,29 @@ enum Func {
   sockShutdown         @45;
 }
 
-struct Call {
+struct Request {
+  union {
+    decl @0 :DeclRequest;
+    call @1 :CallRequest;
+  }
+}
+
+struct Response {
+  union {
+    decl @0 :DeclResponse;
+    call @1 :CallResponse;
+  }
+}
+
+struct DeclRequest {
+  resourceId @0 :UInt64;
+  value      @1 :Value;
+}
+
+struct DeclResponse {
+}
+
+struct CallRequest {
   func    @0 :Func;
   params  @1 :List(ParamSpec);
   results @2 :List(ResultSpec);
@@ -159,6 +181,7 @@ struct Type {
     bool     @0 :Void;
     string   @1 :Void;
     bitflags @2 :Bitflags;
+    handle   @3 :Void;
   }
 }
 
@@ -171,5 +194,6 @@ struct Value {
     bool     @0 :Bool;
     string   @1 :Text;
     bitflags @2 :Bitflags;
+    handle   @3 :UInt32;
   }
 }

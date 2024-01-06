@@ -1,8 +1,5 @@
 {
     "mount_base_dir": true,
-    "resources": [
-        { "id": 0 }
-    ],
     "calls": [
         {
             "func": "path_open",
@@ -53,6 +50,7 @@
                                 { "name": "fd_advise",               "value": true },
                                 { "name": "fd_allocate",             "value": true },
                                 { "name": "path_create_directory",   "value": true },
+                                { "name": "path_create_file",        "value": true },
                                 { "name": "path_link_source",        "value": true },
                                 { "name": "path_link_target",        "value": true },
                                 { "name": "path_open",               "value": true },
@@ -63,6 +61,9 @@
                                 { "name": "path_filestat_get",       "value": true },
                                 { "name": "path_filestat_set_size",  "value": true },
                                 { "name": "path_filestat_set_times", "value": true },
+                                { "name": "fd_filestat_get",         "value": true },
+                                { "name": "fd_filestat_set_size",    "value": true },
+                                { "name": "fd_filestat_set_times",   "value": true },
                                 { "name": "path_symlink",            "value": true },
                                 { "name": "path_remove_directory",   "value": true },
                                 { "name": "path_unlink_file",        "value": true },
@@ -88,6 +89,7 @@
                                 { "name": "fd_advise",               "value": true },
                                 { "name": "fd_allocate",             "value": true },
                                 { "name": "path_create_directory",   "value": true },
+                                { "name": "path_create_file",        "value": true },
                                 { "name": "path_link_source",        "value": true },
                                 { "name": "path_link_target",        "value": true },
                                 { "name": "path_open",               "value": true },
@@ -98,6 +100,9 @@
                                 { "name": "path_filestat_get",       "value": true },
                                 { "name": "path_filestat_set_size",  "value": true },
                                 { "name": "path_filestat_set_times", "value": true },
+                                { "name": "fd_filestat_get",         "value": true },
+                                { "name": "fd_filestat_set_size",    "value": true },
+                                { "name": "fd_filestat_set_times",   "value": true },
                                 { "name": "path_symlink",            "value": true },
                                 { "name": "path_remove_directory",   "value": true },
                                 { "name": "path_unlink_file",        "value": true },

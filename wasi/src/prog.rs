@@ -6,6 +6,7 @@ use wazzi_executor::{wazzi_executor_capnp, RunningExecutor};
 
 use crate::{
     call::{CallParam, StringValue},
+    capnp_mappers,
     Call,
     Value,
 };
@@ -14,7 +15,6 @@ use crate::{
 #[serde(deny_unknown_fields)]
 pub struct ProgSeed {
     mount_base_dir: bool,
-    resources:      Vec<Resource>,
     calls:          Vec<Call>,
 }
 
@@ -28,12 +28,35 @@ impl ProgSeed {
         let module_spec = spec
             .module(&witx::Id::new("wasi_snapshot_preview1"))
             .unwrap();
-        let mut resource_ctx = ResourceContext::from_iter(&self.resources);
+        let mut resource_ctx = ResourceContext::new();
+
+        if self.mount_base_dir {
+            const BASE_DIR_RESOURCE_ID: u64 = 0;
+
+            let base_dir_fd = executor.base_dir_fd();
+            let mut message_builder = capnp::message::Builder::new_default();
+            let mut decl_builder =
+                message_builder.init_root::<wazzi_executor_capnp::decl_request::Builder>();
+
+            decl_builder
+                .reborrow()
+                .set_resource_id(BASE_DIR_RESOURCE_ID);
+            decl_builder.reborrow().init_value().set_handle(base_dir_fd);
+            executor
+                .decl(decl_builder.into_reader())
+                .wrap_err("failed to declare base dir resource")?;
+            resource_ctx.insert(
+                BASE_DIR_RESOURCE_ID,
+                Resource {
+                    id: BASE_DIR_RESOURCE_ID,
+                },
+            );
+        }
 
         for call in &self.calls {
             let mut message_builder = capnp::message::Builder::new_default();
             let mut call_builder =
-                message_builder.init_root::<wazzi_executor_capnp::call::Builder>();
+                message_builder.init_root::<wazzi_executor_capnp::call_request::Builder>();
 
             match call.func.as_str() {
                 | "path_open" => call_builder.set_func(wazzi_executor_capnp::Func::PathOpen),
@@ -51,6 +74,8 @@ impl ProgSeed {
                 let call_param = call.params.get(i).unwrap();
                 let mut param_builder = params_builder.reborrow().get(i as u32);
                 let mut type_builder = param_builder.reborrow().init_type();
+
+                capnp_mappers::build_type(param_spec.tref.type_().as_ref(), &mut type_builder);
 
                 match (&param_spec.resource, &call_param) {
                     | (Some(_resource_spec), &&CallParam::Resource(resource_id)) => {
@@ -81,7 +106,11 @@ impl ProgSeed {
                                 if record.bitflags_repr().is_some() =>
                             {
                                 if bitflags.members.len() != record.members.len() {
-                                    panic!("bitflags members length mismatch");
+                                    panic!(
+                                        "bitflags members length mismatch {} vs {}",
+                                        record.members.len(),
+                                        bitflags.members.len(),
+                                    );
                                 }
 
                                 let mut bitflags_builder = value_builder.init_bitflags();
@@ -93,7 +122,22 @@ impl ProgSeed {
                                     members_builder.set(i as u32, member.value);
                                 }
                             },
-                            | _ => unimplemented!(),
+                            | (
+                                witx::Type::List(witx::TypeRef::Value(ty)),
+                                Value::String(string),
+                            ) if matches!(
+                                ty.as_ref(),
+                                witx::Type::Builtin(witx::BuiltinType::Char)
+                            ) =>
+                            {
+                                match string {
+                                    | StringValue::Utf8(s) => value_builder
+                                        .init_string(s.len() as u32)
+                                        .reborrow()
+                                        .push_str(s),
+                                }
+                            },
+                            | _ => unimplemented!("param_spec is {:#?}", param_spec),
                         }
                     },
                 }
@@ -131,14 +175,14 @@ struct ResourceContext {
 }
 
 impl ResourceContext {
-    fn from_iter(xs: &[Resource]) -> Self {
-        let mut map = HashMap::new();
-
-        for x in xs {
-            map.insert(x.id, x.clone());
+    fn new() -> Self {
+        Self {
+            map: Default::default(),
         }
+    }
 
-        Self { map }
+    fn insert(&mut self, id: u64, resource: Resource) {
+        self.map.insert(id, resource);
     }
 
     fn get(&self, id: u64) -> Option<&Resource> {

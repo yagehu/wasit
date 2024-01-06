@@ -1,4 +1,5 @@
 use wazzi_executor::wazzi_executor_capnp;
+use witx::TypeRef;
 
 pub(crate) fn from_witx_int_repr(x: &witx::IntRepr) -> wazzi_executor_capnp::type_::IntRepr {
     match x {
@@ -35,8 +36,16 @@ pub(crate) fn build_type(
         },
         | witx::Type::Record(_) => todo!(),
         | witx::Type::Variant(_) => todo!(),
-        | witx::Type::Handle(_) => todo!(),
-        | witx::Type::List(_) => todo!(),
+        | witx::Type::Handle(_) => type_builder.reborrow().set_handle(()),
+        | witx::Type::List(item_tref) => {
+            if let witx::Type::Builtin(witx::BuiltinType::Char) = item_tref.type_().as_ref() {
+                type_builder.set_string(());
+
+                return;
+            }
+
+            unimplemented!("{:#?}", item_tref);
+        },
         | witx::Type::Pointer(_) => todo!(),
         | witx::Type::ConstPointer(_) => todo!(),
         | witx::Type::Builtin(_) => todo!(),

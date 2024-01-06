@@ -4,5 +4,5 @@ pub use prog::{Prog, ProgSeed};
 extern crate wazzi_witx as witx;
 
 mod call;
-mod capnp;
+mod capnp_mappers;
 mod prog;
