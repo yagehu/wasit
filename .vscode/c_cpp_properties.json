@@ -1,0 +1,14 @@
+{
+    "configurations": [
+        {
+            "name": "CMake",
+            "compileCommands": "${config:cmake.buildDirectory}/compile_commands.json",
+            "configurationProvider": "ms-vscode.cmake-tools",
+            "includePath": [
+                "build",
+                "build/_deps/c-capnproto-src/lib"
+            ]
+        }
+    ],
+    "version": 4
+}
