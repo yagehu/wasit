@@ -194,6 +194,13 @@ void handle_call(
 
             Result_list result_list = new_Result_list(*segment, 1 /* sz */);
 
+            handle_param_post(p0_fd, p0_fd_ptr);
+            handle_param_post(p1_dirflags, p1_dirflags_ptr);
+            handle_param_post(p2_path, p2_path_ptr);
+            handle_param_post(p3_oflags, p3_oflags_ptr);
+            handle_param_post(p4_fs_rights_base, p4_fs_rights_base_ptr);
+            handle_param_post(p5_fs_rights_inheriting, p5_fs_rights_inheriting_ptr);
+            handle_param_post(p6_fdflags, p6_fdflags_ptr);
             handle_result_post(resource_map, segment, r0_fd, 0, result_list, r0_fd_ptr);
 
             call_return.which     = CallReturn_errno;
@@ -250,6 +257,20 @@ void * handle_param_pre(
     }
 
     return NULL;
+}
+
+void handle_param_post(
+    struct ParamSpec spec,
+    void * ptr
+) {
+    switch (spec.which) {
+        case ParamSpec_resource: break;
+        case ParamSpec_value: {
+            free(ptr);
+
+            break;
+        }
+    }
 }
 
 void * result_pre(struct resource_map_entry ** resource_map, struct ResultSpec spec) {
