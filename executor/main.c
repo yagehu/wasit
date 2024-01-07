@@ -240,7 +240,8 @@ void * handle_param(
         case ParamSpec_value: {
             const struct Value value;
 
-            spec.value
+            (void) value;
+
             fail("unimplemented: ParamSpec_value");
 
             break;

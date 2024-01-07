@@ -8,8 +8,15 @@ FetchContent_Declare(
   c-capnproto
   GIT_REPOSITORY https://gitlab.com/dkml/ext/c-capnproto.git
   GIT_TAG        f07596dbb516329d27ea95060a758f5d48d26366
+  OVERRIDE_FIND_PACKAGE
 )
-FetchContent_MakeAvailable(c-capnproto)
+find_package(c-capnproto)
+
+install(
+  TARGETS capnpc-c
+  RUNTIME DESTINATION ${CMAKE_CURRENT_BINARY_DIR}
+  COMPONENT capnpc-c
+)
 
 set(BUILD_TESTING OFF)
 
@@ -26,7 +33,6 @@ add_custom_command(
 add_executable(
   wazzi-executor
   main.c
-  #wazzi-executor/fmt.c
   wazzi-executor.capnp.c
 )
 target_compile_options(
