@@ -1,18 +1,18 @@
+//! Parser turns s-expressions into unvalidated syntax constructs.
+//! conventions:
+//! `Type::starts_parsing(s-expr) -> bool` is for look-ahead: we use
+//! this predicate to combine parsers for different `Type`s where both
+//! alternatives are accepted.
+//! `Type::parse(sexpr: &SExpr) -> Result<Self, ParseError>` takes a single
+//! s-expression and parses it into a `Self`.
+//! for parsers that take a subset of a vector s-expression, the signature
+//! `Type::parse(sexprs: &[SExpr], location: Location) -> Result<Self, ParseError>`
+//! has an additional `Location` argument, which should point to the parent SExpr::Vec.
+//! This is used for error reporting in case the slice doesn't have the number of elements
+//! expected.
+
 use crate::BuiltinType;
 use wast::parser::{Parse, Parser, Peek, Result};
-
-///! Parser turns s-expressions into unvalidated syntax constructs.
-///! conventions:
-///! `Type::starts_parsing(s-expr) -> bool` is for look-ahead: we use
-///! this predicate to combine parsers for different `Type`s where both
-///! alternatives are accepted.
-///! `Type::parse(sexpr: &SExpr) -> Result<Self, ParseError>` takes a single
-///! s-expression and parses it into a `Self`.
-///! for parsers that take a subset of a vector s-expression, the signature
-///! `Type::parse(sexprs: &[SExpr], location: Location) -> Result<Self, ParseError>`
-///! has an additional `Location` argument, which should point to the parent SExpr::Vec.
-///! This is used for error reporting in case the slice doesn't have the number of elements
-///! expected.
 
 mod kw {
     pub use wast::kw::{export, func, import, memory, module, param, result};
@@ -135,15 +135,11 @@ impl<'a> Parse<'a> for CommentSyntax<'a> {
     fn parse(parser: Parser<'a>) -> Result<CommentSyntax<'a>> {
         let comments = parser.step(|mut cursor| {
             let mut comments = Vec::new();
-            loop {
-                let (comment, c) = match cursor.comment() {
-                    | Some(pair) => pair,
-                    | None => break,
-                };
+            while let Some((comment, c)) = cursor.comment() {
                 cursor = c;
                 comments.push(
-                    if comment.starts_with(";;") {
-                        &comment[2..]
+                    if let Some(stripped) = comment.strip_prefix(";;") {
+                        stripped
                     } else {
                         &comment[2..comment.len() - 2]
                     },
@@ -164,13 +160,7 @@ impl<'a> CommentSyntax<'a> {
             .comments
             .iter()
             .map(|d| d.trim_end())
-            .filter_map(|d| {
-                if d.starts_with(";") {
-                    Some(&d[1..])
-                } else {
-                    None
-                }
-            })
+            .filter_map(|d| d.strip_prefix(';'))
             .collect::<Vec<_>>();
 
         // Figure out how much leading whitespace we're going to be trimming from
@@ -189,9 +179,11 @@ impl<'a> CommentSyntax<'a> {
             if !doc.is_empty() {
                 ret.push_str(doc[to_trim..].trim_end());
             }
-            ret.push_str("\n");
+
+            ret.push('\n');
         }
-        return ret;
+
+        ret
     }
 }
 

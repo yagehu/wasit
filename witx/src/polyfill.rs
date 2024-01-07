@@ -1,9 +1,18 @@
 use crate::{
-    Document, Id, InterfaceFunc, InterfaceFuncParam, Module, RepEquality, Representable, Type,
+    Document,
+    Id,
+    InterfaceFunc,
+    InterfaceFuncParam,
+    Module,
+    RepEquality,
+    Representable,
+    Type,
     TypeRef,
 };
-use std::collections::{HashMap, HashSet};
-use std::rc::Rc;
+use std::{
+    collections::{HashMap, HashSet},
+    rc::Rc,
+};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -31,10 +40,10 @@ impl Polyfill {
             let oldname = Id::new(oldname);
             let newmod = new
                 .module(&newname)
-                .ok_or_else(|| PolyfillError::ModuleNotPresent { name: newname })?;
+                .ok_or(PolyfillError::ModuleNotPresent { name: newname })?;
             let oldmod = old
                 .module(&oldname)
-                .ok_or_else(|| PolyfillError::ModuleNotPresent { name: oldname })?;
+                .ok_or(PolyfillError::ModuleNotPresent { name: oldname })?;
             modules.push(ModulePolyfill::new(newmod, oldmod)?);
         }
         Ok(Polyfill { modules })
@@ -43,16 +52,15 @@ impl Polyfill {
     pub fn type_polyfills(&self) -> HashSet<TypePolyfill> {
         self.modules
             .iter()
-            .map(|m| m.type_polyfills())
-            .flatten()
+            .flat_map(|m| m.type_polyfills())
             .collect()
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ModulePolyfill {
-    pub new: Rc<Module>,
-    pub old: Rc<Module>,
+    pub new:   Rc<Module>,
+    pub old:   Rc<Module>,
     pub funcs: Vec<FuncPolyfill>,
 }
 
@@ -64,28 +72,24 @@ impl ModulePolyfill {
                 .func(&oldfunc.name)
                 .ok_or_else(|| PolyfillError::FuncNotPresent {
                     module: new.name.clone(),
-                    name: oldfunc.name.clone(),
+                    name:   oldfunc.name.clone(),
                 })?;
             funcs.push(FuncPolyfill::new(newfunc, oldfunc));
         }
         Ok(ModulePolyfill { new, old, funcs })
     }
     pub fn type_polyfills(&self) -> HashSet<TypePolyfill> {
-        self.funcs
-            .iter()
-            .map(|f| f.type_polyfills())
-            .flatten()
-            .collect()
+        self.funcs.iter().flat_map(|f| f.type_polyfills()).collect()
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FuncPolyfill {
-    pub new: Rc<InterfaceFunc>,
-    pub old: Rc<InterfaceFunc>,
-    pub mapped_params: Vec<ParamPolyfill>,
-    pub unknown_params: Vec<ParamUnknown>,
-    pub mapped_results: Vec<ParamPolyfill>,
+    pub new:             Rc<InterfaceFunc>,
+    pub old:             Rc<InterfaceFunc>,
+    pub mapped_params:   Vec<ParamPolyfill>,
+    pub unknown_params:  Vec<ParamUnknown>,
+    pub mapped_results:  Vec<ParamPolyfill>,
     pub unknown_results: Vec<ParamUnknown>,
 }
 
@@ -105,11 +109,7 @@ impl FuncPolyfill {
         // Are any new params not covered by the old params?
         // This search is O(n^2), but n ought to be small.
         for new_param in new.params.iter() {
-            if mapped_params
-                .iter()
-                .find(|m| m.new.name == new_param.name)
-                .is_none()
-            {
+            if !mapped_params.iter().any(|m| m.new.name == new_param.name) {
                 unknown_params.push(ParamUnknown::New(new_param.clone()));
             }
         }
@@ -131,11 +131,7 @@ impl FuncPolyfill {
 
         // Are any old results not covered by the new results?
         for old_result in old.results.iter() {
-            if mapped_results
-                .iter()
-                .find(|m| m.old.name == old_result.name)
-                .is_none()
-            {
+            if !mapped_results.iter().any(|m| m.old.name == old_result.name) {
                 unknown_results.push(ParamUnknown::Old(old_result.clone()));
             }
         }
@@ -169,21 +165,21 @@ impl FuncPolyfill {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ParamPolyfill {
-    pub new: InterfaceFuncParam,
-    pub old: InterfaceFuncParam,
+    pub new:           InterfaceFuncParam,
+    pub old:           InterfaceFuncParam,
     pub type_polyfill: TypePolyfill,
 }
 
 impl ParamPolyfill {
     fn common_denominator(a: TypeRef, b: TypeRef) -> (TypeRef, TypeRef) {
         match (&a, &b) {
-            (TypeRef::Value(va), TypeRef::Value(vb)) => match (&**va, &**vb) {
-                (Type::List(a), Type::List(b)) => (a.clone(), b.clone()),
-                (Type::Pointer(a), Type::Pointer(b)) => (a.clone(), b.clone()),
-                (Type::ConstPointer(a), Type::ConstPointer(b)) => (a.clone(), b.clone()),
-                _ => (a, b),
+            | (TypeRef::Value(va), TypeRef::Value(vb)) => match (&**va, &**vb) {
+                | (Type::List(a), Type::List(b)) => (a.clone(), b.clone()),
+                | (Type::Pointer(a), Type::Pointer(b)) => (a.clone(), b.clone()),
+                | (Type::ConstPointer(a), Type::ConstPointer(b)) => (a.clone(), b.clone()),
+                | _ => (a, b),
             },
-            _ => (a, b),
+            | _ => (a, b),
         }
     }
 
@@ -227,14 +223,14 @@ pub enum ParamUnknown {
 impl ParamUnknown {
     pub fn which(&self) -> &'static str {
         match self {
-            ParamUnknown::Old { .. } => "old",
-            ParamUnknown::New { .. } => "new",
+            | ParamUnknown::Old { .. } => "old",
+            | ParamUnknown::New { .. } => "new",
         }
     }
     pub fn param(&self) -> &InterfaceFuncParam {
         match self {
-            ParamUnknown::Old(p) => &p,
-            ParamUnknown::New(p) => &p,
+            | ParamUnknown::Old(p) => p,
+            | ParamUnknown::New(p) => p,
         }
     }
 }
@@ -248,8 +244,8 @@ pub enum TypePolyfill {
 impl TypePolyfill {
     pub fn repeq(&self) -> RepEquality {
         match self {
-            TypePolyfill::NewToOld(new, old) => old.type_().representable(&new.type_()),
-            TypePolyfill::OldToNew(old, new) => new.type_().representable(&old.type_()),
+            | TypePolyfill::NewToOld(new, old) => old.type_().representable(new.type_()),
+            | TypePolyfill::OldToNew(old, new) => new.type_().representable(old.type_()),
         }
     }
 }

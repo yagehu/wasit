@@ -21,7 +21,14 @@
 //! generators will need to implement the various instructions to support APIs.
 
 use crate::{
-    BuiltinType, Id, IntRepr, InterfaceFunc, InterfaceFuncParam, NamedType, Type, TypeRef,
+    BuiltinType,
+    Id,
+    IntRepr,
+    InterfaceFunc,
+    InterfaceFuncParam,
+    NamedType,
+    Type,
+    TypeRef,
 };
 
 /// Enumerates wasm types used by interface types when lowering/lifting.
@@ -38,8 +45,8 @@ pub enum WasmType {
 impl From<IntRepr> for WasmType {
     fn from(i: IntRepr) -> WasmType {
         match i {
-            IntRepr::U8 | IntRepr::U16 | IntRepr::U32 => WasmType::I32,
-            IntRepr::U64 => WasmType::I64,
+            | IntRepr::U8 | IntRepr::U16 | IntRepr::U32 => WasmType::I32,
+            | IntRepr::U64 => WasmType::I64,
         }
     }
 }
@@ -329,17 +336,18 @@ impl Abi {
     ) -> Result<(), String> {
         assert_eq!(*self, Abi::Preview1);
         match results.len() {
-            0 => {}
-            1 => match &**results[0].tref.type_() {
-                Type::Handle(_) | Type::Builtin(_) | Type::ConstPointer(_) | Type::Pointer(_) => {}
-                Type::Variant(v) => {
+            | 0 => {},
+            | 1 => match &**results[0].tref.type_() {
+                | Type::Handle(_) | Type::Builtin(_) | Type::ConstPointer(_) | Type::Pointer(_) => {
+                },
+                | Type::Variant(v) => {
                     let (ok, err) = match v.as_expected() {
-                        Some(pair) => pair,
-                        None => return Err("invalid return type".to_string()),
+                        | Some(pair) => pair,
+                        | None => return Err("invalid return type".to_string()),
                     };
                     if let Some(ty) = ok {
                         match &**ty.type_() {
-                            Type::Record(r) if r.is_tuple() => {
+                            | Type::Record(r) if r.is_tuple() => {
                                 for member in r.members.iter() {
                                     if !member.tref.named() {
                                         return Err(
@@ -347,14 +355,14 @@ impl Abi {
                                         );
                                     }
                                 }
-                            }
-                            _ => {
+                            },
+                            | _ => {
                                 if !ty.named() {
                                     return Err(
                                         "only named types are allowed in results".to_string()
                                     );
                                 }
-                            }
+                            },
                         }
                     }
                     if let Some(ty) = err {
@@ -367,11 +375,11 @@ impl Abi {
                             }
                         }
                     }
-                }
-                Type::Record(r) if r.bitflags_repr().is_some() => {}
-                Type::Record(_) | Type::List(_) => return Err("invalid return type".to_string()),
+                },
+                | Type::Record(r) if r.bitflags_repr().is_some() => {},
+                | Type::Record(_) | Type::List(_) => return Err("invalid return type".to_string()),
             },
-            _ => return Err("more than one result".to_string()),
+            | _ => return Err("more than one result".to_string()),
         }
         Ok(())
     }
@@ -455,7 +463,7 @@ impl InterfaceFunc {
         let mut results = Vec::new();
         for param in self.params.iter() {
             match &**param.tref.type_() {
-                Type::Builtin(BuiltinType::S8)
+                | Type::Builtin(BuiltinType::S8)
                 | Type::Builtin(BuiltinType::U8 { .. })
                 | Type::Builtin(BuiltinType::S16)
                 | Type::Builtin(BuiltinType::U16)
@@ -467,28 +475,28 @@ impl InterfaceFunc {
                 | Type::Handle(_)
                 | Type::Variant(_) => params.push(WasmType::I32),
 
-                Type::Record(r) => match r.bitflags_repr() {
-                    Some(repr) => params.push(WasmType::from(repr)),
-                    None => params.push(WasmType::I32),
+                | Type::Record(r) => match r.bitflags_repr() {
+                    | Some(repr) => params.push(WasmType::from(repr)),
+                    | None => params.push(WasmType::I32),
                 },
 
-                Type::Builtin(BuiltinType::S64) | Type::Builtin(BuiltinType::U64) => {
+                | Type::Builtin(BuiltinType::S64) | Type::Builtin(BuiltinType::U64) => {
                     params.push(WasmType::I64)
-                }
+                },
 
-                Type::Builtin(BuiltinType::F32) => params.push(WasmType::F32),
-                Type::Builtin(BuiltinType::F64) => params.push(WasmType::F64),
+                | Type::Builtin(BuiltinType::F32) => params.push(WasmType::F32),
+                | Type::Builtin(BuiltinType::F64) => params.push(WasmType::F64),
 
-                Type::List(_) => {
+                | Type::List(_) => {
                     params.push(WasmType::I32);
                     params.push(WasmType::I32);
-                }
+                },
             }
         }
 
         for param in self.results.iter() {
             match &**param.tref.type_() {
-                Type::Builtin(BuiltinType::S8)
+                | Type::Builtin(BuiltinType::S8)
                 | Type::Builtin(BuiltinType::U8 { .. })
                 | Type::Builtin(BuiltinType::S16)
                 | Type::Builtin(BuiltinType::U16)
@@ -499,23 +507,23 @@ impl InterfaceFunc {
                 | Type::ConstPointer(_)
                 | Type::Handle(_) => results.push(WasmType::I32),
 
-                Type::Builtin(BuiltinType::S64) | Type::Builtin(BuiltinType::U64) => {
+                | Type::Builtin(BuiltinType::S64) | Type::Builtin(BuiltinType::U64) => {
                     results.push(WasmType::I64)
-                }
-
-                Type::Builtin(BuiltinType::F32) => results.push(WasmType::F32),
-                Type::Builtin(BuiltinType::F64) => results.push(WasmType::F64),
-
-                Type::Record(r) => match r.bitflags_repr() {
-                    Some(repr) => results.push(WasmType::from(repr)),
-                    None => unreachable!(),
                 },
-                Type::List(_) => unreachable!(),
 
-                Type::Variant(v) => {
+                | Type::Builtin(BuiltinType::F32) => results.push(WasmType::F32),
+                | Type::Builtin(BuiltinType::F64) => results.push(WasmType::F64),
+
+                | Type::Record(r) => match r.bitflags_repr() {
+                    | Some(repr) => results.push(WasmType::from(repr)),
+                    | None => unreachable!(),
+                },
+                | Type::List(_) => unreachable!(),
+
+                | Type::Variant(v) => {
                     results.push(match v.tag_repr {
-                        IntRepr::U64 => WasmType::I64,
-                        IntRepr::U32 | IntRepr::U16 | IntRepr::U8 => WasmType::I32,
+                        | IntRepr::U64 => WasmType::I64,
+                        | IntRepr::U32 | IntRepr::U16 | IntRepr::U8 => WasmType::I32,
                     });
                     if v.is_enum() {
                         continue;
@@ -523,15 +531,15 @@ impl InterfaceFunc {
                     // return pointer
                     if let Some(ty) = &v.cases[0].tref {
                         match &**ty.type_() {
-                            Type::Record(r) if r.is_tuple() => {
+                            | Type::Record(r) if r.is_tuple() => {
                                 for _ in 0..r.members.len() {
                                     params.push(WasmType::I32);
                                 }
-                            }
-                            _ => params.push(WasmType::I32),
+                            },
+                            | _ => params.push(WasmType::I32),
                         }
                     }
-                }
+                },
             }
         }
         (params, results)
@@ -579,10 +587,10 @@ impl InterfaceFunc {
 }
 
 struct Generator<'a, B: Bindgen> {
-    bindgen: &'a mut B,
+    bindgen:  &'a mut B,
     operands: Vec<B::Operand>,
-    results: Vec<B::Operand>,
-    stack: Vec<B::Operand>,
+    results:  Vec<B::Operand>,
+    stack:    Vec<B::Operand>,
 }
 
 impl<B: Bindgen> Generator<'_, B> {
@@ -598,14 +606,14 @@ impl<B: Bindgen> Generator<'_, B> {
         // values through a result.
         assert!(func.results.len() < 2);
         if let Some(result) = func.results.get(0) {
-            self.prep_return_pointer(&result.tref.type_());
+            self.prep_return_pointer(result.tref.type_());
         }
 
         let (params, results) = func.wasm_signature();
         self.emit(&Instruction::CallWasm {
-            module: module.as_str(),
-            name: func.name.as_str(),
-            params: &params,
+            module:  module.as_str(),
+            name:    func.name.as_str(),
+            params:  &params,
             results: &results,
         });
 
@@ -677,53 +685,53 @@ impl<B: Bindgen> Generator<'_, B> {
             inst.results_len(),
             self.results.len()
         );
-        self.stack.extend(self.results.drain(..));
+        self.stack.append(&mut self.results);
     }
 
     fn lower(&mut self, ty: &TypeRef, retptr: Option<&mut usize>) {
         use Instruction::*;
         match &**ty.type_() {
-            Type::Builtin(BuiltinType::S8) => self.emit(&I32FromS8),
-            Type::Builtin(BuiltinType::U8 { lang_c_char: true }) => self.emit(&I32FromChar8),
-            Type::Builtin(BuiltinType::U8 { lang_c_char: false }) => self.emit(&I32FromU8),
-            Type::Builtin(BuiltinType::S16) => self.emit(&I32FromS16),
-            Type::Builtin(BuiltinType::U16) => self.emit(&I32FromU16),
-            Type::Builtin(BuiltinType::S32) => self.emit(&I32FromS32),
-            Type::Builtin(BuiltinType::U32 {
+            | Type::Builtin(BuiltinType::S8) => self.emit(&I32FromS8),
+            | Type::Builtin(BuiltinType::U8 { lang_c_char: true }) => self.emit(&I32FromChar8),
+            | Type::Builtin(BuiltinType::U8 { lang_c_char: false }) => self.emit(&I32FromU8),
+            | Type::Builtin(BuiltinType::S16) => self.emit(&I32FromS16),
+            | Type::Builtin(BuiltinType::U16) => self.emit(&I32FromU16),
+            | Type::Builtin(BuiltinType::S32) => self.emit(&I32FromS32),
+            | Type::Builtin(BuiltinType::U32 {
                 lang_ptr_size: true,
             }) => self.emit(&I32FromUsize),
-            Type::Builtin(BuiltinType::U32 {
+            | Type::Builtin(BuiltinType::U32 {
                 lang_ptr_size: false,
             }) => self.emit(&I32FromU32),
-            Type::Builtin(BuiltinType::S64) => self.emit(&I64FromS64),
-            Type::Builtin(BuiltinType::U64) => self.emit(&I64FromU64),
-            Type::Builtin(BuiltinType::Char) => self.emit(&I32FromChar),
-            Type::Pointer(_) => self.emit(&I32FromPointer),
-            Type::ConstPointer(_) => self.emit(&I32FromConstPointer),
-            Type::Handle(_) => self.emit(&I32FromHandle {
+            | Type::Builtin(BuiltinType::S64) => self.emit(&I64FromS64),
+            | Type::Builtin(BuiltinType::U64) => self.emit(&I64FromU64),
+            | Type::Builtin(BuiltinType::Char) => self.emit(&I32FromChar),
+            | Type::Pointer(_) => self.emit(&I32FromPointer),
+            | Type::ConstPointer(_) => self.emit(&I32FromConstPointer),
+            | Type::Handle(_) => self.emit(&I32FromHandle {
                 ty: match ty {
-                    TypeRef::Name(ty) => ty,
-                    _ => unreachable!(),
+                    | TypeRef::Name(ty) => ty,
+                    | _ => unreachable!(),
                 },
             }),
-            Type::Record(r) => {
+            | Type::Record(r) => {
                 let ty = match ty {
-                    TypeRef::Name(ty) => ty,
-                    _ => unreachable!(),
+                    | TypeRef::Name(ty) => ty,
+                    | _ => unreachable!(),
                 };
                 match r.bitflags_repr() {
-                    Some(IntRepr::U64) => self.emit(&I64FromBitflags { ty }),
-                    Some(_) => self.emit(&I32FromBitflags { ty }),
-                    None => self.emit(&AddrOf),
+                    | Some(IntRepr::U64) => self.emit(&I64FromBitflags { ty }),
+                    | Some(_) => self.emit(&I32FromBitflags { ty }),
+                    | None => self.emit(&AddrOf),
                 }
-            }
-            Type::Variant(v) => {
+            },
+            | Type::Variant(v) => {
                 // Enum-like variants are simply lowered to their discriminant.
                 if v.is_enum() {
                     return self.emit(&EnumLower {
                         ty: match ty {
-                            TypeRef::Name(n) => n,
-                            _ => unreachable!(),
+                            | TypeRef::Name(n) => n,
+                            | _ => unreachable!(),
                         },
                     });
                 }
@@ -731,8 +739,8 @@ impl<B: Bindgen> Generator<'_, B> {
                 // If this variant is in the return position then it's special,
                 // otherwise it's an argument and we just pass the address.
                 let retptr = match retptr {
-                    Some(ptr) => ptr,
-                    None => return self.emit(&AddrOf),
+                    | Some(ptr) => ptr,
+                    | None => return self.emit(&AddrOf),
                 };
 
                 // For the return position we emit some blocks to lower the
@@ -748,12 +756,12 @@ impl<B: Bindgen> Generator<'_, B> {
                     let store = |me: &mut Self, ty: &TypeRef, n| {
                         me.emit(&GetArg { nth: *retptr + n });
                         match ty {
-                            TypeRef::Name(ty) => me.emit(&Store { ty }),
-                            _ => unreachable!(),
+                            | TypeRef::Name(ty) => me.emit(&Store { ty }),
+                            | _ => unreachable!(),
                         }
                     };
                     match &**ok.type_() {
-                        Type::Record(r) if r.is_tuple() => {
+                        | Type::Record(r) if r.is_tuple() => {
                             self.emit(&TupleLower {
                                 amt: r.members.len(),
                             });
@@ -763,8 +771,8 @@ impl<B: Bindgen> Generator<'_, B> {
                             for (i, member) in r.members.iter().enumerate().rev() {
                                 store(self, &member.tref, i);
                             }
-                        }
-                        _ => store(self, ok, 0),
+                        },
+                        | _ => store(self, ok, 0),
                     }
                 };
                 self.bindgen.finish_block(None);
@@ -780,23 +788,23 @@ impl<B: Bindgen> Generator<'_, B> {
                 self.bindgen.finish_block(err_expr);
 
                 self.emit(&ResultLower { ok, err });
-            }
-            Type::Builtin(BuiltinType::F32) => self.emit(&F32FromIf32),
-            Type::Builtin(BuiltinType::F64) => self.emit(&F64FromIf64),
-            Type::List(_) => self.emit(&ListPointerLength),
+            },
+            | Type::Builtin(BuiltinType::F32) => self.emit(&F32FromIf32),
+            | Type::Builtin(BuiltinType::F64) => self.emit(&F64FromIf64),
+            | Type::List(_) => self.emit(&ListPointerLength),
         }
     }
 
     fn prep_return_pointer(&mut self, ty: &Type) {
         // Return pointers are only needed for `Result<T, _>`...
         let variant = match ty {
-            Type::Variant(v) => v,
-            _ => return,
+            | Type::Variant(v) => v,
+            | _ => return,
         };
         // ... and only if `T` is actually present in `Result<T, _>`
         let ok = match &variant.cases[0].tref {
-            Some(t) => t,
-            None => return,
+            | Some(t) => t,
+            | None => return,
         };
 
         // Tuples have each individual item in a separate return pointer while
@@ -804,19 +812,19 @@ impl<B: Bindgen> Generator<'_, B> {
         let mut n = 0;
         let mut prep = |ty: &TypeRef| {
             match ty {
-                TypeRef::Name(ty) => self.bindgen.allocate_space(n, ty),
-                _ => unreachable!(),
+                | TypeRef::Name(ty) => self.bindgen.allocate_space(n, ty),
+                | _ => unreachable!(),
             }
             self.emit(&Instruction::ReturnPointerGet { n });
             n += 1;
         };
         match &**ok.type_() {
-            Type::Record(r) if r.is_tuple() => {
+            | Type::Record(r) if r.is_tuple() => {
                 for member in r.members.iter() {
                     prep(&member.tref);
                 }
-            }
-            _ => prep(ok),
+            },
+            | _ => prep(ok),
         }
     }
 
@@ -825,44 +833,44 @@ impl<B: Bindgen> Generator<'_, B> {
     fn lift(&mut self, ty: &TypeRef, is_return: bool) {
         use Instruction::*;
         match &**ty.type_() {
-            Type::Builtin(BuiltinType::S8) => self.emit(&S8FromI32),
-            Type::Builtin(BuiltinType::U8 { lang_c_char: true }) => self.emit(&Char8FromI32),
-            Type::Builtin(BuiltinType::U8 { lang_c_char: false }) => self.emit(&U8FromI32),
-            Type::Builtin(BuiltinType::S16) => self.emit(&S16FromI32),
-            Type::Builtin(BuiltinType::U16) => self.emit(&U16FromI32),
-            Type::Builtin(BuiltinType::S32) => self.emit(&S32FromI32),
-            Type::Builtin(BuiltinType::U32 {
+            | Type::Builtin(BuiltinType::S8) => self.emit(&S8FromI32),
+            | Type::Builtin(BuiltinType::U8 { lang_c_char: true }) => self.emit(&Char8FromI32),
+            | Type::Builtin(BuiltinType::U8 { lang_c_char: false }) => self.emit(&U8FromI32),
+            | Type::Builtin(BuiltinType::S16) => self.emit(&S16FromI32),
+            | Type::Builtin(BuiltinType::U16) => self.emit(&U16FromI32),
+            | Type::Builtin(BuiltinType::S32) => self.emit(&S32FromI32),
+            | Type::Builtin(BuiltinType::U32 {
                 lang_ptr_size: true,
             }) => self.emit(&UsizeFromI32),
-            Type::Builtin(BuiltinType::U32 {
+            | Type::Builtin(BuiltinType::U32 {
                 lang_ptr_size: false,
             }) => self.emit(&U32FromI32),
-            Type::Builtin(BuiltinType::S64) => self.emit(&S64FromI64),
-            Type::Builtin(BuiltinType::U64) => self.emit(&U64FromI64),
-            Type::Builtin(BuiltinType::Char) => self.emit(&CharFromI32),
-            Type::Builtin(BuiltinType::F32) => self.emit(&If32FromF32),
-            Type::Builtin(BuiltinType::F64) => self.emit(&If64FromF64),
-            Type::Pointer(ty) => self.emit(&PointerFromI32 { ty }),
-            Type::ConstPointer(ty) => self.emit(&ConstPointerFromI32 { ty }),
-            Type::Handle(_) => self.emit(&HandleFromI32 {
+            | Type::Builtin(BuiltinType::S64) => self.emit(&S64FromI64),
+            | Type::Builtin(BuiltinType::U64) => self.emit(&U64FromI64),
+            | Type::Builtin(BuiltinType::Char) => self.emit(&CharFromI32),
+            | Type::Builtin(BuiltinType::F32) => self.emit(&If32FromF32),
+            | Type::Builtin(BuiltinType::F64) => self.emit(&If64FromF64),
+            | Type::Pointer(ty) => self.emit(&PointerFromI32 { ty }),
+            | Type::ConstPointer(ty) => self.emit(&ConstPointerFromI32 { ty }),
+            | Type::Handle(_) => self.emit(&HandleFromI32 {
                 ty: match ty {
-                    TypeRef::Name(ty) => ty,
-                    _ => unreachable!(),
+                    | TypeRef::Name(ty) => ty,
+                    | _ => unreachable!(),
                 },
             }),
-            Type::Variant(v) => {
+            | Type::Variant(v) => {
                 if v.is_enum() {
                     return self.emit(&EnumLift {
                         ty: match ty {
-                            TypeRef::Name(n) => n,
-                            _ => unreachable!(),
+                            | TypeRef::Name(n) => n,
+                            | _ => unreachable!(),
                         },
                     });
                 } else if !is_return {
                     return self.emit(&Load {
                         ty: match ty {
-                            TypeRef::Name(n) => n,
-                            _ => unreachable!(),
+                            | TypeRef::Name(n) => n,
+                            | _ => unreachable!(),
                         },
                     });
                 }
@@ -875,20 +883,20 @@ impl<B: Bindgen> Generator<'_, B> {
                         self.emit(&ReturnPointerGet { n });
                         n += 1;
                         match ty {
-                            TypeRef::Name(ty) => self.emit(&Load { ty }),
-                            _ => unreachable!(),
+                            | TypeRef::Name(ty) => self.emit(&Load { ty }),
+                            | _ => unreachable!(),
                         }
                     };
                     match &**ok.type_() {
-                        Type::Record(r) if r.is_tuple() => {
+                        | Type::Record(r) if r.is_tuple() => {
                             for member in r.members.iter() {
                                 load(&member.tref);
                             }
                             self.emit(&TupleLift {
                                 amt: r.members.len(),
                             });
-                        }
-                        _ => load(ok),
+                        },
+                        | _ => load(ok),
                     }
                     Some(self.stack.pop().unwrap())
                 } else {
@@ -907,19 +915,19 @@ impl<B: Bindgen> Generator<'_, B> {
                 self.bindgen.finish_block(err_expr);
 
                 self.emit(&ResultLift);
-            }
-            Type::Record(r) => {
+            },
+            | Type::Record(r) => {
                 let ty = match ty {
-                    TypeRef::Name(ty) => ty,
-                    _ => unreachable!(),
+                    | TypeRef::Name(ty) => ty,
+                    | _ => unreachable!(),
                 };
                 match r.bitflags_repr() {
-                    Some(IntRepr::U64) => self.emit(&BitflagsFromI64 { ty }),
-                    Some(_) => self.emit(&BitflagsFromI32 { ty }),
-                    None => self.emit(&Load { ty }),
+                    | Some(IntRepr::U64) => self.emit(&BitflagsFromI64 { ty }),
+                    | Some(_) => self.emit(&BitflagsFromI32 { ty }),
+                    | None => self.emit(&Load { ty }),
                 }
-            }
-            Type::List(ty) => self.emit(&ListFromPointerLength { ty }),
+            },
+            | Type::List(ty) => self.emit(&ListFromPointerLength { ty }),
         }
     }
 }

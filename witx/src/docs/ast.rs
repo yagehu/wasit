@@ -68,14 +68,14 @@ impl ToMarkdown for Document {
 impl ToMarkdown for TypeRef {
     fn generate(&self, node: MdNodeRef) {
         match self {
-            TypeRef::Value(v) => {
+            | TypeRef::Value(v) => {
                 v.generate(node.clone());
                 node.content_ref_mut::<MdNamedType>().ty = Some(format!("`{}`", self.type_name()));
-            }
-            TypeRef::Name(n) => {
+            },
+            | TypeRef::Name(n) => {
                 node.content_ref_mut::<MdNamedType>().ty =
                     Some(format!("[`{0}`](#{0})", n.name.as_str().to_owned()));
-            }
+            },
         }
     }
 }
@@ -89,13 +89,13 @@ impl ToMarkdown for NamedType {
 impl ToMarkdown for Type {
     fn generate(&self, node: MdNodeRef) {
         match self {
-            Self::Record(a) => a.generate(node.clone()),
-            Self::Variant(a) => a.generate(node.clone()),
-            Self::Handle(a) => a.generate(node.clone()),
-            Self::List(_) => {}
-            Self::Pointer(_) => {}
-            Self::ConstPointer(_) => {}
-            Self::Builtin(_) => {}
+            | Self::Record(a) => a.generate(node.clone()),
+            | Self::Variant(a) => a.generate(node.clone()),
+            | Self::Handle(a) => a.generate(node.clone()),
+            | Self::List(_) => {},
+            | Self::Pointer(_) => {},
+            | Self::ConstPointer(_) => {},
+            | Self::Builtin(_) => {},
         }
     }
 }
@@ -213,9 +213,9 @@ impl ToMarkdown for Module {
 impl ToMarkdown for ModuleImport {
     fn generate(&self, node: MdNodeRef) {
         match self.variant {
-            ModuleImportVariant::Memory => {
+            | ModuleImportVariant::Memory => {
                 node.content_ref_mut::<MdSection>().title = "Memory".to_owned();
-            }
+            },
         }
     }
 }
@@ -277,22 +277,22 @@ impl ToMarkdown for InterfaceFuncParam {
 impl BuiltinType {
     pub fn type_name(&self) -> &'static str {
         match self {
-            BuiltinType::Char => "char",
-            BuiltinType::U8 { .. } => "u8",
-            BuiltinType::U16 => "u16",
-            BuiltinType::U32 {
+            | BuiltinType::Char => "char",
+            | BuiltinType::U8 { .. } => "u8",
+            | BuiltinType::U16 => "u16",
+            | BuiltinType::U32 {
                 lang_ptr_size: false,
             } => "u32",
-            BuiltinType::U32 {
+            | BuiltinType::U32 {
                 lang_ptr_size: true,
             } => "usize",
-            BuiltinType::U64 => "u64",
-            BuiltinType::S8 => "s8",
-            BuiltinType::S16 => "s16",
-            BuiltinType::S32 => "s32",
-            BuiltinType::S64 => "s64",
-            BuiltinType::F32 => "f32",
-            BuiltinType::F64 => "f64",
+            | BuiltinType::U64 => "u64",
+            | BuiltinType::S8 => "s8",
+            | BuiltinType::S16 => "s16",
+            | BuiltinType::S32 => "s32",
+            | BuiltinType::S64 => "s64",
+            | BuiltinType::F32 => "f32",
+            | BuiltinType::F64 => "f64",
         }
     }
 }
@@ -300,16 +300,16 @@ impl BuiltinType {
 impl TypeRef {
     pub fn type_name(&self) -> String {
         match self {
-            TypeRef::Name(n) => n.name.as_str().to_string(),
-            TypeRef::Value(v) => match &**v {
-                Type::List(a) => match &**a.type_() {
-                    Type::Builtin(BuiltinType::Char) => "string".to_string(),
-                    _ => format!("List<{}>", a.type_name()),
+            | TypeRef::Name(n) => n.name.as_str().to_string(),
+            | TypeRef::Value(v) => match &**v {
+                | Type::List(a) => match &**a.type_() {
+                    | Type::Builtin(BuiltinType::Char) => "string".to_string(),
+                    | _ => format!("List<{}>", a.type_name()),
                 },
-                Type::Pointer(p) => format!("Pointer<{}>", p.type_name()),
-                Type::ConstPointer(p) => format!("ConstPointer<{}>", p.type_name()),
-                Type::Builtin(b) => b.type_name().to_string(),
-                Type::Record(RecordDatatype {
+                | Type::Pointer(p) => format!("Pointer<{}>", p.type_name()),
+                | Type::ConstPointer(p) => format!("ConstPointer<{}>", p.type_name()),
+                | Type::Builtin(b) => b.type_name().to_string(),
+                | Type::Record(RecordDatatype {
                     kind: RecordKind::Tuple,
                     members,
                 }) => {
@@ -320,32 +320,28 @@ impl TypeRef {
                         }
                         ret.push_str(&member.tref.type_name());
                     }
-                    ret.push_str(")");
+                    ret.push(')');
                     ret
-                }
-                Type::Record { .. } => {
-                    format!("Record")
-                }
-                Type::Handle { .. } => {
-                    format!("Handle")
-                }
-                Type::Variant(v) => {
+                },
+                | Type::Record { .. } => "Record".to_owned(),
+                | Type::Handle { .. } => "Handle".to_owned(),
+                | Type::Variant(v) => {
                     if let Some((ok, err)) = v.as_expected() {
                         let ok = match ok {
-                            Some(ty) => ty.type_name(),
-                            None => "()".to_string(),
+                            | Some(ty) => ty.type_name(),
+                            | None => "()".to_string(),
                         };
                         let err = match err {
-                            Some(ty) => ty.type_name(),
-                            None => "()".to_string(),
+                            | Some(ty) => ty.type_name(),
+                            | None => "()".to_string(),
                         };
                         format!("Result<{}, {}>", ok, err)
                     } else if v.is_bool() {
-                        format!("bool")
+                        "bool".to_owned()
                     } else {
-                        format!("Variant")
+                        "Variant".to_owned()
                     }
-                }
+                },
             },
         }
     }
@@ -411,11 +407,13 @@ impl Documentation for FuncPolyfill {
             };
             let mut contents = Vec::new();
             for p in self.mapped_params.iter() {
-                contents.push(if !p.full_compat() {
-                    format!("param {}", p.to_md())
-                } else {
-                    format!("param `{}`: compatible", p.new.name.as_str())
-                })
+                contents.push(
+                    if !p.full_compat() {
+                        format!("param {}", p.to_md())
+                    } else {
+                        format!("param `{}`: compatible", p.new.name.as_str())
+                    },
+                )
             }
             for u in self.unknown_params.iter() {
                 contents.push(format!(
@@ -425,11 +423,13 @@ impl Documentation for FuncPolyfill {
                 ))
             }
             for r in self.mapped_results.iter() {
-                contents.push(if !r.full_compat() {
-                    format!("result {}", r.to_md())
-                } else {
-                    format!("result `{}`: compatible", r.new.name.as_str())
-                })
+                contents.push(
+                    if !r.full_compat() {
+                        format!("result {}", r.to_md())
+                    } else {
+                        format!("result `{}`: compatible", r.new.name.as_str())
+                    },
+                )
             }
             for u in self.unknown_results.iter() {
                 contents.push(format!(
@@ -460,13 +460,13 @@ impl Documentation for ParamPolyfill {
             format!("`{}`", self.new.name.as_str())
         };
         let repr = match self.repeq() {
-            RepEquality::Eq => "compatible types".to_string(),
-            RepEquality::Superset => format!(
+            | RepEquality::Eq => "compatible types".to_string(),
+            | RepEquality::Superset => format!(
                 "`{}` is superset-compatible with `{}`",
                 self.old.tref.type_name(),
                 self.new.tref.type_name()
             ),
-            RepEquality::NotEq => format!(
+            | RepEquality::NotEq => format!(
                 "`{}` is incompatible with new `{}`",
                 self.old.tref.type_name(),
                 self.new.tref.type_name()
@@ -480,19 +480,19 @@ impl Documentation for TypePolyfill {
     fn to_md(&self) -> String {
         fn repeq_name(r: RepEquality) -> &'static str {
             match r {
-                RepEquality::Eq => ": compatible",
-                RepEquality::Superset => ": superset",
-                RepEquality::NotEq => "",
+                | RepEquality::Eq => ": compatible",
+                | RepEquality::Superset => ": superset",
+                | RepEquality::NotEq => "",
             }
         }
         match self {
-            TypePolyfill::OldToNew(o, n) => format!(
+            | TypePolyfill::OldToNew(o, n) => format!(
                 "* old `{}` => new `{}`{}",
                 o.type_name(),
                 n.type_name(),
                 repeq_name(self.repeq())
             ),
-            TypePolyfill::NewToOld(n, o) => format!(
+            | TypePolyfill::NewToOld(n, o) => format!(
                 "* new `{}` => old `{}`{}",
                 n.type_name(),
                 o.type_name(),

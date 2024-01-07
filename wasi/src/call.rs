@@ -24,14 +24,19 @@ impl Call {
         let func_specs = module_spec.funcs().collect::<Vec<_>>();
         let func_spec = u.choose(&func_specs)?;
 
+        Self::arbitrary_from_func_spec(u, prog, &func_spec)
+    }
+
+    pub fn arbitrary_from_func_spec(
+        u: &mut Unstructured,
+        prog: &Prog,
+        spec: &InterfaceFunc,
+    ) -> Result<Self, arbitrary::Error> {
         Ok(Self {
-            func:    func_spec.name.as_str().to_owned(),
+            func:    spec.name.as_str().to_owned(),
             params:  vec![],
             results: vec![],
         })
-    }
-
-    pub fn arbitrary_from_func_spec(u: &mut Unstructured, prog: &Prog, spec: &InterfaceFunc) {
     }
 }
 

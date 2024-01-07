@@ -209,6 +209,12 @@ pub struct DocValidationScope<'a> {
     path: &'a Path,
 }
 
+impl Default for DocValidation {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DocValidation {
     pub fn new() -> Self {
         Self {
@@ -303,7 +309,7 @@ impl<'a> DocValidationScope<'a> {
                 let decls = syntax
                     .decls
                     .iter()
-                    .map(|d| module_validator.validate_decl(&d, definitions))
+                    .map(|d| module_validator.validate_decl(d, definitions))
                     .collect::<Result<Vec<_>, _>>()?;
 
                 let rc_module = Rc::new(Module::new(
@@ -383,22 +389,22 @@ impl<'a> DocValidationScope<'a> {
                 })
             },
             | other => Ok(TypeRef::Value(Rc::new(match other {
-                | TypedefSyntax::Enum(syntax) => Type::Variant(self.validate_enum(&syntax, span)?),
+                | TypedefSyntax::Enum(syntax) => Type::Variant(self.validate_enum(syntax, span)?),
                 | TypedefSyntax::Tuple(syntax) => {
-                    Type::Record(self.validate_tuple(definitions, &syntax, span)?)
+                    Type::Record(self.validate_tuple(definitions, syntax, span)?)
                 },
                 | TypedefSyntax::Expected(syntax) => {
-                    Type::Variant(self.validate_expected(definitions, &syntax, span)?)
+                    Type::Variant(self.validate_expected(definitions, syntax, span)?)
                 },
-                | TypedefSyntax::Flags(syntax) => Type::Record(self.validate_flags(&syntax, span)?),
+                | TypedefSyntax::Flags(syntax) => Type::Record(self.validate_flags(syntax, span)?),
                 | TypedefSyntax::Record(syntax) => {
-                    Type::Record(self.validate_record(definitions, &syntax, span)?)
+                    Type::Record(self.validate_record(definitions, syntax, span)?)
                 },
                 | TypedefSyntax::Union(syntax) => {
-                    Type::Variant(self.validate_union(definitions, &syntax, span)?)
+                    Type::Variant(self.validate_union(definitions, syntax, span)?)
                 },
                 | TypedefSyntax::Variant(syntax) => {
-                    Type::Variant(self.validate_variant(definitions, &syntax, span)?)
+                    Type::Variant(self.validate_variant(definitions, syntax, span)?)
                 },
                 | TypedefSyntax::Handle(syntax) => {
                     Type::Handle(self.validate_handle(syntax, span)?)
@@ -488,7 +494,7 @@ impl<'a> DocValidationScope<'a> {
                         .insert(resource_name.clone(), node_id);
 
                     if let Some(alloc) = &alloc {
-                        let alloc_resource_id = *self.doc.resource_scope.map.get(&alloc).unwrap();
+                        let alloc_resource_id = *self.doc.resource_scope.map.get(alloc).unwrap();
 
                         self.doc.resource_scope.graph.add_edge(
                             node_id,
@@ -679,7 +685,7 @@ impl<'a> DocValidationScope<'a> {
                         return Err(ValidationError::InvalidUnionField {
                             name:     name.as_str().to_string(),
                             location: self.location(case.item.name.span()),
-                            reason:   format!("does not correspond to variant in tag `tag`"),
+                            reason:   "does not correspond to variant in tag `tag`".to_owned(),
                         });
                     }
                 }
@@ -730,7 +736,7 @@ impl<'a> DocValidationScope<'a> {
                     if c.tref.is_some() {
                         return Err(ValidationError::InvalidUnionTag {
                             location: self.location(span),
-                            reason:   format!("all variant cases should have empty payloads"),
+                            reason:   "all variant cases should have empty payloads".to_owned(),
                         });
                     }
                     names.push(c.name.clone());
@@ -771,7 +777,7 @@ impl<'a> DocValidationScope<'a> {
             | BuiltinType::U32 { .. } => Ok(IntRepr::U32),
             | BuiltinType::U64 => Ok(IntRepr::U64),
             | _ => Err(ValidationError::InvalidRepr {
-                repr:     type_.clone(),
+                repr:     *type_,
                 location: self.location(span),
             }),
         }

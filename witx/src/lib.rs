@@ -43,14 +43,14 @@ pub fn load<P: AsRef<Path>>(paths: &[P]) -> Result<Document, WitxError> {
 /// Parse a witx document from a str. `(use ...)` directives are not permitted.
 pub fn parse(source: &str) -> Result<Document, WitxError> {
     let mockfs = MockFs::new(&[("-", source)]);
-    toplevel::parse_witx_with(&[Path::new("-")], &mockfs)
+    toplevel::parse_witx_with(&[Path::new("-")], mockfs)
 }
 
 /// Location in the source text
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Location {
-    pub path: PathBuf,
-    pub line: usize,
+    pub path:   PathBuf,
+    pub line:   usize,
     pub column: usize,
 }
 
@@ -68,9 +68,9 @@ impl WitxError {
     pub fn report_with(&self, witxio: &dyn WitxIo) -> String {
         use WitxError::*;
         match self {
-            Io(path, ioerr) => format!("with file {:?}: {}", path, ioerr),
-            Parse(parse) => parse.to_string(),
-            Validation(validation) => validation.report_with(witxio),
+            | Io(path, ioerr) => format!("with file {:?}: {}", path, ioerr),
+            | Parse(parse) => parse.to_string(),
+            | Validation(validation) => validation.report_with(witxio),
         }
     }
     pub fn report(&self) -> String {

@@ -4,7 +4,7 @@ use std::fmt;
 impl fmt::Display for Document {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         for d in self.typenames() {
-            write!(
+            writeln!(
                 f,
                 "{}\n",
                 d.to_sexpr()
@@ -15,9 +15,9 @@ impl fmt::Display for Document {
             )?;
         }
         for m in self.modules() {
-            write!(
+            writeln!(
                 f,
-                "{}\n",
+                "{}",
                 m.to_sexpr()
                     .iter()
                     .map(ToString::to_string)

@@ -1,8 +1,10 @@
 use crate::WitxError;
-use std::collections::HashMap;
-use std::fs::{read_to_string, File};
-use std::io::{BufRead, BufReader, Error, ErrorKind};
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashMap,
+    fs::{read_to_string, File},
+    io::{BufRead, BufReader, Error, ErrorKind},
+    path::{Path, PathBuf},
+};
 
 pub trait WitxIo {
     /// Read the entire file into a String. Used to resolve `use` declarations.
@@ -36,8 +38,7 @@ impl WitxIo for Filesystem {
         let buf = BufReader::new(f);
         let l = buf
             .lines()
-            .skip(line_num - 1)
-            .next()
+            .nth(line_num - 1)
             .ok_or_else(|| {
                 WitxError::Io(path.into(), Error::new(ErrorKind::Other, "Line not found"))
             })?
@@ -81,8 +82,7 @@ impl WitxIo for MockFs {
         if let Some(entry) = self.map.get(path) {
             entry
                 .lines()
-                .skip(line - 1)
-                .next()
+                .nth(line - 1)
                 .map(|s| s.to_string())
                 .ok_or_else(|| {
                     WitxError::Io(

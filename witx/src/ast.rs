@@ -77,7 +77,7 @@ impl Document {
             | _ => None,
         })
     }
-    pub fn typenames<'a>(&'a self) -> impl Iterator<Item = Rc<NamedType>> + 'a {
+    pub fn typenames(&self) -> impl Iterator<Item = Rc<NamedType>> + '_ {
         self.definitions.iter().filter_map(|d| match d {
             | Definition::Typename(nt) => Some(nt.clone()),
             | _ => None,
@@ -85,7 +85,7 @@ impl Document {
     }
     /// All of the (unique) types used as "err" variant of results returned from
     /// functions.
-    pub fn error_types<'a>(&'a self) -> impl Iterator<Item = TypeRef> + 'a {
+    pub fn error_types(&self) -> impl Iterator<Item = TypeRef> + '_ {
         let errors: HashSet<TypeRef> = self
             .modules()
             .flat_map(|m| {
@@ -110,19 +110,19 @@ impl Document {
         errors.into_iter()
     }
     pub fn module(&self, name: &Id) -> Option<Rc<Module>> {
-        self.entries.get(&name).and_then(|e| match e {
+        self.entries.get(name).and_then(|e| match e {
             | Entry::Module(m) => Some(m.upgrade().expect("always possible to upgrade entry")),
             | _ => None,
         })
     }
-    pub fn modules<'a>(&'a self) -> impl Iterator<Item = Rc<Module>> + 'a {
+    pub fn modules(&self) -> impl Iterator<Item = Rc<Module>> + '_ {
         self.definitions.iter().filter_map(|d| match d {
             | Definition::Module(m) => Some(m.clone()),
             | _ => None,
         })
     }
 
-    pub fn constants<'a>(&'a self) -> impl Iterator<Item = &'a Constant> + 'a {
+    pub fn constants(&self) -> impl Iterator<Item = &'_ Constant> {
         self.definitions.iter().filter_map(|d| match d {
             | Definition::Constant(c) => Some(c),
             | _ => None,
@@ -513,7 +513,7 @@ impl Module {
             | _ => None,
         })
     }
-    pub fn imports<'a>(&'a self) -> impl Iterator<Item = Rc<ModuleImport>> + 'a {
+    pub fn imports(&self) -> impl Iterator<Item = Rc<ModuleImport>> + '_ {
         self.definitions.iter().filter_map(|d| match d {
             | ModuleDefinition::Import(d) => Some(d.clone()),
             | _ => None,
@@ -525,7 +525,7 @@ impl Module {
             | _ => None,
         })
     }
-    pub fn funcs<'a>(&'a self) -> impl Iterator<Item = Rc<InterfaceFunc>> + 'a {
+    pub fn funcs(&self) -> impl Iterator<Item = Rc<InterfaceFunc>> + '_ {
         self.definitions.iter().filter_map(|d| match d {
             | ModuleDefinition::Func(d) => Some(d.clone()),
             | _ => None,

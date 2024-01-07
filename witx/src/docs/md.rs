@@ -42,8 +42,8 @@ pub(super) trait MdElement: fmt::Display + fmt::Debug + 'static {
 /// `content` is expected to implement the `MdElement` trait.
 #[derive(Debug)]
 pub(super) struct MdNode {
-    content: Box<dyn MdElement>,
-    parent: Option<Weak<RefCell<MdNode>>>,
+    content:  Box<dyn MdElement>,
+    parent:   Option<Weak<RefCell<MdNode>>>,
     children: Vec<MdNodeRef>,
 }
 
@@ -59,8 +59,8 @@ fn walk_ancestors(parent: Option<&Weak<RefCell<MdNode>>>, cb: &mut impl FnMut(Md
 impl MdNode {
     fn new<T: MdElement + 'static>(item: T) -> Self {
         Self {
-            content: Box::new(item),
-            parent: None,
+            content:  Box::new(item),
+            parent:   None,
             children: vec![],
         }
     }
@@ -178,7 +178,8 @@ impl MdElement for MdRoot {
         None
     }
 
-    fn set_docs(&mut self, _: &str) {}
+    fn set_docs(&mut self, _: &str) {
+    }
 
     fn as_any(&self) -> &dyn Any {
         self
@@ -230,8 +231,8 @@ impl MdHeading {
 impl fmt::Display for MdHeading {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let as_string = match self {
-            Self::Header { level } => "#".repeat(*level),
-            Self::Bullet => "-".to_owned(),
+            | Self::Header { level } => "#".repeat(*level),
+            | Self::Bullet => "-".to_owned(),
         };
         f.write_str(&as_string)
     }
@@ -248,8 +249,8 @@ impl fmt::Display for MdHeading {
 #[derive(Debug)]
 pub(super) struct MdSection {
     pub heading: MdHeading,
-    pub id: Option<String>,
-    pub title: String,
+    pub id:      Option<String>,
+    pub title:   String,
 }
 
 impl MdSection {
@@ -264,14 +265,15 @@ impl MdSection {
 
 impl MdElement for MdSection {
     fn id(&self) -> Option<&str> {
-        self.id.as_ref().map(|s| s.as_str())
+        self.id.as_deref()
     }
 
     fn docs(&self) -> Option<&str> {
         None
     }
 
-    fn set_docs(&mut self, _: &str) {}
+    fn set_docs(&mut self, _: &str) {
+    }
 
     fn as_any(&self) -> &dyn Any {
         self
@@ -319,10 +321,10 @@ impl fmt::Display for MdSection {
 #[derive(Debug)]
 pub(super) struct MdNamedType {
     pub heading: MdHeading,
-    pub id: String,
-    pub name: String,
-    pub docs: String,
-    pub ty: Option<String>,
+    pub id:      String,
+    pub name:    String,
+    pub docs:    String,
+    pub ty:      Option<String>,
 }
 
 impl MdNamedType {
@@ -401,11 +403,11 @@ impl fmt::Display for MdNamedType {
 #[derive(Debug)]
 pub(super) struct MdFunc {
     pub heading: MdHeading,
-    pub id: String,
-    pub name: String,
-    pub inputs: Vec<(String, String)>,
+    pub id:      String,
+    pub name:    String,
+    pub inputs:  Vec<(String, String)>,
     pub outputs: Vec<String>,
-    pub docs: String,
+    pub docs:    String,
 }
 
 impl MdFunc {
@@ -456,12 +458,12 @@ impl fmt::Display for MdFunc {
         let outputs: Vec<_> = self
             .outputs
             .iter()
-            .map(|r#type| format!("{}", r#type))
+            .map(|r#type| r#type.to_string())
             .collect();
         let outputs = match outputs.len() {
-            0 => "".to_owned(),
-            1 => format!(" -> {}", outputs[0]),
-            _ => format!(" -> ({})", outputs.join(", ")),
+            | 0 => "".to_owned(),
+            | 1 => format!(" -> {}", outputs[0]),
+            | _ => format!(" -> ({})", outputs.join(", ")),
         };
         // Format
         writeln!(f, "\n---\n")?;

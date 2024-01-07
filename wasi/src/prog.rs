@@ -79,9 +79,9 @@ impl ProgSeed {
 
                 match (&param_spec.resource, &call_param) {
                     | (Some(_resource_spec), &&CallParam::Resource(resource_id)) => {
-                        let resource = resource_ctx
-                            .get(resource_id)
-                            .expect(&format!("resource {resource_id} not found in the context"));
+                        let resource = resource_ctx.get(resource_id).unwrap_or_else(|| {
+                            panic!("resource {resource_id} not found in the context")
+                        });
                         let mut resource_builder = param_builder.reborrow().init_resource();
 
                         resource_builder.set_id(resource.id);

@@ -28,16 +28,16 @@ fn parse_links<S: AsRef<str>>(text: S, existing_links: &HashSet<String>) -> Stri
     for ch in text.chars() {
         match (ch, is_link) {
             // Found the beginning of a link!
-            ('`', false) => {
+            | ('`', false) => {
                 is_link = true;
-            }
+            },
             // Reached the end, expand into a link!
-            ('`', true) => {
+            | ('`', true) => {
                 // Sanitise scoping by replacing "::" with '.'
                 let md_link = link.replace("::", ".");
                 // Before committing to pasting the link in,
                 // first verify that it actually exists.
-                let expanded = if let Some(_) = existing_links.get(&md_link) {
+                let expanded = if existing_links.get(&md_link).is_some() {
                     format!("[`{}`](#{})", link, md_link)
                 } else {
                     log::warn!(
@@ -50,9 +50,9 @@ fn parse_links<S: AsRef<str>>(text: S, existing_links: &HashSet<String>) -> Stri
                 parsed_text.push_str(&expanded);
                 link.drain(..);
                 is_link = false;
-            }
-            (ch, false) => parsed_text.push(ch),
-            (ch, true) => link.push(ch),
+            },
+            | (ch, false) => parsed_text.push(ch),
+            | (ch, true) => link.push(ch),
         }
     }
 
@@ -61,7 +61,7 @@ fn parse_links<S: AsRef<str>>(text: S, existing_links: &HashSet<String>) -> Stri
 
 impl Documentation for Document {
     fn to_md(&self) -> String {
-        let root = MdNodeRef::new(MdRoot::default());
+        let root = MdNodeRef::new(MdRoot);
         self.generate(root.clone());
         // Get all children of the `root` element.
         let children = root.borrow().children();
