@@ -24,6 +24,8 @@ struct resource_map_entry {
 
 noreturn void fail(const char* err);
 
+void * malloc_set_value(const struct Type type, const struct Value value, int32_t * len);
+
 void handle_decl(struct resource_map_entry ** resource_map, const struct DeclRequest);
 void handle_call(struct resource_map_entry ** resource_map, const struct CallRequest);
 
@@ -85,6 +87,60 @@ int main(void) {
 noreturn void fail(const char* err) {
     fprintf(stderr, "%s\n", err);
     exit(1);
+}
+
+void * malloc_set_value(const struct Type type, const struct Value value, int32_t * len) {
+    switch (value.which) {
+        case Value__bool: {
+            bool * ptr = malloc(sizeof(bool));
+
+           * ptr = value._bool;
+
+            return ptr;
+        }
+        case Value_string: {
+            char * ptr = malloc(value.string.len);
+
+            * len = value.string.len;
+
+            return strncpy(ptr, value.string.str, value.string.len);
+        };
+        case Value_bitflags: {
+            struct Value_Bitflags bitflags;
+            struct Type_Bitflags  bitflags_type;
+
+            read_Type_Bitflags(&bitflags_type, type.bitflags);
+            read_Value_Bitflags(&bitflags, value.bitflags);
+
+            uint64_t int_value = 0;
+
+            for (int i = 0; i < capn_len(bitflags.members); i++) {
+                const bool is_set = capn_get1(bitflags.members, i);
+
+                int_value |= (0x1 & is_set) << i;
+            }
+
+            switch (bitflags_type.repr) {
+                case Type_IntRepr_u8:
+                case Type_IntRepr_u16:
+                case Type_IntRepr_u32: {
+                    uint32_t * ptr = malloc(sizeof(uint32_t));
+
+                    * ptr = (uint32_t) int_value;
+
+                    return ptr;
+                }
+                case Type_IntRepr_u64: {
+                    uint64_t * ptr = malloc(sizeof(uint64_t));
+
+                    * ptr = int_value;
+
+                    return ptr;
+                }
+            }
+        }
+        case Value_handle: fail("unimplemeneted: handle value");
+    }
 }
 
 void handle_decl(
@@ -191,6 +247,7 @@ void handle_call(
                 p6_fdflags_,
                 (int32_t) r0_fd_ptr
             );
+            fprintf(stderr, "path_open ret %d\n", errno);
 
             Result_list result_list = new_Result_list(*segment, 1 /* sz */);
 
@@ -229,8 +286,6 @@ void * handle_param_pre(
     struct ParamSpec spec,
     int32_t * len
 ) {
-    (void) len;
-
     switch (spec.which) {
         case ParamSpec_resource: {
             struct ResourceRef resource_ref;
@@ -246,13 +301,13 @@ void * handle_param_pre(
             return resource_entry->value.ptr;
         }
         case ParamSpec_value: {
-            const struct Value value;
+            struct Value value;
+            struct Type type;
 
-            (void) value;
+            read_Value(&value, spec.value);
+            read_Type(&type, spec.type);
 
-            fail("unimplemented: ParamSpec_value");
-
-            break;
+            return malloc_set_value(type, value, len);
         }
     }
 

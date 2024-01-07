@@ -1,9 +1,0 @@
-[
-    {
-        "name": "wasi-sdk",
-        "toolchainFile": "../wasi-sdk/build/install/opt/wasi-sdk/share/cmake/wasi-sdk.cmake",
-        "cmakeSettings": {
-            "BUILD_TESTING": "OFF"
-        }
-    }
-]

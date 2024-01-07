@@ -36,23 +36,33 @@ where
             .wasi_runner
             .run(self.executor.clone(), self.base_dir.clone())?;
         let mut stderr = child.stderr.take().unwrap();
+        let stderr_copy_handle = thread::spawn(move || {
+            io::copy(&mut stderr, stderr_logger.lock().unwrap().deref_mut()).unwrap()
+        });
 
-        thread::spawn(move || io::copy(&mut stderr, stderr_logger.lock().unwrap().deref_mut()));
-
-        Ok(RunningExecutor::new(child, self.wasi_runner.base_dir_fd()))
+        Ok(RunningExecutor::new(
+            child,
+            self.wasi_runner.base_dir_fd(),
+            stderr_copy_handle,
+        ))
     }
 }
 
 #[derive(Debug)]
 pub struct RunningExecutor {
-    child:       process::Child,
-    stdin:       process::ChildStdin,
-    stdout:      process::ChildStdout,
-    base_dir_fd: u32,
+    child:              process::Child,
+    stdin:              process::ChildStdin,
+    stdout:             process::ChildStdout,
+    stderr_copy_handle: thread::JoinHandle<u64>,
+    base_dir_fd:        u32,
 }
 
 impl RunningExecutor {
-    pub fn new(child: process::Child, base_dir_fd: u32) -> Self {
+    pub fn new(
+        child: process::Child,
+        base_dir_fd: u32,
+        stderr_copy_handle: thread::JoinHandle<u64>,
+    ) -> Self {
         let mut child = child;
         let stdin = child.stdin.take().unwrap();
         let stdout = child.stdout.take().unwrap();
@@ -61,8 +71,14 @@ impl RunningExecutor {
             child,
             stdin,
             stdout,
+            stderr_copy_handle,
             base_dir_fd,
         }
+    }
+
+    pub fn kill(mut self) {
+        self.child.kill().unwrap();
+        self.stderr_copy_handle.join().unwrap();
     }
 
     pub fn call(
