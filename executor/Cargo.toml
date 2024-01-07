@@ -6,9 +6,10 @@ publish.workspace = true
 build = "build.rs"
 
 [build-dependencies]
-capnpc.workspace = true
+cc.workspace = true
 
 [dependencies]
+wazzi-executor-capnp.workspace = true
 wazzi-runners.workspace = true
 
 capnp.workspace = true

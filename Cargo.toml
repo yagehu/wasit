@@ -6,13 +6,18 @@ publish = false
 resolver = "2"
 members = [
     "executor",
+    "executor/capnp",
+    "executor/capnp-c",
+    "executor/capnpc-c",
     "runners",
     "wasi",
     "witx",
 ]
 
 [workspace.dependencies]
+capnpc-c.path = "executor/capnpc-c"
 wazzi-executor.path = "executor"
+wazzi-executor-capnp.path = "executor/capnp"
 wazzi-runners.path = "runners"
 wazzi-wasi.path = "wasi"
 wazzi-witx.path = "witx"
@@ -20,6 +25,7 @@ wazzi-witx.path = "witx"
 arbitrary = "1"
 capnp = "0.18"
 capnpc = "0.18"
+cc = "*"
 color-eyre = "0.6"
 ntest = "0.9"
 petgraph = "0.6"

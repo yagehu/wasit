@@ -4,3 +4,6 @@
 [submodule "wasi-sdk"]
 	path = wasi-sdk
 	url = git@github.com:yagehu/wasi-sdk.git
+[submodule "executor/c-capnproto"]
+	path = executor/c-capnproto
+	url = https://gitlab.com/dkml/ext/c-capnproto.git

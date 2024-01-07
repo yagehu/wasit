@@ -81,6 +81,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "capnpc-c"
+version = "0.1.0"
+
+[[package]]
 name = "cc"
 version = "1.0.83"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -635,8 +639,25 @@ name = "wazzi-executor"
 version = "0.1.0"
 dependencies = [
  "capnp",
- "capnpc",
+ "cc",
+ "wazzi-executor-capnp",
  "wazzi-runners",
+]
+
+[[package]]
+name = "wazzi-executor-capnp"
+version = "0.1.0"
+dependencies = [
+ "capnp",
+ "capnpc",
+]
+
+[[package]]
+name = "wazzi-executor-capnp-c"
+version = "0.1.0"
+dependencies = [
+ "capnpc-c",
+ "cc",
 ]
 
 [[package]]

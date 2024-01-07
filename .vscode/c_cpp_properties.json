@@ -6,7 +6,8 @@
             "configurationProvider": "ms-vscode.cmake-tools",
             "includePath": [
                 "build",
-                "build/_deps/c-capnproto-src/lib"
+                "build/_deps/c-capnproto-src/lib",
+                "target/debug"
             ]
         }
     ],

@@ -27,7 +27,8 @@ noreturn void fail(const char* err);
 void handle_decl(struct resource_map_entry ** resource_map, const struct DeclRequest);
 void handle_call(struct resource_map_entry ** resource_map, const struct CallRequest);
 
-void * handle_param(struct resource_map_entry ** resource_map, struct ParamSpec spec, int32_t * len);
+void * handle_param_pre(struct resource_map_entry ** resource_map, struct ParamSpec spec, int32_t * len);
+void   handle_param_post(struct ParamSpec spec, void * ptr);
 void * result_pre(struct resource_map_entry ** resource_map, struct ResultSpec result);
 void handle_result_post(
     struct resource_map_entry ** resource_map,
@@ -162,13 +163,13 @@ void handle_call(
             get_ResultSpec(&r0_fd, call.results, 0);
 
             int32_t p2_path_len                 = 0;
-            void *  p0_fd_ptr                   = handle_param(resource_map, p0_fd, NULL);
-            void *  p1_dirflags_ptr             = handle_param(resource_map, p1_dirflags, NULL);
-            void *  p2_path_ptr                 = handle_param(resource_map, p2_path, &p2_path_len);
-            void *  p3_oflags_ptr               = handle_param(resource_map, p3_oflags, NULL);
-            void *  p4_fs_rights_base_ptr       = handle_param(resource_map, p4_fs_rights_base, NULL);
-            void *  p5_fs_rights_inheriting_ptr = handle_param(resource_map, p5_fs_rights_inheriting, NULL);
-            void *  p6_fdflags_ptr              = handle_param(resource_map, p6_fdflags, NULL);
+            void *  p0_fd_ptr                   = handle_param_pre(resource_map, p0_fd, NULL);
+            void *  p1_dirflags_ptr             = handle_param_pre(resource_map, p1_dirflags, NULL);
+            void *  p2_path_ptr                 = handle_param_pre(resource_map, p2_path, &p2_path_len);
+            void *  p3_oflags_ptr               = handle_param_pre(resource_map, p3_oflags, NULL);
+            void *  p4_fs_rights_base_ptr       = handle_param_pre(resource_map, p4_fs_rights_base, NULL);
+            void *  p5_fs_rights_inheriting_ptr = handle_param_pre(resource_map, p5_fs_rights_inheriting, NULL);
+            void *  p6_fdflags_ptr              = handle_param_pre(resource_map, p6_fdflags, NULL);
             void *  r0_fd_ptr                   = result_pre(resource_map, r0_fd);
             int32_t p0_fd_                      = * (int32_t *) p0_fd_ptr;
             int32_t p1_dirflags_                = * (int32_t *) p1_dirflags_ptr;
