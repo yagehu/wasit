@@ -49,3 +49,30 @@ fn path_open() {
 
     assert!(fd.resource.is_some());
 }
+
+#[test]
+fn fd_write() {
+    let doc = document();
+    let module = doc.module(&Id::new("wasi_snapshot_preview1")).unwrap();
+    let fd_write = module.func(&Id::new("fd_write")).unwrap();
+    let iovs = &fd_write.params[1];
+    let ciovec_tref = match iovs.tref.type_().as_ref() {
+        | wazzi_witx::Type::List(tref) => tref,
+        | _ => panic!(),
+    };
+    let ciovec_named_type = match ciovec_tref {
+        | wazzi_witx::TypeRef::Name(named_type) => named_type,
+        | _ => panic!(),
+    };
+
+    assert!(ciovec_named_type.resource.is_some());
+
+    let ciovec_record = match ciovec_named_type.type_().as_ref() {
+        | wazzi_witx::Type::Record(record) => record,
+        | _ => panic!(),
+    };
+    let buf_resource = ciovec_record.members[0].resource.as_ref().unwrap();
+    let buf_len_resource = ciovec_record.members[1].resource.as_ref().unwrap();
+
+    assert_eq!(buf_len_resource.alloc, Some(buf_resource.name.clone()));
+}

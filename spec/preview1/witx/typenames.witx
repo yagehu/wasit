@@ -297,10 +297,17 @@
 (typename $ciovec
   (record
     ;;; The address of the buffer to be written.
-    (field $buf (@witx const_pointer u8))
+    (field $buf
+      (@witx const_pointer u8)
+      (@resource $write_buf)
+    )
     ;;; The length of the buffer to be written.
-    (field $buf_len $size)
+    (field $buf_len
+      $size
+      (@resource $write_buf_size (@alloc $write_buf))
+    )
   )
+  (@resource $ciovec)
 )
 
 (typename $iovec_array (list $iovec))

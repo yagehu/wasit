@@ -291,11 +291,31 @@ impl<'a> DocValidationScope<'a> {
                 let docs = comments.docs();
                 let tref =
                     self.validate_datatype(definitions, &decl.def, true, decl.ident.span())?;
+                let resource = match &decl.resource {
+                    | Some(resource_ref) => {
+                        let name = self.doc.resource_scope.scope.introduce(
+                            resource_ref.name.name(),
+                            self.location(resource_ref.name.span()),
+                        )?;
+                        let alloc = match &resource_ref.alloc {
+                            | None => None,
+                            | Some(alloc) => Some(
+                                self.doc
+                                    .resource_scope
+                                    .scope
+                                    .get(alloc.name.name(), self.location(alloc.name.span()))?,
+                            ),
+                        };
+
+                        Some(ResourceRef { name, alloc })
+                    },
+                    | None => None,
+                };
                 let rc_datatype = Rc::new(NamedType {
                     name: name.clone(),
                     tref,
                     docs,
-                    resource: None,
+                    resource,
                 });
                 self.doc
                     .entries
@@ -600,13 +620,31 @@ impl<'a> DocValidationScope<'a> {
                 let tref =
                     self.validate_datatype(definitions, &f.item.type_, false, f.item.name.span())?;
                 let docs = f.comments.docs();
+                let resource = match &f.item.resource {
+                    | Some(resource_syntax) => {
+                        let name = self.doc.resource_scope.scope.introduce(
+                            resource_syntax.name.name(),
+                            self.location(resource_syntax.name.span()),
+                        )?;
+                        let alloc = match &resource_syntax.alloc {
+                            | Some(alloc_syntax) => Some(self.doc.resource_scope.scope.get(
+                                alloc_syntax.name.name(),
+                                self.location(alloc_syntax.name.span()),
+                            )?),
+                            | None => None,
+                        };
+
+                        Some(ResourceRef { name, alloc })
+                    },
+                    | None => None,
+                };
 
                 // huyage: resource
                 Ok(RecordMember {
                     name,
                     tref,
                     docs,
-                    resource: None,
+                    resource,
                 })
             })
             .collect::<Result<Vec<RecordMember>, _>>()?;

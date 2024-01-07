@@ -263,8 +263,9 @@ impl<'a> Parse<'a> for DeclSyntax<'a> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypenameSyntax<'a> {
-    pub ident: wast::Id<'a>,
-    pub def:   TypedefSyntax<'a>,
+    pub ident:    wast::Id<'a>,
+    pub def:      TypedefSyntax<'a>,
+    pub resource: Option<ResourceSyntax<'a>>,
 }
 
 impl<'a> Parse<'a> for TypenameSyntax<'a> {
@@ -272,7 +273,17 @@ impl<'a> Parse<'a> for TypenameSyntax<'a> {
         parser.parse::<kw::typename>()?;
         let ident = parser.parse()?;
         let def = parser.parse()?;
-        Ok(TypenameSyntax { ident, def })
+        let resource = if parser.peek2::<annotation::resource>() {
+            Some(parser.parse()?)
+        } else {
+            None
+        };
+
+        Ok(TypenameSyntax {
+            ident,
+            def,
+            resource,
+        })
     }
 }
 

@@ -1,5 +1,6 @@
-use crate::ast::*;
 use std::fmt;
+
+use crate::ast::*;
 
 impl fmt::Display for Document {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -146,6 +147,10 @@ impl NamedType {
 
         v.extend(body);
 
+        if let Some(resource) = &self.resource {
+            v.push(resource.to_sexpr());
+        }
+
         SExpr::docs(&self.docs, vec![SExpr::Vec(v)])
     }
 }
@@ -245,6 +250,10 @@ impl RecordDatatype {
                         let mut v = vec![SExpr::word("field"), m.name.to_sexpr()];
 
                         v.append(&mut m.tref.to_sexpr());
+
+                        if let Some(resource) = &m.resource {
+                            v.push(resource.to_sexpr());
+                        }
 
                         SExpr::docs(&m.docs, vec![SExpr::Vec(v)])
                     })
