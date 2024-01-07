@@ -9,10 +9,12 @@
 
 use anyhow::{anyhow, bail, Context, Result};
 use rayon::prelude::*;
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::str;
-use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    str,
+    sync::atomic::{AtomicUsize, Ordering::SeqCst},
+};
 use wast::parser::{self, Parse, ParseBuffer, Parser};
 use wazzi_witx::{Documentation, Instruction, Representable, WasmType, WitxError};
 
@@ -42,7 +44,7 @@ fn main() {
         .par_iter()
         .filter_map(|(test, contents)| {
             WitxtRunner {
-                ntests: &ntests,
+                ntests:    &ntests,
                 documents: HashMap::new(),
             }
             .run(test, contents)
@@ -81,8 +83,8 @@ fn find_tests() -> Vec<PathBuf> {
             }
 
             match f.path().extension().and_then(|s| s.to_str()) {
-                Some("witxt") => {}
-                _ => continue,
+                | Some("witxt") => {},
+                | _ => continue,
             }
             tests.push(f.path());
         }
@@ -90,7 +92,7 @@ fn find_tests() -> Vec<PathBuf> {
 }
 
 struct WitxtRunner<'a> {
-    ntests: &'a AtomicUsize,
+    ntests:    &'a AtomicUsize,
     documents: HashMap<String, wazzi_witx::Document>,
 }
 
@@ -148,7 +150,7 @@ impl WitxtRunner<'_> {
     ) -> Result<()> {
         self.bump_ntests();
         match directive {
-            WitxtDirective::Witx(witx) => {
+            | WitxtDirective::Witx(witx) => {
                 let doc = witx.document(contents, test)?;
                 self.assert_roundtrip(&doc)
                     .context("failed to round-trip the document")?;
@@ -156,17 +158,17 @@ impl WitxtRunner<'_> {
                 if let Some(name) = witx.id {
                     self.documents.insert(name.name().to_string(), doc);
                 }
-            }
-            WitxtDirective::AssertInvalid { witx, message, .. } => {
+            },
+            | WitxtDirective::AssertInvalid { witx, message, .. } => {
                 let err = match witx.document(contents, test) {
-                    Ok(_) => bail!("witx was valid when it shouldn't be"),
-                    Err(e) => format!("{:?}", anyhow::Error::from(e)),
+                    | Ok(_) => bail!("witx was valid when it shouldn't be"),
+                    | Err(e) => format!("{:?}", anyhow::Error::from(e)),
                 };
                 if !err.contains(message) {
                     bail!("expected error {:?}\nfound error {}", message, err);
                 }
-            }
-            WitxtDirective::AssertRepresentable { repr, t1, t2, .. } => {
+            },
+            | WitxtDirective::AssertRepresentable { repr, t1, t2, .. } => {
                 let (t1m, t1t) = t1;
                 let (t2m, t2t) = t2;
                 let t1d = self
@@ -184,15 +186,15 @@ impl WitxtRunner<'_> {
                     .typename(&wazzi_witx::Id::new(t2t))
                     .ok_or_else(|| anyhow!("no type named {:?}", t2t))?;
                 match (repr, t1.type_().representable(&t2.type_())) {
-                    (RepEquality::Eq, wazzi_witx::RepEquality::Eq)
+                    | (RepEquality::Eq, wazzi_witx::RepEquality::Eq)
                     | (RepEquality::Superset, wazzi_witx::RepEquality::Superset)
-                    | (RepEquality::NotEq, wazzi_witx::RepEquality::NotEq) => {}
-                    (a, b) => {
+                    | (RepEquality::NotEq, wazzi_witx::RepEquality::NotEq) => {},
+                    | (a, b) => {
                         bail!("expected {:?} representation, got {:?}", a, b);
-                    }
+                    },
                 }
-            }
-            WitxtDirective::AssertAbi {
+            },
+            | WitxtDirective::AssertAbi {
                 witx,
                 wasm,
                 interface,
@@ -221,7 +223,7 @@ impl WitxtRunner<'_> {
                 check.abi = interface.instrs.iter();
                 func.call_interface(&module.name, &mut check);
                 check.check()?;
-            }
+            },
         }
         Ok(())
     }
@@ -229,7 +231,6 @@ impl WitxtRunner<'_> {
     fn assert_roundtrip(&self, doc: &wazzi_witx::Document) -> Result<()> {
         self.bump_ntests();
         let back_to_sexprs = format!("{}", doc);
-        std::fs::write("back_to_sex.witx", &back_to_sexprs).unwrap();
         let doc2 = wazzi_witx::parse(&back_to_sexprs)?;
         if *doc == doc2 {
             return Ok(());
@@ -239,8 +240,8 @@ impl WitxtRunner<'_> {
         // lines long of debug representations.
         for type_ in doc.typenames() {
             let type2 = match doc2.typename(&type_.name) {
-                Some(t) => t,
-                None => bail!("doc2 missing datatype"),
+                | Some(t) => t,
+                | None => bail!("doc2 missing datatype"),
             };
             if type_ != type2 {
                 bail!("types are not equal\n{:?}\n   !=\n{:?}", type_, type2);
@@ -248,20 +249,20 @@ impl WitxtRunner<'_> {
         }
         for mod_ in doc.modules() {
             let mod2 = match doc2.module(&mod_.name) {
-                Some(m) => m,
-                None => bail!("doc2 missing module"),
+                | Some(m) => m,
+                | None => bail!("doc2 missing module"),
             };
             for import in mod_.imports() {
                 let import2 = match mod2.import(&import.name) {
-                    Some(i) => i,
-                    None => bail!("mod2 missing import"),
+                    | Some(i) => i,
+                    | None => bail!("mod2 missing import"),
                 };
                 assert_eq!(import, import2);
             }
             for func in mod_.funcs() {
                 let func2 = match mod2.func(&func.name) {
-                    Some(f) => f,
-                    None => bail!("mod2 missing func"),
+                    | Some(f) => f,
+                    | None => bail!("mod2 missing func"),
                 };
                 assert_eq!(func, func2);
             }
@@ -281,16 +282,16 @@ impl WitxtRunner<'_> {
 }
 
 struct AbiBindgen<'a> {
-    abi: std::slice::Iter<'a, (wast::Span, &'a str)>,
-    err: Option<anyhow::Error>,
+    abi:      std::slice::Iter<'a, (wast::Span, &'a str)>,
+    err:      Option<anyhow::Error>,
     contents: &'a str,
 }
 
 impl AbiBindgen<'_> {
     fn check(&mut self) -> Result<()> {
         match self.err.take() {
-            None => Ok(()),
-            Some(e) => Err(e),
+            | None => Ok(()),
+            | Some(e) => Err(e),
         }
     }
 
@@ -299,8 +300,8 @@ impl AbiBindgen<'_> {
             return;
         }
         match self.abi.next() {
-            Some((_, s)) if *s == name => {}
-            Some((span, s)) => {
+            | Some((_, s)) if *s == name => {},
+            | Some((span, s)) => {
                 let (line, col) = span.linecol_in(self.contents);
                 self.err = Some(anyhow!(
                     "line {}:{} - expected `{}` found `{}`",
@@ -309,13 +310,13 @@ impl AbiBindgen<'_> {
                     name,
                     s,
                 ));
-            }
-            None => {
+            },
+            | None => {
                 self.err = Some(anyhow!(
                     "extra instruction `{}` found when none was expected",
                     name
                 ));
-            }
+            },
         }
     }
 }
@@ -330,60 +331,60 @@ impl wazzi_witx::Bindgen for AbiBindgen<'_> {
     ) {
         use wazzi_witx::Instruction::*;
         match inst {
-            GetArg { nth } => self.assert(&format!("get-arg{}", nth)),
-            AddrOf => self.assert("addr-of"),
-            I32FromChar => self.assert("i32.from_char"),
-            I64FromU64 => self.assert("i64.from_u64"),
-            I64FromS64 => self.assert("i64.from_s64"),
-            I32FromU32 => self.assert("i32.from_u32"),
-            I32FromS32 => self.assert("i32.from_s32"),
-            I32FromUsize => self.assert("i32.from_usize"),
-            I32FromU16 => self.assert("i32.from_u16"),
-            I32FromS16 => self.assert("i32.from_s16"),
-            I32FromU8 => self.assert("i32.from_u8"),
-            I32FromS8 => self.assert("i32.from_s8"),
-            I32FromChar8 => self.assert("i32.from_char8"),
-            I32FromPointer => self.assert("i32.from_pointer"),
-            I32FromConstPointer => self.assert("i32.from_const_pointer"),
-            I32FromHandle { .. } => self.assert("i32.from_handle"),
-            ListPointerLength => self.assert("list.pointer_length"),
-            ListFromPointerLength { .. } => self.assert("list.from_pointer_length"),
-            F32FromIf32 => self.assert("f32.from_if32"),
-            F64FromIf64 => self.assert("f64.from_if64"),
-            CallWasm { .. } => self.assert("call.wasm"),
-            CallInterface { .. } => self.assert("call.interface"),
-            S8FromI32 => self.assert("s8.from_i32"),
-            U8FromI32 => self.assert("u8.from_i32"),
-            S16FromI32 => self.assert("s16.from_i32"),
-            U16FromI32 => self.assert("u16.from_i32"),
-            S32FromI32 => self.assert("s32.from_i32"),
-            U32FromI32 => self.assert("u32.from_i32"),
-            S64FromI64 => self.assert("s64.from_i64"),
-            U64FromI64 => self.assert("u64.from_i64"),
-            CharFromI32 => self.assert("char.from_i32"),
-            Char8FromI32 => self.assert("char8.from_i32"),
-            UsizeFromI32 => self.assert("usize.from_i32"),
-            If32FromF32 => self.assert("if32.from_f32"),
-            If64FromF64 => self.assert("if64.from_f64"),
-            HandleFromI32 { .. } => self.assert("handle.from_i32"),
-            PointerFromI32 { .. } => self.assert("pointer.from_i32"),
-            ConstPointerFromI32 { .. } => self.assert("const_pointer.from_i32"),
-            ReturnPointerGet { n } => self.assert(&format!("return_pointer.get{}", n)),
-            ResultLift => self.assert("result.lift"),
-            ResultLower { .. } => self.assert("result.lower"),
-            EnumLift { .. } => self.assert("enum.lift"),
-            EnumLower { .. } => self.assert("enum.lower"),
-            TupleLift { .. } => self.assert("tuple.lift"),
-            TupleLower { .. } => self.assert("tuple.lower"),
-            ReuseReturn => self.assert("reuse_return"),
-            Load { .. } => self.assert("load"),
-            Store { .. } => self.assert("store"),
-            Return { .. } => self.assert("return"),
-            VariantPayload => self.assert("variant-payload"),
-            I32FromBitflags { .. } => self.assert("i32.from_bitflags"),
-            BitflagsFromI32 { .. } => self.assert("bitflags.from_i32"),
-            I64FromBitflags { .. } => self.assert("i64.from_bitflags"),
-            BitflagsFromI64 { .. } => self.assert("bitflags.from_i64"),
+            | GetArg { nth } => self.assert(&format!("get-arg{}", nth)),
+            | AddrOf => self.assert("addr-of"),
+            | I32FromChar => self.assert("i32.from_char"),
+            | I64FromU64 => self.assert("i64.from_u64"),
+            | I64FromS64 => self.assert("i64.from_s64"),
+            | I32FromU32 => self.assert("i32.from_u32"),
+            | I32FromS32 => self.assert("i32.from_s32"),
+            | I32FromUsize => self.assert("i32.from_usize"),
+            | I32FromU16 => self.assert("i32.from_u16"),
+            | I32FromS16 => self.assert("i32.from_s16"),
+            | I32FromU8 => self.assert("i32.from_u8"),
+            | I32FromS8 => self.assert("i32.from_s8"),
+            | I32FromChar8 => self.assert("i32.from_char8"),
+            | I32FromPointer => self.assert("i32.from_pointer"),
+            | I32FromConstPointer => self.assert("i32.from_const_pointer"),
+            | I32FromHandle { .. } => self.assert("i32.from_handle"),
+            | ListPointerLength => self.assert("list.pointer_length"),
+            | ListFromPointerLength { .. } => self.assert("list.from_pointer_length"),
+            | F32FromIf32 => self.assert("f32.from_if32"),
+            | F64FromIf64 => self.assert("f64.from_if64"),
+            | CallWasm { .. } => self.assert("call.wasm"),
+            | CallInterface { .. } => self.assert("call.interface"),
+            | S8FromI32 => self.assert("s8.from_i32"),
+            | U8FromI32 => self.assert("u8.from_i32"),
+            | S16FromI32 => self.assert("s16.from_i32"),
+            | U16FromI32 => self.assert("u16.from_i32"),
+            | S32FromI32 => self.assert("s32.from_i32"),
+            | U32FromI32 => self.assert("u32.from_i32"),
+            | S64FromI64 => self.assert("s64.from_i64"),
+            | U64FromI64 => self.assert("u64.from_i64"),
+            | CharFromI32 => self.assert("char.from_i32"),
+            | Char8FromI32 => self.assert("char8.from_i32"),
+            | UsizeFromI32 => self.assert("usize.from_i32"),
+            | If32FromF32 => self.assert("if32.from_f32"),
+            | If64FromF64 => self.assert("if64.from_f64"),
+            | HandleFromI32 { .. } => self.assert("handle.from_i32"),
+            | PointerFromI32 { .. } => self.assert("pointer.from_i32"),
+            | ConstPointerFromI32 { .. } => self.assert("const_pointer.from_i32"),
+            | ReturnPointerGet { n } => self.assert(&format!("return_pointer.get{}", n)),
+            | ResultLift => self.assert("result.lift"),
+            | ResultLower { .. } => self.assert("result.lower"),
+            | EnumLift { .. } => self.assert("enum.lift"),
+            | EnumLower { .. } => self.assert("enum.lower"),
+            | TupleLift { .. } => self.assert("tuple.lift"),
+            | TupleLower { .. } => self.assert("tuple.lower"),
+            | ReuseReturn => self.assert("reuse_return"),
+            | Load { .. } => self.assert("load"),
+            | Store { .. } => self.assert("store"),
+            | Return { .. } => self.assert("return"),
+            | VariantPayload => self.assert("variant-payload"),
+            | I32FromBitflags { .. } => self.assert("i32.from_bitflags"),
+            | BitflagsFromI32 { .. } => self.assert("bitflags.from_i32"),
+            | I64FromBitflags { .. } => self.assert("i64.from_bitflags"),
+            | BitflagsFromI64 { .. } => self.assert("bitflags.from_i64"),
         }
         for _ in 0..inst.results_len() {
             results.push(());
@@ -440,30 +441,30 @@ impl<'a> Parse<'a> for Witxt<'a> {
 enum WitxtDirective<'a> {
     Witx(Witx<'a>),
     AssertInvalid {
-        span: wast::Span,
-        witx: Witx<'a>,
+        span:    wast::Span,
+        witx:    Witx<'a>,
         message: &'a str,
     },
     AssertRepresentable {
         span: wast::Span,
         repr: RepEquality,
-        t1: (wast::Id<'a>, &'a str),
-        t2: (wast::Id<'a>, &'a str),
+        t1:   (wast::Id<'a>, &'a str),
+        t2:   (wast::Id<'a>, &'a str),
     },
     AssertAbi {
-        span: wast::Span,
-        witx: Witx<'a>,
+        span:           wast::Span,
+        witx:           Witx<'a>,
         wasm_signature: (Vec<WasmType>, Vec<WasmType>),
-        wasm: Abi<'a>,
-        interface: Abi<'a>,
+        wasm:           Abi<'a>,
+        interface:      Abi<'a>,
     },
 }
 
 impl WitxtDirective<'_> {
     fn span(&self) -> wast::Span {
         match self {
-            WitxtDirective::Witx(w) => w.span,
-            WitxtDirective::AssertInvalid { span, .. }
+            | WitxtDirective::Witx(w) => w.span,
+            | WitxtDirective::AssertInvalid { span, .. }
             | WitxtDirective::AssertAbi { span, .. }
             | WitxtDirective::AssertRepresentable { span, .. } => *span,
         }
@@ -555,8 +556,8 @@ fn parse_wasmtype(p: Parser<'_>) -> parser::Result<WasmType> {
 
 struct Witx<'a> {
     span: wast::Span,
-    id: Option<wast::Id<'a>>,
-    def: WitxDef<'a>,
+    id:   Option<wast::Id<'a>>,
+    def:  WitxDef<'a>,
 }
 
 enum WitxDef<'a> {
@@ -567,7 +568,7 @@ enum WitxDef<'a> {
 impl Witx<'_> {
     fn document(&self, contents: &str, file: &Path) -> Result<wazzi_witx::Document> {
         match &self.def {
-            WitxDef::Inline(decls) => {
+            | WitxDef::Inline(decls) => {
                 let mut validator = wazzi_witx::DocValidation::new();
                 let mut definitions = Vec::new();
                 for decl in decls {
@@ -577,12 +578,12 @@ impl Witx<'_> {
                         .map_err(WitxError::Validation)?;
                 }
                 Ok(validator.into_document(definitions))
-            }
-            WitxDef::Fs(paths) => {
+            },
+            | WitxDef::Fs(paths) => {
                 let parent = file.parent().unwrap();
                 let paths = paths.iter().map(|p| parent.join(p)).collect::<Vec<_>>();
                 Ok(wazzi_witx::load(&paths)?)
-            }
+            },
         }
     }
 }

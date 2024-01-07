@@ -1,5 +1,3 @@
-use witx::TypeRef;
-
 pub(crate) fn from_witx_int_repr(x: &witx::IntRepr) -> wazzi_executor_capnp::type_::IntRepr {
     match x {
         | witx::IntRepr::U8 => wazzi_executor_capnp::type_::IntRepr::U8,
