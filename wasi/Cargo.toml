@@ -6,6 +6,7 @@ publish.workspace = true
 
 [dependencies]
 wazzi-executor.workspace = true
+wazzi-executor-capnp.workspace = true
 wazzi-runners.workspace = true
 wazzi-witx.workspace = true
 

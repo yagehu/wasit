@@ -217,7 +217,7 @@ void handle_call(
     capn_free(&capn);
 }
 
-void * handle_param(
+void * handle_param_pre(
     struct resource_map_entry ** resource_map,
     struct ParamSpec spec,
     int32_t * len

@@ -1,4 +1,3 @@
-use wazzi_executor::wazzi_executor_capnp;
 use witx::TypeRef;
 
 pub(crate) fn from_witx_int_repr(x: &witx::IntRepr) -> wazzi_executor_capnp::type_::IntRepr {

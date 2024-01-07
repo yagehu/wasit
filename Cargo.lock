@@ -639,8 +639,8 @@ name = "wazzi-executor"
 version = "0.1.0"
 dependencies = [
  "capnp",
- "cc",
  "wazzi-executor-capnp",
+ "wazzi-executor-capnp-c",
  "wazzi-runners",
 ]
 
@@ -680,6 +680,7 @@ dependencies = [
  "tempfile",
  "tracing",
  "wazzi-executor",
+ "wazzi-executor-capnp",
  "wazzi-runners",
  "wazzi-witx",
 ]

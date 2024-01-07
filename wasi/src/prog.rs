@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use color_eyre::eyre::{self, Context};
 use serde::{Deserialize, Serialize};
-use wazzi_executor::{wazzi_executor_capnp, RunningExecutor};
+use wazzi_executor::RunningExecutor;
 
 use crate::{
     call::{CallParam, StringValue},

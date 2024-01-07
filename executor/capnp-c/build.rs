@@ -3,6 +3,9 @@ use std::{env, fs, path::PathBuf, process};
 fn main() {
     println!("cargo:rerun-if-changed=../wazzi-executor.capnp");
 
+    let root_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
+        .join("..")
+        .join("..");
     let target_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
         .join("..")
         .join("..")
@@ -17,6 +20,26 @@ fn main() {
         .canonicalize()
         .unwrap();
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap())
+        .canonicalize()
+        .unwrap();
+    let clang_path = root_dir
+        .join("wasi-sdk")
+        .join("build")
+        .join("install")
+        .join("opt")
+        .join("wasi-sdk")
+        .join("bin")
+        .join("clang")
+        .canonicalize()
+        .unwrap();
+    let ar_path = root_dir
+        .join("wasi-sdk")
+        .join("build")
+        .join("install")
+        .join("opt")
+        .join("wasi-sdk")
+        .join("bin")
+        .join("llvm-ar")
         .canonicalize()
         .unwrap();
 
@@ -48,10 +71,41 @@ fn main() {
     )
     .unwrap();
 
-    cc::Build::new()
-        .file(out_dir.join("wazzi-executor.capnp.c"))
-        .include(c_capnproto_path.join("lib"))
-        .compile("wazzi_executor_capnp");
+    assert!(process::Command::new(clang_path)
+        .arg("--sysroot")
+        .arg(
+            root_dir
+                .join("wasi-sdk")
+                .join("build")
+                .join("install")
+                .join("opt")
+                .join("wasi-sdk")
+                .join("share")
+                .join("wasi-sysroot"),
+        )
+        .args([out_dir.join("wazzi-executor.capnp.c")])
+        .arg("-I")
+        .arg(c_capnproto_path.join("lib"))
+        .arg("-lwazzi_executor_capnp")
+        .arg("-L")
+        .arg(&target_dir)
+        .arg("-c")
+        .arg("-o")
+        .arg(out_dir.join("wazzi_executor_capnp.o"))
+        .spawn()
+        .unwrap()
+        .wait()
+        .unwrap()
+        .success());
+    assert!(process::Command::new(ar_path)
+        .arg("r")
+        .arg(out_dir.join("libwazzi_executor_capnp.a"))
+        .arg(out_dir.join("wazzi_executor_capnp.o"))
+        .spawn()
+        .unwrap()
+        .wait()
+        .unwrap()
+        .success());
     fs::copy(
         out_dir.join("libwazzi_executor_capnp.a"),
         target_dir.join("libwazzi_executor_capnp.a"),
