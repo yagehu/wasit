@@ -44,22 +44,26 @@ impl From<&str> for Id {
 
 #[derive(Debug, Clone)]
 pub struct Document {
-    definitions:   Vec<Definition>,
-    entries:       HashMap<Id, Entry>,
-    resources_map: HashMap<Id, NodeIndex>,
-    resources:     DiGraph<Resource, ResourceRelation>,
+    definitions: Vec<Definition>,
+    entries:     HashMap<Id, Entry>,
+
+    typename_resource_map: HashMap<Id, NodeIndex>,
+    resources_map:         HashMap<Id, NodeIndex>,
+    resources:             DiGraph<Resource, ResourceRelation>,
 }
 
 impl Document {
     pub(crate) fn new(
         definitions: Vec<Definition>,
         entries: HashMap<Id, Entry>,
+        typename_resource_map: HashMap<Id, NodeIndex>,
         resources_map: HashMap<Id, NodeIndex>,
         resources: DiGraph<Resource, ResourceRelation>,
     ) -> Self {
         Document {
             definitions,
             entries,
+            typename_resource_map,
             resources_map,
             resources,
         }
@@ -67,6 +71,12 @@ impl Document {
 
     pub fn resource(&self, name: &Id) -> Option<&Resource> {
         let id = *self.resources_map.get(name)?;
+
+        self.resources.node_weight(id)
+    }
+
+    pub fn typename_resource(&self, name: &Id) -> Option<&Resource> {
+        let id = *self.typename_resource_map.get(name)?;
 
         self.resources.node_weight(id)
     }
@@ -210,6 +220,14 @@ impl TypeRef {
             | TypeRef::Value(_) => false,
         }
     }
+
+    pub fn resource<'a>(&self, doc: &'a Document) -> Option<&'a Resource> {
+        eprintln!("{:#?}", self);
+        match self {
+            | TypeRef::Name(ty) => doc.typename_resource(&ty.name),
+            | TypeRef::Value(_) => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -220,10 +238,9 @@ pub struct ResourceRef {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct NamedType {
-    pub name:     Id,
-    pub tref:     TypeRef,
-    pub docs:     String,
-    pub resource: Option<ResourceRef>,
+    pub name: Id,
+    pub tref: TypeRef,
+    pub docs: String,
 }
 
 impl NamedType {
@@ -379,10 +396,9 @@ pub enum RecordKind {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RecordMember {
-    pub name:     Id,
-    pub tref:     TypeRef,
-    pub docs:     String,
-    pub resource: Option<ResourceRef>,
+    pub name: Id,
+    pub tref: TypeRef,
+    pub docs: String,
 }
 
 impl RecordDatatype {
@@ -608,7 +624,7 @@ pub struct InterfaceFunc {
 }
 
 impl InterfaceFunc {
-    pub fn unpack_expected_result(&self) -> Vec<(TypeRef, Option<ResourceRef>)> {
+    pub fn unpack_expected_result(&self) -> Vec<TypeRef> {
         let mut v = Vec::new();
 
         if let Some(result) = self.results.first() {
@@ -623,17 +639,15 @@ impl InterfaceFunc {
 
                         if let Some(ok_tref) = ok_tref {
                             match ok_tref {
-                                | TypeRef::Name(named_type) => {
-                                    v.push((named_type.tref.clone(), named_type.resource.clone()))
-                                },
+                                | TypeRef::Name(named_type) => v.push(named_type.tref.clone()),
                                 | TypeRef::Value(ty) => match ty.as_ref() {
                                     | Type::Record(record) if record.kind == RecordKind::Tuple => {
                                         for member in &record.members {
-                                            v.push((member.tref.clone(), member.resource.clone()));
+                                            v.push(member.tref.clone());
                                         }
                                     },
                                     | _ => {
-                                        v.push((ok_tref.clone(), None));
+                                        v.push(ok_tref.clone());
                                     },
                                 },
                             }
@@ -650,10 +664,9 @@ impl InterfaceFunc {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct InterfaceFuncParam {
-    pub name:     Id,
-    pub tref:     TypeRef,
-    pub docs:     String,
-    pub resource: Option<ResourceRef>,
+    pub name: Id,
+    pub tref: TypeRef,
+    pub docs: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

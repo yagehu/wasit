@@ -53,13 +53,17 @@ mod kw {
     wast::custom_keyword!(usize);
     wast::custom_keyword!(variant);
     wast::custom_keyword!(bool_ = "bool");
+
+    wast::custom_keyword!(r#type = "type");
+    wast::custom_keyword!(resource);
 }
 
 mod annotation {
     wast::annotation!(interface);
     wast::annotation!(witx);
+
     wast::annotation!(alloc);
-    wast::annotation!(resource);
+    wast::annotation!(r#type = "type");
 }
 
 impl Parse<'_> for BuiltinType {
@@ -199,6 +203,7 @@ impl<'a, T: Parse<'a>> Parse<'a> for Documented<'a, T> {
         let _r1 = parser.register_annotation("interface");
         let _r1 = parser.register_annotation("alloc");
         let _r1 = parser.register_annotation("resource");
+        let _r1 = parser.register_annotation("type");
         let comments = parser.parse()?;
         let item = parser.parse()?;
         Ok(Documented { comments, item })
@@ -244,6 +249,7 @@ pub enum DeclSyntax<'a> {
     Typename(TypenameSyntax<'a>),
     Module(ModuleSyntax<'a>),
     Const(Documented<'a, ConstSyntax<'a>>),
+    Resource(ResourceSyntax<'a>),
 }
 
 impl<'a> Parse<'a> for DeclSyntax<'a> {
@@ -255,6 +261,8 @@ impl<'a> Parse<'a> for DeclSyntax<'a> {
             Ok(DeclSyntax::Typename(parser.parse()?))
         } else if l.peek::<annotation::witx>() {
             Ok(DeclSyntax::Const(parser.parse()?))
+        } else if l.peek::<kw::resource>() {
+            Ok(DeclSyntax::Resource(parser.parse()?))
         } else {
             Err(l.error())
         }
@@ -263,9 +271,8 @@ impl<'a> Parse<'a> for DeclSyntax<'a> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypenameSyntax<'a> {
-    pub ident:    wast::Id<'a>,
-    pub def:      TypedefSyntax<'a>,
-    pub resource: Option<ResourceSyntax<'a>>,
+    pub ident: wast::Id<'a>,
+    pub def:   TypedefSyntax<'a>,
 }
 
 impl<'a> Parse<'a> for TypenameSyntax<'a> {
@@ -273,17 +280,8 @@ impl<'a> Parse<'a> for TypenameSyntax<'a> {
         parser.parse::<kw::typename>()?;
         let ident = parser.parse()?;
         let def = parser.parse()?;
-        let resource = if parser.peek2::<annotation::resource>() {
-            Some(parser.parse()?)
-        } else {
-            None
-        };
 
-        Ok(TypenameSyntax {
-            ident,
-            def,
-            resource,
-        })
+        Ok(TypenameSyntax { ident, def })
     }
 }
 
@@ -421,20 +419,14 @@ impl<'a> Parse<'a> for TupleSyntax<'a> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TupleMemberSyntax<'a> {
-    pub type_:    TypedefSyntax<'a>,
-    pub resource: Option<ResourceSyntax<'a>>,
+    pub type_: TypedefSyntax<'a>,
 }
 
 impl<'a> Parse<'a> for TupleMemberSyntax<'a> {
     fn parse(parser: Parser<'a>) -> Result<Self> {
         let type_ = parser.parse()?;
-        let resource = if parser.peek2::<annotation::resource>() {
-            Some(parser.parse()?)
-        } else {
-            None
-        };
 
-        Ok(TupleMemberSyntax { type_, resource })
+        Ok(TupleMemberSyntax { type_ })
     }
 }
 
@@ -544,32 +536,37 @@ impl<'a> Parse<'a> for AllocSyntax<'a> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResourceSyntax<'a> {
-    pub name:  wast::Id<'a>,
-    pub alloc: Option<AllocSyntax<'a>>,
+    pub ident:     wast::Id<'a>,
+    pub type_name: wast::Id<'a>,
+    pub alloc:     Option<AllocSyntax<'a>>,
 }
 
 impl<'a> Parse<'a> for ResourceSyntax<'a> {
     fn parse(parser: Parser<'a>) -> Result<Self> {
-        parser.parens(|parser| {
-            parser.parse::<annotation::resource>()?;
+        parser.parse::<kw::resource>()?;
 
-            let name = parser.parse()?;
-            let alloc = if parser.peek2::<annotation::alloc>() {
-                Some(parser.parse()?)
-            } else {
-                None
-            };
+        let ident = parser.parse()?;
+        let type_name = parser.parens(|parser| {
+            parser.parse::<kw::r#type>()?;
+            parser.parse()
+        })?;
+        let alloc = match parser.peek2::<annotation::alloc>() {
+            | false => None,
+            | true => Some(parser.parse()?),
+        };
 
-            Ok(ResourceSyntax { name, alloc })
+        Ok(Self {
+            ident,
+            type_name,
+            alloc,
         })
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FieldSyntax<'a> {
-    pub name:     wast::Id<'a>,
-    pub type_:    TypedefSyntax<'a>,
-    pub resource: Option<ResourceSyntax<'a>>,
+    pub name:  wast::Id<'a>,
+    pub type_: TypedefSyntax<'a>,
 }
 
 impl<'a> Parse<'a> for FieldSyntax<'a> {
@@ -579,17 +576,8 @@ impl<'a> Parse<'a> for FieldSyntax<'a> {
 
             let name: wast::Id = p.parse()?;
             let type_ = p.parse()?;
-            let resource = if p.peek2::<annotation::resource>() {
-                Some(p.parse()?)
-            } else {
-                None
-            };
 
-            Ok(FieldSyntax {
-                name,
-                type_,
-                resource,
-            })
+            Ok(FieldSyntax { name, type_ })
         })
     }
 }
@@ -825,25 +813,15 @@ impl<'a> Parse<'a> for InterfaceFuncField<'a> {
                 parser.parse::<kw::param>()?;
 
                 Ok(InterfaceFuncField::Param(FieldSyntax {
-                    name:     parser.parse()?,
-                    type_:    parser.parse()?,
-                    resource: if p.peek2::<annotation::resource>() {
-                        Some(p.parse()?)
-                    } else {
-                        None
-                    },
+                    name:  parser.parse()?,
+                    type_: parser.parse()?,
                 }))
             } else if l.peek::<kw::result>() {
                 parser.parse::<kw::result>()?;
 
                 Ok(InterfaceFuncField::Result(FieldSyntax {
-                    name:     parser.parse()?,
-                    type_:    parser.parse()?,
-                    resource: if p.peek2::<annotation::resource>() {
-                        Some(p.parse()?)
-                    } else {
-                        None
-                    },
+                    name:  parser.parse()?,
+                    type_: parser.parse()?,
                 }))
             } else if l.peek::<annotation::witx>() {
                 parser.parse::<annotation::witx>()?;

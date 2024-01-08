@@ -84,7 +84,13 @@ impl RunningExecutor {
     pub fn call(
         &mut self,
         call: wazzi_executor_capnp::call_request::Reader,
-    ) -> Result<(), capnp::Error> {
+    ) -> Result<
+        capnp::message::TypedReader<
+            capnp::serialize::OwnedSegments,
+            wazzi_executor_capnp::call_response::Owned,
+        >,
+        capnp::Error,
+    > {
         let mut message = capnp::message::Builder::new_default();
         let mut request_builder = message.init_root::<wazzi_executor_capnp::request::Builder>();
 
@@ -96,7 +102,7 @@ impl RunningExecutor {
             capnp::message::DEFAULT_READER_OPTIONS,
         )?;
 
-        Ok(())
+        Ok(message.into_typed())
     }
 
     pub fn decl(

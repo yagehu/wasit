@@ -147,10 +147,6 @@ impl NamedType {
 
         v.extend(body);
 
-        if let Some(resource) = &self.resource {
-            v.push(resource.to_sexpr());
-        }
-
         SExpr::docs(&self.docs, vec![SExpr::Vec(v)])
     }
 }
@@ -208,23 +204,8 @@ impl RecordDatatype {
 
                 for m in self.members.iter() {
                     tuple.append(&mut SExpr::docs(&m.docs, m.tref.to_sexpr()));
-
-                    if let Some(resource) = &m.resource {
-                        let mut v = vec![
-                            SExpr::annot("resource"),
-                            SExpr::ident(resource.name.as_str()),
-                        ];
-
-                        if let Some(alloc) = &resource.alloc {
-                            v.push(SExpr::Vec(vec![
-                                SExpr::annot("alloc"),
-                                SExpr::ident(alloc.as_str()),
-                            ]));
-                        }
-
-                        tuple.push(SExpr::Vec(v));
-                    }
                 }
+
                 SExpr::Vec(tuple)
             },
             | RecordKind::Bitflags(repr) => {
@@ -250,10 +231,6 @@ impl RecordDatatype {
                         let mut v = vec![SExpr::word("field"), m.name.to_sexpr()];
 
                         v.append(&mut m.tref.to_sexpr());
-
-                        if let Some(resource) = &m.resource {
-                            v.push(resource.to_sexpr());
-                        }
 
                         SExpr::docs(&m.docs, vec![SExpr::Vec(v)])
                     })
@@ -361,10 +338,6 @@ impl InterfaceFunc {
                 let mut v = vec![SExpr::word("param"), f.name.to_sexpr()];
 
                 v.append(&mut f.tref.to_sexpr());
-
-                if let Some(resource) = &f.resource {
-                    v.push(resource.to_sexpr());
-                }
 
                 SExpr::docs(&f.docs, vec![SExpr::Vec(v)])
             })

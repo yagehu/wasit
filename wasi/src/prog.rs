@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use wazzi_executor::RunningExecutor;
 
 use crate::{
-    call::{CallParam, StringValue},
+    call::{CallParam, CallResult, StringValue},
     capnp_mappers,
     Call,
     Value,
@@ -59,6 +59,7 @@ impl ProgSeed {
                 message_builder.init_root::<wazzi_executor_capnp::call_request::Builder>();
 
             match call.func.as_str() {
+                | "fd_write" => call_builder.set_func(wazzi_executor_capnp::Func::FdWrite),
                 | "path_open" => call_builder.set_func(wazzi_executor_capnp::Func::PathOpen),
                 | _ => panic!(),
             }
@@ -87,6 +88,7 @@ impl ProgSeed {
                         resource_builder.set_id(resource.id);
                     },
                     | (None, &CallParam::Resource(resource_id)) => {
+                        eprintln!("{} {:#?}", func_spec.name.as_str(), param_spec);
                         panic!(
                             "resource {resource_id} ({}) is not specified as a resource",
                             param_spec.name.as_str()
@@ -143,9 +145,45 @@ impl ProgSeed {
                 }
             }
 
-            executor
+            let results = func_spec.unpack_expected_result();
+            let mut results_builder = call_builder.reborrow().init_results(results.len() as u32);
+
+            for (i, (result_tref, resource_ref)) in results.iter().enumerate() {
+                let result = &call.results[i];
+                let mut result_builder = results_builder.reborrow().get(i as u32);
+                let mut type_builder = result_builder.reborrow().init_type();
+
+                capnp_mappers::build_type(result_tref.type_().as_ref(), &mut type_builder);
+
+                match result {
+                    | &CallResult::Resource(resource_id) => {
+                        result_builder.reborrow().set_resource(resource_id)
+                    },
+                }
+            }
+
+            let mut handle_results_ok = || {
+                for (i, (result_tref, resource_ref)) in results.iter().enumerate() {
+                    match &call.results[i] {
+                        | &CallResult::Resource(resource_id) => {
+                            resource_ctx.insert(resource_id, Resource { id: resource_id })
+                        },
+                    }
+                }
+            };
+            let response = executor
                 .call(call_builder.into_reader())
                 .wrap_err("failed to call function in executor")?;
+            let response = response.get()?;
+            let ret = response.get_return()?;
+
+            match ret.which()? {
+                | wazzi_executor_capnp::call_return::Which::None(_) => handle_results_ok(),
+                | wazzi_executor_capnp::call_return::Which::Errno(errno) if errno == 0 => {
+                    handle_results_ok()
+                },
+                | wazzi_executor_capnp::call_return::Which::Errno(errno) => todo!(),
+            }
         }
 
         Ok(Prog {

@@ -43,12 +43,55 @@ fn executor_bin() -> PathBuf {
 }
 
 #[test]
-#[timeout(500)]
 fn creat() {
     let spec = spec();
     let path = [env!("CARGO_MANIFEST_DIR"), "..", "seeds", "00-creat.json"]
         .into_iter()
         .collect::<PathBuf>();
+    let f = fs::OpenOptions::new().read(true).open(&path).unwrap();
+    let seed: ProgSeed = serde_json::from_reader(f).unwrap();
+    let base_dir = tempdir().unwrap();
+    let wasmtime = wazzi_runners::Wasmtime::new("wasmtime");
+    let stderr = Arc::new(Mutex::new(Vec::new()));
+    let mut executor = wazzi_executor::ExecutorRunner::new(
+        wasmtime,
+        executor_bin(),
+        Some(base_dir.path().to_owned()),
+    )
+    .run(stderr.clone())
+    .expect("failed to run executor");
+
+    let execute_result = seed.execute(&mut executor, &spec);
+
+    executor.kill();
+
+    let stderr_str = String::from_utf8(stderr.try_lock().unwrap().deref().clone()).unwrap();
+
+    assert!(
+        execute_result.is_ok(),
+        "{:#?}\n{}",
+        execute_result,
+        stderr_str
+    );
+
+    base_dir.path().join("a").canonicalize().expect(&format!(
+        "00-creat seed should create file `a`\nexecutor stderr:\n{}\n",
+        stderr_str,
+    ));
+}
+
+#[test]
+#[timeout(300)]
+fn creat_write() {
+    let spec = spec();
+    let path = [
+        env!("CARGO_MANIFEST_DIR"),
+        "..",
+        "seeds",
+        "01-creat_write.json",
+    ]
+    .into_iter()
+    .collect::<PathBuf>();
     let f = fs::OpenOptions::new().read(true).open(&path).unwrap();
     let seed: ProgSeed = serde_json::from_reader(f).unwrap();
     let base_dir = tempdir().unwrap();

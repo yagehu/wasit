@@ -282,6 +282,8 @@
 
 ;;; A file descriptor handle.
 (typename $fd (handle))
+(resource $fd (type $fd))
+;;(resource $filefd (type $fd) (@in $fd))
 
 ;;; A region of memory for scatter/gather reads.
 (typename $iovec
@@ -294,21 +296,19 @@
 )
 
 ;;; A region of memory for scatter/gather writes.
+(typename $write_buf (@witx const_pointer u8))
+(typename $write_buf_len $size)
 (typename $ciovec
   (record
     ;;; The address of the buffer to be written.
-    (field $buf
-      (@witx const_pointer u8)
-      (@resource $write_buf)
-    )
+    (field $buf $write_buf)
     ;;; The length of the buffer to be written.
-    (field $buf_len
-      $size
-      (@resource $write_buf_size (@alloc $write_buf))
-    )
+    (field $buf_len $write_buf_len)
   )
-  (@resource $ciovec)
 )
+(resource $write_buf     (type $write_buf))
+(resource $write_buf_len (type $write_buf_len) (@alloc $write_buf))
+(resource $ciovec        (type $ciovec))
 
 (typename $iovec_array (list $iovec))
 (typename $ciovec_array (list $ciovec))
@@ -765,4 +765,3 @@
     $prestat_dir
   )
 )
-

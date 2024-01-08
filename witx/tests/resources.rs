@@ -1,4 +1,4 @@
-use wazzi_witx::Id;
+use wazzi_witx::{Id, Resource};
 
 fn document() -> wazzi_witx::Document {
     wazzi_witx::load(&[
@@ -27,10 +27,8 @@ fn argv() {
     let args_get = module.func(&Id::new("args_get")).unwrap();
     let args_sizes_get = module.func(&Id::new("args_sizes_get")).unwrap();
     let args_sizes_get_results = args_sizes_get.unpack_expected_result();
-    let argv_size_resource_ref = args_sizes_get_results[0].1.as_ref().unwrap();
-    let argv_buf_size_resource_ref = args_sizes_get_results[1].1.as_ref().unwrap();
-    let argv_size_resource = doc.resource(&argv_size_resource_ref.name).unwrap();
-    let argv_buf_size_resource = doc.resource(&argv_buf_size_resource_ref.name).unwrap();
+    let argv_size_resource = args_sizes_get_results[0].resource(&doc).unwrap();
+    let argv_buf_size_resource = args_sizes_get_results[1].resource(&doc).unwrap();
     let argv_size_can_fulfill = argv_size_resource.can_fulfill(&doc);
     let argv_buf_size_can_fulfill = argv_buf_size_resource.can_fulfill(&doc);
 
@@ -45,9 +43,9 @@ fn path_open() {
     let doc = document();
     let module = doc.module(&Id::new("wasi_snapshot_preview1")).unwrap();
     let path_open = module.func(&Id::new("path_open")).unwrap();
-    let fd = &path_open.params[0];
+    let fd = &path_open.params[0].tref.resource(&doc);
 
-    assert!(fd.resource.is_some());
+    assert!(fd.is_some());
 }
 
 #[test]
@@ -60,19 +58,23 @@ fn fd_write() {
         | wazzi_witx::Type::List(tref) => tref,
         | _ => panic!(),
     };
-    let ciovec_named_type = match ciovec_tref {
-        | wazzi_witx::TypeRef::Name(named_type) => named_type,
-        | _ => panic!(),
-    };
 
-    assert!(ciovec_named_type.resource.is_some());
+    assert!(ciovec_tref.resource(&doc).is_some());
 
-    let ciovec_record = match ciovec_named_type.type_().as_ref() {
+    let ciovec_record = match ciovec_tref.type_().as_ref() {
         | wazzi_witx::Type::Record(record) => record,
         | _ => panic!(),
     };
-    let buf_resource = ciovec_record.members[0].resource.as_ref().unwrap();
-    let buf_len_resource = ciovec_record.members[1].resource.as_ref().unwrap();
+    let buf_resource = ciovec_record.members[0].tref.resource(&doc).unwrap();
+    let buf_len_resource = ciovec_record.members[1].tref.resource(&doc).unwrap();
 
-    assert_eq!(buf_len_resource.alloc, Some(buf_resource.name.clone()));
+    let buf_len_can_fulfills = buf_len_resource.can_fulfill(&doc);
+
+    assert!(matches!(
+        buf_len_can_fulfills[0],
+        Resource {
+            name,
+            ..
+        } if name == &buf_resource.name,
+    ));
 }

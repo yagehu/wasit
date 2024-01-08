@@ -47,7 +47,6 @@ use crate::{
     RecordKind,
     RecordMember,
     Resource,
-    ResourceRef,
     ResourceRelation,
     Type,
     TypeRef,
@@ -179,17 +178,19 @@ impl IdentValidation {
 }
 
 pub struct ResourceValidationScope {
-    scope: IdentValidation,
-    map:   HashMap<Id, NodeIndex>,
-    graph: DiGraph<Resource, ResourceRelation>,
+    scope:        IdentValidation,
+    typename_map: HashMap<Id, NodeIndex>,
+    map:          HashMap<Id, NodeIndex>,
+    graph:        DiGraph<Resource, ResourceRelation>,
 }
 
 impl ResourceValidationScope {
     fn new() -> Self {
         Self {
-            scope: IdentValidation::new(),
-            map:   HashMap::new(),
-            graph: DiGraph::new(),
+            scope:        IdentValidation::new(),
+            typename_map: HashMap::new(),
+            map:          HashMap::new(),
+            graph:        DiGraph::new(),
         }
     }
 }
@@ -252,6 +253,7 @@ impl DocValidation {
         Document::new(
             defs,
             self.entries,
+            self.resource_scope.typename_map,
             self.resource_scope.map,
             self.resource_scope.graph,
         )
@@ -291,31 +293,10 @@ impl<'a> DocValidationScope<'a> {
                 let docs = comments.docs();
                 let tref =
                     self.validate_datatype(definitions, &decl.def, true, decl.ident.span())?;
-                let resource = match &decl.resource {
-                    | Some(resource_ref) => {
-                        let name = self.doc.resource_scope.scope.introduce(
-                            resource_ref.name.name(),
-                            self.location(resource_ref.name.span()),
-                        )?;
-                        let alloc = match &resource_ref.alloc {
-                            | None => None,
-                            | Some(alloc) => Some(
-                                self.doc
-                                    .resource_scope
-                                    .scope
-                                    .get(alloc.name.name(), self.location(alloc.name.span()))?,
-                            ),
-                        };
-
-                        Some(ResourceRef { name, alloc })
-                    },
-                    | None => None,
-                };
                 let rc_datatype = Rc::new(NamedType {
                     name: name.clone(),
                     tref,
                     docs,
-                    resource,
                 });
                 self.doc
                     .entries
@@ -362,6 +343,55 @@ impl<'a> DocValidationScope<'a> {
                     value: syntax.item.value,
                     docs: syntax.comments.docs(),
                 }));
+            },
+
+            | DeclSyntax::Resource(syntax) => {
+                let name = self
+                    .doc
+                    .resource_scope
+                    .scope
+                    .introduce(syntax.ident.name(), self.location(syntax.ident.span()))?;
+                let type_name = self.doc.scope.get(
+                    syntax.type_name.name(),
+                    self.location(syntax.type_name.span()),
+                )?;
+                let type_entry = self.doc.entries.get(&type_name).unwrap();
+                let named_type = match type_entry {
+                    | Entry::Typename(ty) => ty,
+                    | Entry::Module(_) => {
+                        return Err(ValidationError::WrongKindName {
+                            name:     type_name.as_str().to_owned(),
+                            location: self.location(syntax.type_name.span()),
+                            expected: "typename",
+                            got:      type_entry.kind(),
+                        });
+                    },
+                };
+                let named_type_rc = named_type.upgrade().unwrap();
+                let node_id = self.doc.resource_scope.graph.add_node(Resource {
+                    name: name.clone(),
+                    tref: TypeRef::Name(named_type_rc.clone()),
+                });
+
+                if let Some(alloc_syntax) = &syntax.alloc {
+                    let target = self.doc.resource_scope.scope.get(
+                        alloc_syntax.name.name(),
+                        self.location(alloc_syntax.name.span()),
+                    )?;
+                    let target_node_id = *self.doc.resource_scope.map.get(&target).unwrap();
+
+                    self.doc.resource_scope.graph.add_edge(
+                        node_id,
+                        target_node_id,
+                        ResourceRelation::Alloc,
+                    );
+                }
+
+                self.doc
+                    .resource_scope
+                    .typename_map
+                    .insert(named_type_rc.name.clone(), node_id);
+                self.doc.resource_scope.map.insert(name, node_id);
             },
         }
         Ok(())
@@ -487,55 +517,11 @@ impl<'a> DocValidationScope<'a> {
             .enumerate()
             .map(|(i, member)| {
                 let tref = self.validate_datatype(definitions, &member.type_, false, span)?;
-                let resource = if let Some(resource_syntax) = &member.resource {
-                    let resource_name = self.doc.resource_scope.scope.introduce(
-                        resource_syntax.name.name(),
-                        self.location(resource_syntax.name.span()),
-                    )?;
-                    let alloc = if let Some(alloc) = &resource_syntax.alloc {
-                        Some(
-                            self.doc
-                                .resource_scope
-                                .scope
-                                .get(alloc.name.name(), self.location(alloc.name.span()))?,
-                        )
-                    } else {
-                        None
-                    };
-
-                    let node_id = self.doc.resource_scope.graph.add_node(Resource {
-                        name: resource_name.clone(),
-                        tref: tref.clone(),
-                    });
-
-                    self.doc
-                        .resource_scope
-                        .map
-                        .insert(resource_name.clone(), node_id);
-
-                    if let Some(alloc) = &alloc {
-                        let alloc_resource_id = *self.doc.resource_scope.map.get(alloc).unwrap();
-
-                        self.doc.resource_scope.graph.add_edge(
-                            node_id,
-                            alloc_resource_id,
-                            ResourceRelation::Alloc,
-                        );
-                    }
-
-                    Some(ResourceRef {
-                        name: resource_name,
-                        alloc,
-                    })
-                } else {
-                    None
-                };
 
                 Ok(RecordMember {
                     name: Id::new(i.to_string()),
                     tref,
                     docs: String::new(),
-                    resource,
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -595,7 +581,6 @@ impl<'a> DocValidationScope<'a> {
                 name,
                 docs,
                 tref: self.doc.bool_ty.clone(),
-                resource: None,
             });
         }
         Ok(RecordDatatype {
@@ -620,32 +605,8 @@ impl<'a> DocValidationScope<'a> {
                 let tref =
                     self.validate_datatype(definitions, &f.item.type_, false, f.item.name.span())?;
                 let docs = f.comments.docs();
-                let resource = match &f.item.resource {
-                    | Some(resource_syntax) => {
-                        let name = self.doc.resource_scope.scope.introduce(
-                            resource_syntax.name.name(),
-                            self.location(resource_syntax.name.span()),
-                        )?;
-                        let alloc = match &resource_syntax.alloc {
-                            | Some(alloc_syntax) => Some(self.doc.resource_scope.scope.get(
-                                alloc_syntax.name.name(),
-                                self.location(alloc_syntax.name.span()),
-                            )?),
-                            | None => None,
-                        };
 
-                        Some(ResourceRef { name, alloc })
-                    },
-                    | None => None,
-                };
-
-                // huyage: resource
-                Ok(RecordMember {
-                    name,
-                    tref,
-                    docs,
-                    resource,
-                })
+                Ok(RecordMember { name, tref, docs })
             })
             .collect::<Result<Vec<RecordMember>, _>>()?;
 
@@ -872,26 +833,6 @@ impl<'a, 'b> ModuleValidation<'a, 'b> {
                             false,
                             f.item.name.span(),
                         )?;
-                        let resource = if let Some(resource_syntax) = &f.item.resource {
-                            let name = self.doc.doc.resource_scope.scope.introduce(
-                                resource_syntax.name.name(),
-                                self.doc.location(resource_syntax.name.span()),
-                            )?;
-                            let node_id = self.doc.doc.resource_scope.graph.add_node(Resource {
-                                name: name.clone(),
-                                tref: tref.clone(),
-                            });
-
-                            self.doc
-                                .doc
-                                .resource_scope
-                                .map
-                                .insert(name.clone(), node_id);
-
-                            Some(ResourceRef { name, alloc: None })
-                        } else {
-                            None
-                        };
 
                         Ok(InterfaceFuncParam {
                             name: argnames.introduce(
@@ -900,7 +841,6 @@ impl<'a, 'b> ModuleValidation<'a, 'b> {
                             )?,
                             tref,
                             docs: f.comments.docs(),
-                            resource,
                         })
                     })
                     .collect::<Result<Vec<_>, _>>()?;
@@ -915,40 +855,6 @@ impl<'a, 'b> ModuleValidation<'a, 'b> {
                             f.item.name.span(),
                         )?;
 
-                        // if let TypeRef::Value(ty) = &tref {
-                        //     match ty.as_ref() {
-                        //         | Type::Variant(variant) if variant.as_expected().is_some() => {
-                        //             let (ok_tref, _err_tref) = variant.as_expected().unwrap();
-
-                        //             if let Some(ok_tref) = ok_tref {
-                        //                 match ok_tref {
-                        //                     | TypeRef::Name(named_type) => {},
-                        //                     | TypeRef::Value(ty) => match ty.as_ref() {
-                        //                         | Type::Record(record) if record.is_tuple() => {
-                        //                             for member in &record.members {
-                        //                                 if let TypeRef::Name(named_type) =
-                        //                                     &member.tref
-                        //                                 {
-                        //                                     if let Some(resource) =
-                        //                                         &named_type.resource
-                        //                                     {
-                        //                                     }
-                        //                                 }
-                        //                             }
-                        //                         },
-                        //                         | _ => unimplemented!(),
-                        //                     },
-                        //                 }
-                        //             }
-                        //         },
-                        //         | _ => {
-                        //             if let Some(_resource_syntax) = &f.item.resource {
-                        //                 unimplemented!()
-                        //             }
-                        //         },
-                        //     }
-                        // }
-
                         Ok(InterfaceFuncParam {
                             name: argnames.introduce(
                                 f.item.name.name(),
@@ -956,7 +862,6 @@ impl<'a, 'b> ModuleValidation<'a, 'b> {
                             )?,
                             tref,
                             docs: f.comments.docs(),
-                            resource: None,
                         })
                     })
                     .collect::<Result<Vec<_>, _>>()?;

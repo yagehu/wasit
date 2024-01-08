@@ -58,6 +58,7 @@ pub enum CallParam {
 pub enum Value {
     String(StringValue),
     Bitflags(BitflagsValue),
+    Array(ArrayValue),
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Debug)]
@@ -88,3 +89,7 @@ pub enum BitflagsRepr {
     U32,
     U64,
 }
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Debug)]
+#[serde(rename_all = "snake_case")]
+pub struct ArrayValue(Vec<Value>);

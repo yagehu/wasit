@@ -24,20 +24,23 @@ struct resource_map_entry {
 
 noreturn void fail(const char* err);
 
+// Allocate some memory for the type and set its value.
 void * malloc_set_value(const struct Type type, const struct Value value, int32_t * len);
+
+void set_value_from_ptr(struct capn_segment **, struct Value *, const struct Type, void * ptr);
 
 void handle_decl(struct resource_map_entry ** resource_map, const struct DeclRequest);
 void handle_call(struct resource_map_entry ** resource_map, const struct CallRequest);
 
 void * handle_param_pre(struct resource_map_entry ** resource_map, struct ParamSpec spec, int32_t * len);
 void   handle_param_post(struct ParamSpec spec, void * ptr);
-void * result_pre(struct resource_map_entry ** resource_map, struct ResultSpec result);
-void handle_result_post(
+void * handle_result_pre(struct resource_map_entry ** resource_map, struct ResultSpec result);
+void   handle_result_post(
     struct resource_map_entry ** resource_map,
     struct capn_segment ** segment,
     struct ResultSpec spec,
     const size_t result_idx,
-    Result_list result_list,
+    CallResult_list call_result_list,
     void * ptr
 );
 
@@ -143,6 +146,62 @@ void * malloc_set_value(const struct Type type, const struct Value value, int32_
     }
 }
 
+void set_value_from_ptr(
+    struct capn_segment ** segment,
+    struct Value * value,
+    const struct Type type,
+    void * ptr
+) {
+    switch (type.which) {
+        case Type__bool: {
+            value->which = Value__bool;
+            value->_bool = * (bool *) ptr;
+
+            break;
+        }
+        case Type_bitflags: {
+            struct Type_Bitflags  bitflags_type;
+
+            read_Type_Bitflags(&bitflags_type, type.bitflags);
+
+            capn_list1 members      = capn_new_list1(*segment, capn_len(bitflags_type.members));
+            uint64_t   bitflags_int = 0;
+
+            switch (bitflags_type.repr) {
+                case Type_IntRepr_u8:
+                case Type_IntRepr_u16:
+                case Type_IntRepr_u32:
+                    bitflags_int = * (uint32_t *) ptr;
+                    break;
+                case Type_IntRepr_u64:
+                    bitflags_int = * (uint64_t *) ptr;
+                    break;
+            }
+
+            for (int i = 0; i < capn_len(bitflags_type.members); i++) {
+                capn_set1(members, i, bitflags_int | 0x1);
+                bitflags_int >>= 1;
+            }
+
+            struct Value_Bitflags bitflags_value = {
+                .members = members,
+            };
+
+            value->which = Value_bitflags;
+            write_Value_Bitflags(&bitflags_value, value->bitflags);
+
+            break;
+        }
+        case Type_string: fail("unimplemented: string type result");
+        case Type_handle: {
+            value->which  = Value_handle;
+            value->handle = * (uint32_t *) ptr;
+
+            break;
+        }
+    }
+}
+
 void handle_decl(
     struct resource_map_entry ** resource_map,
     const struct DeclRequest decl
@@ -199,6 +258,47 @@ void handle_call(
     struct CallReturn      call_return;
     
     switch (call.func) {
+        case Func_fdWrite: {
+            struct ParamSpec  p0_fd;
+            struct ParamSpec  p1_iovs;
+            struct ResultSpec r0_size;
+
+            get_ParamSpec(&p0_fd, call.params, 0);
+            get_ParamSpec(&p1_iovs, call.params, 1);
+            get_ResultSpec(&r0_size, call.results, 0);
+
+            int32_t p1_iovs_len = 0;
+            void *  p0_fd_ptr    = handle_param_pre(resource_map, p0_fd, NULL);
+            void *  p1_iovs_ptr  = handle_param_pre(resource_map, p1_iovs, &p1_iovs_len);
+            void *  r0_size_ptr  = handle_result_pre(resource_map, r0_size);
+            int32_t p0_fd_       = * (int32_t *) p0_fd_ptr;
+            int32_t p1_iovs_     = * (int32_t *) p1_iovs_ptr;
+            int32_t r0_size_     = (int32_t) r0_size_ptr;
+
+            fprintf(stderr, "fd_write()\n");
+
+            int32_t errno = __imported_wasi_snapshot_preview1_fd_write(
+                p0_fd_,
+                p1_iovs_,
+                p1_iovs_len,
+                r0_size_
+            );
+
+            fprintf(stderr, "fd_write ret %d\n", errno);
+
+            CallResult_list call_result_list = new_CallResult_list(*segment, 1 /* sz */);
+
+            handle_param_post(p0_fd, p0_fd_ptr);
+            handle_param_post(p1_iovs, p1_iovs_ptr);
+            handle_result_post(resource_map, segment, r0_size, 0, call_result_list, r0_size_ptr);
+
+            call_return.which     = CallReturn_errno;
+            call_return.errno     = errno;
+            call_response.results = call_result_list;
+            write_CallReturn(&call_return, call_response._return);
+
+            break;
+        }
         case Func_pathOpen: {
             struct ParamSpec  p0_fd;
             struct ParamSpec  p1_dirflags;
@@ -226,7 +326,7 @@ void handle_call(
             void *  p4_fs_rights_base_ptr       = handle_param_pre(resource_map, p4_fs_rights_base, NULL);
             void *  p5_fs_rights_inheriting_ptr = handle_param_pre(resource_map, p5_fs_rights_inheriting, NULL);
             void *  p6_fdflags_ptr              = handle_param_pre(resource_map, p6_fdflags, NULL);
-            void *  r0_fd_ptr                   = result_pre(resource_map, r0_fd);
+            void *  r0_fd_ptr                   = handle_result_pre(resource_map, r0_fd);
             int32_t p0_fd_                      = * (int32_t *) p0_fd_ptr;
             int32_t p1_dirflags_                = * (int32_t *) p1_dirflags_ptr;
             int32_t p3_oflags_                  = * (int32_t *) p3_oflags_ptr;
@@ -247,9 +347,10 @@ void handle_call(
                 p6_fdflags_,
                 (int32_t) r0_fd_ptr
             );
-            fprintf(stderr, "path_open ret %d\n", errno);
 
-            Result_list result_list = new_Result_list(*segment, 1 /* sz */);
+            fprintf(stderr, "path_open ret %d %d\n", errno, * (int32_t *) r0_fd_ptr);
+
+            CallResult_list call_result_list = new_CallResult_list(*segment, 1 /* sz */);
 
             handle_param_post(p0_fd, p0_fd_ptr);
             handle_param_post(p1_dirflags, p1_dirflags_ptr);
@@ -258,11 +359,11 @@ void handle_call(
             handle_param_post(p4_fs_rights_base, p4_fs_rights_base_ptr);
             handle_param_post(p5_fs_rights_inheriting, p5_fs_rights_inheriting_ptr);
             handle_param_post(p6_fdflags, p6_fdflags_ptr);
-            handle_result_post(resource_map, segment, r0_fd, 0, result_list, r0_fd_ptr);
+            handle_result_post(resource_map, segment, r0_fd, 0, call_result_list, r0_fd_ptr);
 
             call_return.which     = CallReturn_errno;
             call_return.errno     = errno;
-            call_response.results = result_list;
+            call_response.results = call_result_list;
 
             break;
         }
@@ -270,8 +371,13 @@ void handle_call(
             break;
     }
 
+    CallReturn_ptr call_return_ptr = new_CallReturn(*segment);
+
+    write_CallReturn(&call_return, call_return_ptr);
+
     CallResponse_ptr call_response_ptr = new_CallResponse(*segment);
 
+    call_response._return = call_return_ptr;
     write_CallResponse(&call_response, call_response_ptr);
 
     const int ret = capn_setp(capn_ptr, 0, call_response_ptr.p);
@@ -328,22 +434,34 @@ void handle_param_post(
     }
 }
 
-void * result_pre(struct resource_map_entry ** resource_map, struct ResultSpec spec) {
+void * handle_result_pre(struct resource_map_entry ** resource_map, struct ResultSpec spec) {
     (void) resource_map;
-    (void) spec;
-    // switch (result.which) {
-    //     case Result_ignore: {
-    //         void * ptr = malloc(result.ignore);
 
-    //         if (ptr == NULL) fail("failed to allocate result");
+    struct Type type;
 
-    //         return ptr;
-    //     }
-    //     case Result_resource: {
-    //     }
-    // }
+    read_Type(&type, spec.type);
 
-    return NULL;
+    switch (type.which) {
+        case Type__bool: fail("result cannot be bool");
+        case Type_string: fail("result cannot be string");
+        case Type_bitflags: {
+            struct Type_Bitflags bitflags_type;
+
+            read_Type_Bitflags(&bitflags_type, type.bitflags);
+
+            void * ptr;
+
+            switch (bitflags_type.repr) {
+                case Type_IntRepr_u8:
+                case Type_IntRepr_u16:
+                case Type_IntRepr_u32: ptr = malloc(sizeof(int32_t)); break;
+                case Type_IntRepr_u64: ptr = malloc(sizeof(int64_t)); break;
+            }
+
+            return ptr;
+        }
+        case Type_handle: return malloc(sizeof(int32_t));
+    }
 }
 
 void handle_result_post(
@@ -351,15 +469,19 @@ void handle_result_post(
     struct capn_segment ** segment,
     struct ResultSpec spec,
     const  size_t result_idx,
-    Result_list result_list,
+    CallResult_list call_result_list,
     void * ptr
 ) {
-    (void) resource_map;
-    (void) segment;
-    (void) spec;
-    (void) result_idx;
-    (void) result_list;
-    (void) ptr;
+    struct CallResult call_result;
+    struct Value      value;
+    struct Type       type;
+
+    read_Type(&type, spec.type);
+    set_value_from_ptr(segment, &value, type, ptr);
+
+    call_result.memoryOffset = (uint32_t) ptr;
+    write_Value(&value, call_result.value);
+
     // struct WasiType wasi_type;
 
     // read_WasiType(&wasi_type, result.wasiType);
@@ -402,8 +524,8 @@ void handle_result_post(
     // }
 
     // // Send results back.
-    // struct Value value;
 
     // set_result_value(segment, &value, wasi_type, ptr);
-    // set_Value(&value, result_list, result_idx);
+    // set_Value(&value, call_result_list, result_idx);
+    set_CallResult(&call_result, call_result_list, result_idx);
 }

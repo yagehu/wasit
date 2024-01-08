@@ -79,7 +79,7 @@ struct CallRequest {
 
 struct CallResponse {
   return  @0 :CallReturn;
-  results @1 :List(Result);
+  results @1 :List(CallResult);
 }
 
 struct CallReturn {
@@ -103,14 +103,17 @@ struct ResourceRef {
 }
 
 struct ResultSpec {
+  type @0 :Type;
+
   union {
-    ignore   @0 :Void;
-    resource @1 :Void;
+    ignore   @1 :Void;
+    resource @2 :UInt64;
   }
 }
 
-struct Result {
+struct CallResult {
   memoryOffset @0 :UInt32;
+  value        @1 :Value;
 }
 
 struct Type {
