@@ -222,7 +222,6 @@ impl TypeRef {
     }
 
     pub fn resource<'a>(&self, doc: &'a Document) -> Option<&'a Resource> {
-        eprintln!("{:#?}", self);
         match self {
             | TypeRef::Name(ty) => doc.typename_resource(&ty.name),
             | TypeRef::Value(_) => None,

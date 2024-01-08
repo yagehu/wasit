@@ -176,27 +176,51 @@ struct Type {
   }
 
   union {
-    # builtin     @0 :Builtin;
     # record      @1 :Record;
     # array       @2 :Array;
     # variant     @4 :Variant;
     # allocBuffer @5 :Void;
-    bool     @0 :Void;
-    string   @1 :Void;
-    bitflags @2 :Bitflags;
-    handle   @3 :Void;
+    builtin      @7 :Builtin;
+    bool         @0 :Void;
+    string       @1 :Void;
+    bitflags     @2 :Bitflags;
+    handle       @3 :Void;
+    array        @4 :Array;
+    record       @5 :Record;
+    constPointer @6 :Type;
   }
 }
 
 struct Value {
+  struct Builtin {
+    union {
+      u8   @0 :UInt8;
+      u16  @1 :UInt16;
+      u32  @2 :UInt32;
+      u64  @3 :UInt64;
+      s8   @4 :Int8;
+      s16  @5 :Int16;
+      s32  @6 :Int32;
+      s64  @7 :Int64;
+      char @8 :UInt8;
+    }
+  }
+
   struct Bitflags {
     members @0 :List(Bool);
   }
 
+  struct Array {
+    items @0 :List(Value);
+  }
+
+
   union {
+    builtin  @5 :Builtin;
     bool     @0 :Bool;
     string   @1 :Text;
     bitflags @2 :Bitflags;
     handle   @3 :UInt32;
+    array    @4 :Array;
   }
 }

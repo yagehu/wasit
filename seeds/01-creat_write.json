@@ -138,7 +138,27 @@
                 { "resource": 1 },
                 {
                     "value": {
-                        "array": []
+                        "array": [
+                            {
+                                "value": {
+                                    "record": [
+                                        {
+                                            "name": "buf",
+                                            "value": {
+                                                "array": [
+                                                    { "value": { "builtin": { "u8": 97 } } },
+                                                    { "value": { "builtin": { "u8": 98 } } }
+                                                ]
+                                            }
+                                        },
+                                        {
+                                            "name": "buf_len",
+                                            "value": { "builtin": { "u32": 2 } }
+                                        }
+                                    ]
+                                }
+                            }
+                        ]
                     }
                 }
             ],

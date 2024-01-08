@@ -83,7 +83,7 @@ int main(void) {
 
         capn_free(&capn);
     }
-
+/
     return 0;
 }
 
@@ -94,6 +94,63 @@ noreturn void fail(const char* err) {
 
 void * malloc_set_value(const struct Type type, const struct Value value, int32_t * len) {
     switch (value.which) {
+        case Value_builtin: {
+            struct Value_Builtin builtin_value;
+
+            read_Value_Builtin(&builtin_value, value.builtin);
+
+            void * ptr;
+
+            switch (builtin_value.which) {
+                case Value_Builtin__char: {
+                    ptr = malloc(sizeof(int32_t));
+                    * (uint8_t *) ptr = builtin_value._char;
+                    break;
+                }
+                case Value_Builtin_s8: {
+                    ptr = malloc(sizeof(int32_t));
+                    * (int8_t *) ptr = builtin_value.s8;
+                    break;
+                }
+                case Value_Builtin_s16: {
+                    ptr = malloc(sizeof(int32_t));
+                    * (int16_t *) ptr = builtin_value.s16;
+                    break;
+                }
+                case Value_Builtin_s32: {
+                    ptr = malloc(sizeof(int32_t));
+                    * (int32_t *) ptr = builtin_value.s32;
+                    break;
+                }
+                case Value_Builtin_s64: {
+                    ptr = malloc(sizeof(int64_t));
+                    * (int64_t *) ptr = builtin_value.s64;
+                    break;
+                }
+                case Value_Builtin_u8: {
+                    ptr = malloc(sizeof(uint32_t));
+                    * (uint8_t *) ptr = builtin_value.u8;
+                    break;
+                }
+                case Value_Builtin_u16: {
+                    ptr = malloc(sizeof(uint32_t));
+                    * (uint16_t *) ptr = builtin_value.u16;
+                    break;
+                }
+                case Value_Builtin_u32: {
+                    ptr = malloc(sizeof(uint32_t));
+                    * (uint32_t *) ptr = builtin_value.u32;
+                    break;
+                }
+                case Value_Builtin_u64: {
+                    ptr = malloc(sizeof(uint64_t));
+                    * (uint64_t *) ptr = builtin_value.u64;
+                    break;
+                }
+            }
+
+            return ptr;
+        }
         case Value__bool: {
             bool * ptr = malloc(sizeof(bool));
 
@@ -143,6 +200,27 @@ void * malloc_set_value(const struct Type type, const struct Value value, int32_
             }
         }
         case Value_handle: fail("unimplemeneted: handle value");
+        case Value_array: {
+            struct Value_Array array_value;
+            struct Type_Array  array_type;
+
+            read_Value_Array(&array_value, value.array);
+            read_Type_Array(&array_type, type.array);
+
+            struct Type item_type;
+
+            read_Type(&item_type, array_type.item);
+
+            * len = capn_len(array_value.items);
+
+            for (int i = 0; i < capn_len(array_value.items); i++) {
+                struct Value value;
+
+                get_Value(&value, array_value.items, i);
+
+
+            }
+        }
     }
 }
 
@@ -153,6 +231,23 @@ void set_value_from_ptr(
     void * ptr
 ) {
     switch (type.which) {
+        case Type_builtin: {
+            struct Type_Builtin builtin_type;
+
+            read_Type_Builtin(&builtin_type, type.builtin);
+
+            switch (builtin_type.which) {
+                case Type_Builtin_u8:
+                case Type_Builtin_u16:
+                case Type_Builtin_u32:
+                case Type_Builtin_s8:
+                case Type_Builtin_s16:
+                case Type_Builtin_s32:
+                case Type_Builtin__char: ptr = malloc(sizeof(int32_t)); break;
+                case Type_Builtin_u64:
+                case Type_Builtin_s64: ptr = malloc(sizeof(int64_t)); break;
+            }
+        }
         case Type__bool: {
             value->which = Value__bool;
             value->_bool = * (bool *) ptr;
@@ -199,6 +294,9 @@ void set_value_from_ptr(
 
             break;
         }
+        case Type_array: fail("unimplemented: array type result");
+        case Type_record: fail("unimplemented: record type result");
+        case Type_constPointer: fail("unimplemented: constPointer type result");
     }
 }
 
@@ -219,6 +317,7 @@ void handle_decl(
     read_Value(&value, decl.value);
 
     switch (value.which) {
+        case Value_builtin:
         case Value__bool:
         case Value_string:
         case Value_bitflags: fail("only handle can be declared");
@@ -284,7 +383,7 @@ void handle_call(
                 r0_size_
             );
 
-            fprintf(stderr, "fd_write ret %d\n", errno);
+            fprintf(stderr, "fd_write() ret %d written %d\n", errno, * (int32_t *) r0_size_ptr);
 
             CallResult_list call_result_list = new_CallResult_list(*segment, 1 /* sz */);
 
@@ -442,6 +541,27 @@ void * handle_result_pre(struct resource_map_entry ** resource_map, struct Resul
     read_Type(&type, spec.type);
 
     switch (type.which) {
+        case Type_builtin: {
+            struct Type_Builtin builtin;
+
+            read_Type_Builtin(&builtin, type.builtin);
+
+            void * ptr;
+
+            switch (builtin.which) {
+                case Type_Builtin_u8:
+                case Type_Builtin_u16:
+                case Type_Builtin_u32:
+                case Type_Builtin_s8:
+                case Type_Builtin_s16:
+                case Type_Builtin_s32:
+                case Type_Builtin__char: ptr = malloc(sizeof(int32_t)); break;
+                case Type_Builtin_u64:
+                case Type_Builtin_s64: ptr = malloc(sizeof(int64_t)); break;
+            }
+
+            return ptr;
+        };
         case Type__bool: fail("result cannot be bool");
         case Type_string: fail("result cannot be string");
         case Type_bitflags: {
@@ -461,6 +581,9 @@ void * handle_result_pre(struct resource_map_entry ** resource_map, struct Resul
             return ptr;
         }
         case Type_handle: return malloc(sizeof(int32_t));
+        case Type_array: fail("result cannot be array");
+        case Type_record: fail("result cannot be record");
+        case Type_constPointer: fail("result cannot be constPointer");
     }
 }
 
@@ -481,6 +604,24 @@ void handle_result_post(
 
     call_result.memoryOffset = (uint32_t) ptr;
     write_Value(&value, call_result.value);
+
+    switch (spec.which) {
+        case ResultSpec_ignore: {
+            free(ptr);
+            break;
+        }
+        case ResultSpec_resource: {
+            // TODO(huyage): size.
+            const struct resource resource = {
+                .ptr  = ptr,
+                .size = 0,
+            };
+
+            hmput(*resource_map, spec.resource, resource);
+
+            break;
+        }
+    }
 
     // struct WasiType wasi_type;
 

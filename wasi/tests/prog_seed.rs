@@ -104,6 +104,7 @@ fn creat_write() {
     )
     .run(stderr.clone())
     .expect("failed to run executor");
+
     assert!(
         seed.execute(&mut executor, &spec).is_ok(),
         "Executor stderr:\n{}",
@@ -113,9 +114,7 @@ fn creat_write() {
     executor.kill();
 
     let stderr_str = String::from_utf8(stderr.try_lock().unwrap().deref().clone()).unwrap();
+    let content = fs::read(base_dir.path().join("a").canonicalize().unwrap()).unwrap();
 
-    base_dir.path().join("a").canonicalize().expect(&format!(
-        "00-creat seed should create file `a`\nexecutor stderr:\n{}\n",
-        stderr_str,
-    ));
+    assert_eq!(content, vec![97, 98], "{stderr_str}");
 }

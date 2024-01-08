@@ -78,7 +78,7 @@ impl ProgSeed {
 
                 capnp_mappers::build_type(param_spec.tref.type_().as_ref(), &mut type_builder);
 
-                match (&param_spec.resource, &call_param) {
+                match (&param_spec.tref.resource(spec), &call_param) {
                     | (Some(_resource_spec), &&CallParam::Resource(resource_id)) => {
                         let resource = resource_ctx.get(resource_id).unwrap_or_else(|| {
                             panic!("resource {resource_id} not found in the context")
@@ -88,7 +88,6 @@ impl ProgSeed {
                         resource_builder.set_id(resource.id);
                     },
                     | (None, &CallParam::Resource(resource_id)) => {
-                        eprintln!("{} {:#?}", func_spec.name.as_str(), param_spec);
                         panic!(
                             "resource {resource_id} ({}) is not specified as a resource",
                             param_spec.name.as_str()
@@ -139,6 +138,7 @@ impl ProgSeed {
                                         .push_str(s),
                                 }
                             },
+                            | (witx::Type::List(tref), Value::Array(array)) => {},
                             | _ => unimplemented!("param_spec is {:#?}", param_spec),
                         }
                     },
@@ -148,7 +148,7 @@ impl ProgSeed {
             let results = func_spec.unpack_expected_result();
             let mut results_builder = call_builder.reborrow().init_results(results.len() as u32);
 
-            for (i, (result_tref, resource_ref)) in results.iter().enumerate() {
+            for (i, result_tref) in results.iter().enumerate() {
                 let result = &call.results[i];
                 let mut result_builder = results_builder.reborrow().get(i as u32);
                 let mut type_builder = result_builder.reborrow().init_type();
@@ -163,7 +163,7 @@ impl ProgSeed {
             }
 
             let mut handle_results_ok = || {
-                for (i, (result_tref, resource_ref)) in results.iter().enumerate() {
+                for (i, result_tref) in results.iter().enumerate() {
                     match &call.results[i] {
                         | &CallResult::Resource(resource_id) => {
                             resource_ctx.insert(resource_id, Resource { id: resource_id })

@@ -1,4 +1,4 @@
-use wazzi_witx::{Id, Resource};
+use wazzi_witx::Id;
 
 fn document() -> wazzi_witx::Document {
     wazzi_witx::load(&[
@@ -67,14 +67,9 @@ fn fd_write() {
     };
     let buf_resource = ciovec_record.members[0].tref.resource(&doc).unwrap();
     let buf_len_resource = ciovec_record.members[1].tref.resource(&doc).unwrap();
-
     let buf_len_can_fulfills = buf_len_resource.can_fulfill(&doc);
 
-    assert!(matches!(
-        buf_len_can_fulfills[0],
-        Resource {
-            name,
-            ..
-        } if name == &buf_resource.name,
-    ));
+    assert!(buf_len_can_fulfills
+        .iter()
+        .any(|resource| resource.name == buf_resource.name));
 }
