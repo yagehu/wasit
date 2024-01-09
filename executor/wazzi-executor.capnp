@@ -180,8 +180,7 @@ struct Type {
     # array       @2 :Array;
     # variant     @4 :Variant;
     # allocBuffer @5 :Void;
-    builtin      @7 :Builtin;
-    bool         @0 :Void;
+    builtin      @0 :Builtin;
     string       @1 :Void;
     bitflags     @2 :Bitflags;
     handle       @3 :Void;
@@ -216,8 +215,7 @@ struct Value {
 
 
   union {
-    builtin  @5 :Builtin;
-    bool     @0 :Bool;
+    builtin  @0 :Builtin;
     string   @1 :Text;
     bitflags @2 :Bitflags;
     handle   @3 :UInt32;

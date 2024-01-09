@@ -100,7 +100,7 @@ pub enum BitflagsRepr {
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Debug)]
-pub struct ArrayValue(Vec<ArrayElementValue>);
+pub struct ArrayValue(pub Vec<ArrayElementValue>);
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Debug)]
 #[serde(rename_all = "snake_case")]

@@ -3,8 +3,8 @@
         {
             "name": "main",
             "includePath": [
-                "executor/c-capnproto/lib",
-                "target/debug"
+                "target/debug",
+                "${workspaceFolder}/executor/c-capnproto/lib"
             ]
         }
     ],

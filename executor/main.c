@@ -25,7 +25,8 @@ struct resource_map_entry {
 noreturn void fail(const char* err);
 
 // Allocate some memory for the type and set its value.
-void * malloc_set_value(const struct Type type, const struct Value value, int32_t * len);
+void * malloc_set_value(const struct Type, const struct Value, int32_t * len);
+void   set_ptr_value_no_alloc(const struct Type, const struct Value, void * ptr);
 
 void set_value_from_ptr(struct capn_segment **, struct Value *, const struct Type, void * ptr);
 
@@ -83,7 +84,7 @@ int main(void) {
 
         capn_free(&capn);
     }
-/
+
     return 0;
 }
 
@@ -93,133 +94,146 @@ noreturn void fail(const char* err) {
 }
 
 void * malloc_set_value(const struct Type type, const struct Value value, int32_t * len) {
+    void * ptr;
+
+    switch (type.which) {
+        case Type_builtin: {
+            struct Type_Builtin builtin_type;
+
+            read_Type_Builtin(&builtin_type, type.builtin);
+
+            switch (builtin_type.which) {
+                case Type_Builtin__char: ptr = malloc(sizeof(uint8_t));  break;
+                case Type_Builtin_s8:    ptr = malloc(sizeof(int8_t));   break;
+                case Type_Builtin_s16:   ptr = malloc(sizeof(int16_t));  break;
+                case Type_Builtin_s32:   ptr = malloc(sizeof(int32_t));  break;
+                case Type_Builtin_s64:   ptr = malloc(sizeof(int64_t));  break;
+                case Type_Builtin_u8:    ptr = malloc(sizeof(uint8_t));  break;
+                case Type_Builtin_u16:   ptr = malloc(sizeof(uint16_t)); break;
+                case Type_Builtin_u32:   ptr = malloc(sizeof(uint32_t)); break;
+                case Type_Builtin_u64:   ptr = malloc(sizeof(uint64_t)); break;
+            }
+
+            break;
+        }
+        case Type_string: {
+            ptr = malloc(value.string.len);
+            * len = value.string.len;
+
+            break;
+        }
+        case Type_bitflags: {
+            struct Type_Bitflags bitflags_type;
+
+            read_Type_Bitflags(&bitflags_type, type.bitflags);
+
+            switch (bitflags_type.repr) {
+                case Type_IntRepr_u8:  ptr = malloc(sizeof(uint8_t));  break;
+                case Type_IntRepr_u16: ptr = malloc(sizeof(uint16_t)); break;
+                case Type_IntRepr_u32: ptr = malloc(sizeof(uint32_t)); break;
+                case Type_IntRepr_u64: ptr = malloc(sizeof(uint64_t)); break;
+            }
+
+            break;
+        }
+        case Type_handle: ptr = malloc(sizeof(int32_t)); break;
+        case Type_array: {
+            struct Type_Array  array_type;
+            struct Value_Array array_value;
+
+            read_Type_Array(&array_type, type.array);
+            read_Value_Array(&array_value, value.array);
+
+            fprintf(stderr, "Type_array %d %d\n", capn_len(array_value.items), array_type.itemSize);
+            ptr = malloc(capn_len(array_value.items) * array_type.itemSize);
+            * len = capn_len(array_value.items);
+
+            break;
+        }
+        case Type_record: {
+            struct Type_Record record_type;
+
+            read_Type_Record(&record_type, type.record);
+
+            ptr = malloc(record_type.size);
+
+            break;
+        }
+        case Type_constPointer: fail("unimplemented: constPointer param");
+    }
+
+    if (ptr == NULL) fail("failed to alloc");
+
+    set_ptr_value_no_alloc(type, value, ptr);
+
+    return ptr;
+}
+
+void set_ptr_value_no_alloc(const struct Type type, const struct Value value, void * ptr) {
     switch (value.which) {
         case Value_builtin: {
             struct Value_Builtin builtin_value;
 
             read_Value_Builtin(&builtin_value, value.builtin);
 
-            void * ptr;
-
             switch (builtin_value.which) {
-                case Value_Builtin__char: {
-                    ptr = malloc(sizeof(int32_t));
-                    * (uint8_t *) ptr = builtin_value._char;
-                    break;
-                }
-                case Value_Builtin_s8: {
-                    ptr = malloc(sizeof(int32_t));
-                    * (int8_t *) ptr = builtin_value.s8;
-                    break;
-                }
-                case Value_Builtin_s16: {
-                    ptr = malloc(sizeof(int32_t));
-                    * (int16_t *) ptr = builtin_value.s16;
-                    break;
-                }
-                case Value_Builtin_s32: {
-                    ptr = malloc(sizeof(int32_t));
-                    * (int32_t *) ptr = builtin_value.s32;
-                    break;
-                }
-                case Value_Builtin_s64: {
-                    ptr = malloc(sizeof(int64_t));
-                    * (int64_t *) ptr = builtin_value.s64;
-                    break;
-                }
-                case Value_Builtin_u8: {
-                    ptr = malloc(sizeof(uint32_t));
-                    * (uint8_t *) ptr = builtin_value.u8;
-                    break;
-                }
-                case Value_Builtin_u16: {
-                    ptr = malloc(sizeof(uint32_t));
-                    * (uint16_t *) ptr = builtin_value.u16;
-                    break;
-                }
-                case Value_Builtin_u32: {
-                    ptr = malloc(sizeof(uint32_t));
-                    * (uint32_t *) ptr = builtin_value.u32;
-                    break;
-                }
-                case Value_Builtin_u64: {
-                    ptr = malloc(sizeof(uint64_t));
-                    * (uint64_t *) ptr = builtin_value.u64;
-                    break;
-                }
+                case Value_Builtin__char: * (uint8_t *)  ptr = builtin_value._char; break;
+                case Value_Builtin_s8:    * (int8_t *)   ptr = builtin_value.s8;    break;
+                case Value_Builtin_s16:   * (int16_t *)  ptr = builtin_value.s16;   break;
+                case Value_Builtin_s32:   * (int32_t *)  ptr = builtin_value.s32;   break;
+                case Value_Builtin_s64:   * (int64_t *)  ptr = builtin_value.s64;   break;
+                case Value_Builtin_u8:    * (uint8_t *)  ptr = builtin_value.u8;    break;
+                case Value_Builtin_u16:   * (uint16_t *) ptr = builtin_value.u16;   break;
+                case Value_Builtin_u32:   * (uint32_t *) ptr = builtin_value.u32;   break;
+                case Value_Builtin_u64:   * (uint64_t *) ptr = builtin_value.u64;   break;
             }
 
-            return ptr;
+            break;
         }
-        case Value__bool: {
-            bool * ptr = malloc(sizeof(bool));
-
-           * ptr = value._bool;
-
-            return ptr;
-        }
-        case Value_string: {
-            char * ptr = malloc(value.string.len);
-
-            * len = value.string.len;
-
-            return strncpy(ptr, value.string.str, value.string.len);
-        };
+        case Value_string: strncpy(ptr, value.string.str, value.string.len); break;
         case Value_bitflags: {
-            struct Value_Bitflags bitflags;
+            struct Value_Bitflags bitflags_value;
             struct Type_Bitflags  bitflags_type;
 
+            read_Value_Bitflags(&bitflags_value, value.bitflags);
             read_Type_Bitflags(&bitflags_type, type.bitflags);
-            read_Value_Bitflags(&bitflags, value.bitflags);
 
-            uint64_t int_value = 0;
+            uint64_t bitflags_int = 0;
 
-            for (int i = 0; i < capn_len(bitflags.members); i++) {
-                const bool is_set = capn_get1(bitflags.members, i);
+            for (int i = 0; i < capn_len(bitflags_value.members); i++) {
+                bool is_set = capn_get1(bitflags_value.members, i);
 
-                int_value |= (0x1 & is_set) << i;
+                bitflags_int |= is_set << i;
             }
 
             switch (bitflags_type.repr) {
-                case Type_IntRepr_u8:
-                case Type_IntRepr_u16:
-                case Type_IntRepr_u32: {
-                    uint32_t * ptr = malloc(sizeof(uint32_t));
-
-                    * ptr = (uint32_t) int_value;
-
-                    return ptr;
-                }
-                case Type_IntRepr_u64: {
-                    uint64_t * ptr = malloc(sizeof(uint64_t));
-
-                    * ptr = int_value;
-
-                    return ptr;
-                }
+                case Type_IntRepr_u8:  * (uint8_t *)  ptr = (uint8_t)  bitflags_int; break;
+                case Type_IntRepr_u16: * (uint16_t *) ptr = (uint16_t) bitflags_int; break;
+                case Type_IntRepr_u32: * (uint32_t *) ptr = (uint32_t) bitflags_int; break;
+                case Type_IntRepr_u64: * (uint64_t *) ptr = (uint64_t) bitflags_int; break;
             }
+
+            break;
         }
-        case Value_handle: fail("unimplemeneted: handle value");
+        case Value_handle: * (uint32_t *) ptr = value.handle; break;
         case Value_array: {
             struct Value_Array array_value;
             struct Type_Array  array_type;
+            struct Type        item_type;
 
             read_Value_Array(&array_value, value.array);
             read_Type_Array(&array_type, type.array);
-
-            struct Type item_type;
-
             read_Type(&item_type, array_type.item);
 
-            * len = capn_len(array_value.items);
-
             for (int i = 0; i < capn_len(array_value.items); i++) {
-                struct Value value;
+                struct Value item_value;
 
-                get_Value(&value, array_value.items, i);
+                get_Value(&item_value, array_value.items, i);
 
-
+                set_ptr_value_no_alloc(item_type, item_value, (uint8_t *) ptr + (array_type.itemSize * i));
             }
+
+            break;
         }
     }
 }
@@ -247,12 +261,6 @@ void set_value_from_ptr(
                 case Type_Builtin_u64:
                 case Type_Builtin_s64: ptr = malloc(sizeof(int64_t)); break;
             }
-        }
-        case Type__bool: {
-            value->which = Value__bool;
-            value->_bool = * (bool *) ptr;
-
-            break;
         }
         case Type_bitflags: {
             struct Type_Bitflags  bitflags_type;
@@ -318,8 +326,8 @@ void handle_decl(
 
     switch (value.which) {
         case Value_builtin:
-        case Value__bool:
         case Value_string:
+        case Value_array:
         case Value_bitflags: fail("only handle can be declared");
         case Value_handle: {
             uint32_t * ptr = malloc(sizeof(uint32_t));
@@ -374,7 +382,7 @@ void handle_call(
             int32_t p1_iovs_     = * (int32_t *) p1_iovs_ptr;
             int32_t r0_size_     = (int32_t) r0_size_ptr;
 
-            fprintf(stderr, "fd_write()\n");
+            fprintf(stderr, "fd_write() %d\n", p1_iovs_len);
 
             int32_t errno = __imported_wasi_snapshot_preview1_fd_write(
                 p0_fd_,
@@ -447,7 +455,8 @@ void handle_call(
                 (int32_t) r0_fd_ptr
             );
 
-            fprintf(stderr, "path_open ret %d %d\n", errno, * (int32_t *) r0_fd_ptr);
+            fprintf(stderr, "%s %d\n", (char *) p2_path_ptr, * (int32_t *) p3_oflags_);
+            fprintf(stderr, "path_open() ret %d %d\n", errno, * (int32_t *) r0_fd_ptr);
 
             CallResult_list call_result_list = new_CallResult_list(*segment, 1 /* sz */);
 
@@ -562,7 +571,6 @@ void * handle_result_pre(struct resource_map_entry ** resource_map, struct Resul
 
             return ptr;
         };
-        case Type__bool: fail("result cannot be bool");
         case Type_string: fail("result cannot be string");
         case Type_bitflags: {
             struct Type_Bitflags bitflags_type;

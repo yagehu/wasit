@@ -138,7 +138,15 @@ impl ProgSeed {
                                         .push_str(s),
                                 }
                             },
-                            | (witx::Type::List(tref), Value::Array(array)) => {},
+                            | (witx::Type::List(tref), Value::Array(array)) => {
+                                let mut array_builder = value_builder.reborrow().init_array();
+                                let mut items_builder =
+                                    array_builder.reborrow().init_items(array.0.len() as u32);
+
+                                for (i, element) in array.0.iter().enumerate() {
+                                    let mut item_builder = items_builder.reborrow().get(i as u32);
+                                }
+                            },
                             | _ => unimplemented!("param_spec is {:#?}", param_spec),
                         }
                     },
@@ -182,7 +190,7 @@ impl ProgSeed {
                 | wazzi_executor_capnp::call_return::Which::Errno(errno) if errno == 0 => {
                     handle_results_ok()
                 },
-                | wazzi_executor_capnp::call_return::Which::Errno(errno) => todo!(),
+                | wazzi_executor_capnp::call_return::Which::Errno(errno) => (),
             }
         }
 
