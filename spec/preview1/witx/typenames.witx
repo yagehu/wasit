@@ -12,6 +12,7 @@
 
 ;;; Timestamp in nanoseconds.
 (typename $timestamp u64)
+(resource $timestamp (type $timestamp))
 
 ;;; Identifiers for clocks.
 (typename $clockid

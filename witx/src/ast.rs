@@ -638,7 +638,7 @@ impl InterfaceFunc {
 
                         if let Some(ok_tref) = ok_tref {
                             match ok_tref {
-                                | TypeRef::Name(named_type) => v.push(named_type.tref.clone()),
+                                | TypeRef::Name(_ty) => v.push(ok_tref.clone()),
                                 | TypeRef::Value(ty) => match ty.as_ref() {
                                     | Type::Record(record) if record.kind == RecordKind::Tuple => {
                                         for member in &record.members {
@@ -704,4 +704,5 @@ impl Resource {
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
 pub enum ResourceRelation {
     Alloc,
+    Subtype,
 }

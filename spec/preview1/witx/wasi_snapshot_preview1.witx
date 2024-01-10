@@ -32,6 +32,9 @@
 (typename $environ_buf_size $size)
 (resource $environ_buf_size (type $environ_buf_size) (@alloc $environ_buf))
 
+(typename $clock_res $timestamp)
+(resource $clock_res (type $clock_res))
+
 (module $wasi_snapshot_preview1
   ;;; Linear memory to be accessed by WASI functions that need it.
   (import "memory" (memory))
@@ -86,7 +89,7 @@
     ;;; The clock for which to return the resolution.
     (param $id $clockid)
     ;;; The resolution of the clock, or an error if one happened.
-    (result $error (expected $timestamp (error $errno)))
+    (result $error (expected $clock_res (error $errno)))
   )
   ;;; Return the time value of a clock.
   ;;; Note: This is similar to `clock_gettime` in POSIX.

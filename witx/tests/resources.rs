@@ -70,6 +70,26 @@ fn environ() {
 }
 
 #[test]
+fn clock() {
+    let doc = document();
+    let module = doc.module(&Id::new("wasi_snapshot_preview1")).unwrap();
+    let clock_res_get = module.func(&Id::new("clock_res_get")).unwrap();
+    let clock_time_get = module.func(&Id::new("clock_time_get")).unwrap();
+    let res_tref = &clock_res_get.unpack_expected_result()[0];
+    let res_resource = res_tref.resource(&doc).unwrap();
+    let res_can_fulfill = res_resource.can_fulfill(&doc);
+    let precision_tref = &clock_time_get.params[1].tref;
+
+    assert!(
+        res_can_fulfill
+            .iter()
+            .any(|resource| { &resource.tref == precision_tref }),
+        "{:#?}",
+        res_can_fulfill
+    );
+}
+
+#[test]
 fn path_open() {
     let doc = document();
     let module = doc.module(&Id::new("wasi_snapshot_preview1")).unwrap();

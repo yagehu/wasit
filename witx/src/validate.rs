@@ -387,6 +387,26 @@ impl<'a> DocValidationScope<'a> {
                     );
                 }
 
+                // Now check for subtype relations and insert edges.
+
+                let mut parent_type = &named_type_rc.tref;
+
+                while let TypeRef::Name(ty) = &parent_type {
+                    let parent_type_name = &ty.name;
+
+                    if let Some(&parent_node_id) =
+                        self.doc.resource_scope.typename_map.get(parent_type_name)
+                    {
+                        self.doc.resource_scope.graph.add_edge(
+                            node_id,
+                            parent_node_id,
+                            ResourceRelation::Subtype,
+                        );
+                    }
+
+                    parent_type = &ty.tref;
+                }
+
                 self.doc
                     .resource_scope
                     .typename_map

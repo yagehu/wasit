@@ -860,51 +860,6 @@ void handle_result_post(
         }
     }
 
-    // struct WasiType wasi_type;
-
-    // read_WasiType(&wasi_type, result.wasiType);
-
-    // switch (result.which) {
-    //     case Result_ignore: fail("unimplemented result type ignore");
-    //     case Result_resource: {
-    //         struct Decl          decl;
-    //         struct AllocStrategy alloc;
-    //         size_t               size;
-
-    //         read_Decl(&decl, result.resource);
-    //         read_AllocStrategy(&alloc, decl.alloc);
-
-    //         switch (alloc.which) {
-    //             case AllocStrategy_none: fail("result must be alloc'd");
-    //             case AllocStrategy_asArray: fail("result cannot be array");
-    //             case AllocStrategy_fromSize: {
-    //                 size = alloc.fromSize;
-    //                 break;
-    //             }
-    //             case AllocStrategy_fromResource: {
-    //                 struct resource_map_entry * resource_entry =
-    //                     hmgetp_null(*resource_map, alloc.fromResource);
-
-    //                 size = * (size_t *) resource_entry->value.ptr;
-    //                 break;
-    //             }
-    //         }
-
-    //         struct resource resource = {
-    //             .ptr  = ptr,
-    //             .size = size,
-    //         };
-
-    //         hmput(*resource_map, decl.resourceId, resource);
-
-    //         break;
-    //     }
-    // }
-
-    // // Send results back.
-
-    // set_result_value(segment, &value, wasi_type, ptr);
-    // set_Value(&value, call_result_list, result_idx);
     set_CallResult(&call_result, call_result_list, result_idx);
 }
 
