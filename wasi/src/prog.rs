@@ -123,7 +123,7 @@ impl ProgSeed {
             }
 
             let mut handle_results_ok = || {
-                for (i, result_tref) in results.iter().enumerate() {
+                for (i, _result_tref) in results.iter().enumerate() {
                     match &call.results[i] {
                         | &CallResult::Resource(resource_id) => {
                             resource_ctx.insert(resource_id, Resource { id: resource_id })

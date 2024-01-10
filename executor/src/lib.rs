@@ -115,7 +115,7 @@ impl RunningExecutor {
         request_builder.reborrow().set_decl(request)?;
         capnp::serialize::write_message(&self.stdin, &message)?;
 
-        let message = capnp::serialize::read_message(
+        let _message = capnp::serialize::read_message(
             &mut self.stdout,
             capnp::message::DEFAULT_READER_OPTIONS,
         )?;

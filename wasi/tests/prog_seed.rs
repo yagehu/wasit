@@ -6,7 +6,6 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use ntest::timeout;
 use tempfile::tempdir;
 
 use wazzi_wasi::ProgSeed;

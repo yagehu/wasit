@@ -32,8 +32,8 @@ impl Call {
     }
 
     pub fn arbitrary_from_func_spec(
-        u: &mut Unstructured,
-        prog: &Prog,
+        _u: &mut Unstructured,
+        _prog: &Prog,
         spec: &InterfaceFunc,
     ) -> Result<Self, arbitrary::Error> {
         Ok(Self {
