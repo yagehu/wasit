@@ -187,6 +187,7 @@ struct Type {
     array        @4 :Array;
     record       @5 :Record;
     constPointer @6 :Type;
+    pointer      @7 :Type;
   }
 }
 
@@ -217,6 +218,14 @@ struct Value {
     members @0 :List(ParamSpec);
   }
 
+  struct Pointer {
+    struct Alloc {
+      resourceId @0 :UInt64;
+    }
+
+    alloc @0 :Alloc;
+  }
+
   union {
     builtin      @0 :Builtin;
     string       @1 :Text;
@@ -225,5 +234,6 @@ struct Value {
     array        @4 :Array;
     record       @5 :Record;
     constPointer @6 :List(Value);
+    pointer      @7 :Pointer;
   }
 }

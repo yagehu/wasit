@@ -7,8 +7,12 @@ use crate::prog::Prog;
 #[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct Call {
-    pub func:    String,
-    pub params:  Vec<CallParam>,
+    pub func: String,
+
+    #[serde(default)]
+    pub params: Vec<CallParam>,
+
+    #[serde(default)]
     pub results: Vec<CallResult>,
 }
 
@@ -61,7 +65,8 @@ pub enum Value {
     Bitflags(BitflagsValue),
     Array(ArrayValue),
     Record(RecordValue),
-    ConstPointer(PointerValue),
+    ConstPointer(ConstPointerValue),
+    Pointer(PointerValue),
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Debug)]
@@ -114,4 +119,10 @@ pub struct RecordMemberValue {
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Debug)]
-pub struct PointerValue(pub Vec<Value>);
+pub struct ConstPointerValue(pub Vec<Value>);
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Debug)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum PointerValue {
+    Alloc { resource: u64 },
+}

@@ -111,7 +111,7 @@ void * malloc_set_value(
     const struct Value value,
     int32_t * len
 ) {
-    void * ptr;
+    void * ptr = NULL;
 
     switch (type.which) {
         case Type_builtin: {
@@ -177,6 +177,7 @@ void * malloc_set_value(
             break;
         }
         case Type_constPointer: fail("malloc_set_value constPointer"); break;
+        case Type_pointer: ptr = malloc(sizeof(int32_t)); break;
     }
 
     if (ptr == NULL) fail("failed to alloc");
@@ -340,8 +341,6 @@ void set_ptr_value_no_alloc(
             const size_t element_size = type_size(element_type);
             void * elements = malloc(capn_len(value.constPointer) * element_size);
 
-            fprintf(stderr, "elements_len %d %zu\n", capn_len(value.constPointer), element_size);
-
             for (int i = 0; i < capn_len(value.constPointer); i++) {
                 struct Value element_value;
 
@@ -350,12 +349,23 @@ void set_ptr_value_no_alloc(
                 void * element_ptr = (uint8_t *) elements + i * element_size;
 
                 set_ptr_value_no_alloc(resource_map, element_type, element_value, element_ptr);
-
-                fprintf(stderr, "element_ptr %d = %d\n", (int32_t) element_ptr, * (char *) element_ptr);
             }
 
-            fprintf(stderr, "elements ptr %d\n", (int32_t) elements);
             * (int32_t *) ptr = (int32_t) elements;
+
+            break;
+        }
+        case Value_pointer: {
+            struct Value_Pointer       pointer_value;
+            struct Value_Pointer_Alloc alloc;
+
+            read_Value_Pointer(&pointer_value, value.pointer);
+            read_Value_Pointer_Alloc(&alloc, pointer_value.alloc);
+
+            struct resource_map_entry * resource_entry = hmgetp_null(*resource_map, alloc.resourceId);
+            if (resource_entry == NULL) fail("pointer resource not found");
+
+            * (int32_t *) ptr = (int32_t) malloc(* (uint32_t *) resource_entry->value.ptr);
 
             break;
         }
@@ -429,6 +439,7 @@ void set_value_from_ptr(
         case Type_array: fail("unimplemented: array type result");
         case Type_record: fail("unimplemented: record type result");
         case Type_constPointer: fail("unimplemented: constPointer type result");
+        case Type_pointer: fail("unimplemented: pointer type result");
     }
 }
 
@@ -454,6 +465,7 @@ void handle_decl(
         case Value_array:
         case Value_record:
         case Value_constPointer:
+        case Value_pointer:
         case Value_bitflags: fail("only handle can be declared");
         case Value_handle: {
             uint32_t * ptr = malloc(sizeof(uint32_t));
@@ -491,6 +503,53 @@ void handle_call(
     struct CallReturn      call_return;
     
     switch (call.func) {
+        case Func_argsGet: {
+            struct ParamSpec p0_argv;
+            struct ParamSpec p1_argv_buf;
+
+            get_ParamSpec(&p0_argv, call.params, 0);
+            get_ParamSpec(&p1_argv_buf, call.params, 1);
+
+            void * p0_argv_ptr     = handle_param_pre(resource_map, p0_argv, NULL);
+            void * p1_argv_buf_ptr = handle_param_pre(resource_map, p1_argv_buf, NULL);
+            int32_t p0_argv_       = * (int32_t *) p0_argv_ptr;
+            int32_t p1_argv_buf_   = * (int32_t *) p1_argv_buf_ptr;
+
+            int32_t errno = __imported_wasi_snapshot_preview1_args_get(p0_argv_,  p1_argv_buf_);
+
+            CallResult_list call_result_list = new_CallResult_list(*segment, 0 /* sz */);
+
+            call_return.which     = CallReturn_errno;
+            call_return.errno     = errno;
+            call_response.results = call_result_list;
+
+            break;
+        }
+        case Func_argsSizesGet: {
+            struct ResultSpec r0_argv_size;
+            struct ResultSpec r1_argv_buf_size;
+
+            get_ResultSpec(&r0_argv_size, call.results, 0);
+            get_ResultSpec(&r1_argv_buf_size, call.results, 1);
+
+            void * r0_argv_size_ptr      = handle_result_pre(resource_map, r0_argv_size);
+            void * r1_argv_buf_size_ptr  = handle_result_pre(resource_map, r1_argv_buf_size);
+            int32_t r0_argv_size_        = (int32_t) r0_argv_size_ptr;
+            int32_t r0_argv_buf_size_    = (int32_t) r1_argv_buf_size_ptr;
+
+            int32_t errno = __imported_wasi_snapshot_preview1_args_sizes_get(r0_argv_size_, r0_argv_buf_size_);
+
+            CallResult_list call_result_list = new_CallResult_list(*segment, 2 /* sz */);
+
+            handle_result_post(resource_map, segment, r0_argv_size, 0, call_result_list, r0_argv_size_ptr);
+            handle_result_post(resource_map, segment, r1_argv_buf_size, 1, call_result_list, r1_argv_buf_size_ptr);
+
+            call_return.which     = CallReturn_errno;
+            call_return.errno     = errno;
+            call_response.results = call_result_list;
+
+            break;
+        }
         case Func_fdWrite: {
             struct ParamSpec  p0_fd;
             struct ParamSpec  p1_iovs;
@@ -507,9 +566,6 @@ void handle_call(
             int32_t p0_fd_       = * (int32_t *) p0_fd_ptr;
             int32_t p1_iovs_     = (int32_t) p1_iovs_ptr;
             int32_t r0_size_     = (int32_t) r0_size_ptr;
-
-            fprintf(stderr, "fd_write() %d = %d\n", p1_iovs_, * (int32_t *) p1_iovs_ptr);
-            fprintf(stderr, "fd_write() %d fd %d iovs_len %d iovs_ptr %d iovs_buf_len %d iovs_buf %d\n", p1_iovs_len, * (int32_t *) p0_fd_ptr, p1_iovs_len, (int32_t) p1_iovs_ptr, (* ((int32_t **) p1_iovs_ptr))[1], ** (int32_t **) p1_iovs_ptr);
 
             int32_t errno = __imported_wasi_snapshot_preview1_fd_write(
                 p0_fd_,
@@ -529,7 +585,6 @@ void handle_call(
             call_return.which     = CallReturn_errno;
             call_return.errno     = errno;
             call_response.results = call_result_list;
-            write_CallReturn(&call_return, call_response._return);
 
             break;
         }
@@ -602,8 +657,7 @@ void handle_call(
 
             break;
         }
-        default:
-            break;
+        default: fail("unimplemented func"); break;
     }
 
     CallReturn_ptr call_return_ptr = new_CallReturn(*segment);
@@ -719,6 +773,7 @@ void * handle_result_pre(struct resource_map_entry ** resource_map, struct Resul
         case Type_array: fail("result cannot be array");
         case Type_record: fail("result cannot be record");
         case Type_constPointer: fail("result cannot be constPointer");
+        case Type_pointer: fail("result cannot be pointer");
     }
 }
 
@@ -847,8 +902,7 @@ size_t type_size(const struct Type type) {
 
             return record_type.size;
         }
-        case Type_constPointer: {
-            return sizeof(uint32_t);
-        }
+        case Type_constPointer: return sizeof(uint32_t);
+        case Type_pointer: return sizeof(uint32_t);
     }
 }

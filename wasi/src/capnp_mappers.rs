@@ -79,7 +79,11 @@ pub(crate) fn build_type(
                 .reborrow()
                 .set_item_size(item_tref.mem_size() as u32);
         },
-        | witx::Type::Pointer(_) => todo!(),
+        | witx::Type::Pointer(tref) => {
+            let mut pointer_builder = type_builder.reborrow().init_pointer();
+
+            build_type(tref.type_().as_ref(), &mut pointer_builder);
+        },
         | witx::Type::ConstPointer(tref) => {
             let mut pointee_builder = type_builder.reborrow().init_const_pointer();
 

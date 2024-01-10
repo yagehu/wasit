@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use wazzi_executor::RunningExecutor;
 
 use crate::{
-    call::{BuiltinValue, CallParam, CallResult, StringValue},
+    call::{BuiltinValue, CallParam, CallResult, PointerValue, StringValue},
     capnp_mappers::{self, build_type},
     Call,
     Value,
@@ -59,6 +59,10 @@ impl ProgSeed {
                 message_builder.init_root::<wazzi_executor_capnp::call_request::Builder>();
 
             match call.func.as_str() {
+                | "args_get" => call_builder.set_func(wazzi_executor_capnp::Func::ArgsGet),
+                | "args_sizes_get" => {
+                    call_builder.set_func(wazzi_executor_capnp::Func::ArgsSizesGet)
+                },
                 | "fd_write" => call_builder.set_func(wazzi_executor_capnp::Func::FdWrite),
                 | "path_open" => call_builder.set_func(wazzi_executor_capnp::Func::PathOpen),
                 | _ => panic!(),
@@ -138,7 +142,9 @@ impl ProgSeed {
                 | wazzi_executor_capnp::call_return::Which::Errno(errno) if errno == 0 => {
                     handle_results_ok()
                 },
-                | wazzi_executor_capnp::call_return::Which::Errno(errno) => todo!(),
+                | wazzi_executor_capnp::call_return::Which::Errno(errno) => {
+                    println!("errno {errno}")
+                },
             }
         }
 
@@ -248,6 +254,14 @@ fn build_value(builder: &mut wazzi_executor_capnp::value::Builder, ty: &witx::Ty
                 let mut element_builder = const_pointer_builder.reborrow().get(i as u32);
 
                 build_value(&mut element_builder, tref.type_().as_ref(), element_value);
+            }
+        },
+        | (witx::Type::Pointer(_tref), Value::Pointer(pointer_value)) => {
+            let mut pointer_builder = builder.reborrow().init_pointer();
+            let mut alloc_builder = pointer_builder.reborrow().init_alloc();
+
+            match pointer_value {
+                | &PointerValue::Alloc { resource } => alloc_builder.set_resource_id(resource),
             }
         },
         | (witx::Type::Builtin(builtin_type), Value::Builtin(builtin_value)) => {
