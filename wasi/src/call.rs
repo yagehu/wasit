@@ -61,6 +61,7 @@ pub enum Value {
     Bitflags(BitflagsValue),
     Array(ArrayValue),
     Record(RecordValue),
+    ConstPointer(PointerValue),
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Debug)]
@@ -100,21 +101,17 @@ pub enum BitflagsRepr {
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Debug)]
-pub struct ArrayValue(pub Vec<ArrayElementValue>);
+pub struct ArrayValue(pub Vec<CallParam>);
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Debug)]
-#[serde(rename_all = "snake_case")]
-pub enum ArrayElementValue {
-    Resource(u64),
-    Value(Value),
-}
-
-#[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Debug)]
-pub struct RecordValue(Vec<RecordMemberValue>);
+pub struct RecordValue(pub Vec<RecordMemberValue>);
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct RecordMemberValue {
     pub name:  String,
-    pub value: Value,
+    pub value: CallParam,
 }
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Debug)]
+pub struct PointerValue(pub Vec<Value>);

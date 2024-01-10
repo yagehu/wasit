@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use wazzi_executor::RunningExecutor;
 
 use crate::{
-    call::{CallParam, CallResult, StringValue},
-    capnp_mappers,
+    call::{BuiltinValue, CallParam, CallResult, StringValue},
+    capnp_mappers::{self, build_type},
     Call,
     Value,
 };
@@ -96,59 +96,7 @@ impl ProgSeed {
                     | (_, &CallParam::Value(value)) => {
                         let mut value_builder = param_builder.init_value();
 
-                        match (param_spec.tref.type_().as_ref(), value) {
-                            | (witx::Type::Pointer(_tref), Value::String(StringValue::Utf8(s))) => {
-                                value_builder
-                                    .reborrow()
-                                    .init_string(s.len() as u32)
-                                    .push_str(s);
-                            },
-                            | (witx::Type::Record(record), Value::Bitflags(bitflags))
-                                if record.bitflags_repr().is_some() =>
-                            {
-                                if bitflags.members.len() != record.members.len() {
-                                    panic!(
-                                        "bitflags members length mismatch {} vs {}",
-                                        record.members.len(),
-                                        bitflags.members.len(),
-                                    );
-                                }
-
-                                let mut bitflags_builder = value_builder.init_bitflags();
-                                let mut members_builder = bitflags_builder
-                                    .reborrow()
-                                    .init_members(record.members.len() as u32);
-
-                                for (i, member) in bitflags.members.iter().enumerate() {
-                                    members_builder.set(i as u32, member.value);
-                                }
-                            },
-                            | (
-                                witx::Type::List(witx::TypeRef::Value(ty)),
-                                Value::String(string),
-                            ) if matches!(
-                                ty.as_ref(),
-                                witx::Type::Builtin(witx::BuiltinType::Char)
-                            ) =>
-                            {
-                                match string {
-                                    | StringValue::Utf8(s) => value_builder
-                                        .init_string(s.len() as u32)
-                                        .reborrow()
-                                        .push_str(s),
-                                }
-                            },
-                            | (witx::Type::List(tref), Value::Array(array)) => {
-                                let mut array_builder = value_builder.reborrow().init_array();
-                                let mut items_builder =
-                                    array_builder.reborrow().init_items(array.0.len() as u32);
-
-                                for (i, element) in array.0.iter().enumerate() {
-                                    let mut item_builder = items_builder.reborrow().get(i as u32);
-                                }
-                            },
-                            | _ => unimplemented!("param_spec is {:#?}", param_spec),
-                        }
+                        build_value(&mut value_builder, param_spec.tref.type_().as_ref(), value);
                     },
                 }
             }
@@ -190,7 +138,7 @@ impl ProgSeed {
                 | wazzi_executor_capnp::call_return::Which::Errno(errno) if errno == 0 => {
                     handle_results_ok()
                 },
-                | wazzi_executor_capnp::call_return::Which::Errno(errno) => (),
+                | wazzi_executor_capnp::call_return::Which::Errno(errno) => todo!(),
             }
         }
 
@@ -198,6 +146,122 @@ impl ProgSeed {
             calls: self.calls.clone(),
             resource_ctx,
         })
+    }
+}
+
+fn build_value(builder: &mut wazzi_executor_capnp::value::Builder, ty: &witx::Type, value: &Value) {
+    match (ty, value) {
+        | (witx::Type::Pointer(_tref), Value::String(StringValue::Utf8(s))) => {
+            builder.reborrow().init_string(s.len() as u32).push_str(s);
+        },
+        | (witx::Type::Record(record), Value::Bitflags(bitflags))
+            if record.bitflags_repr().is_some() =>
+        {
+            if bitflags.members.len() != record.members.len() {
+                panic!(
+                    "bitflags members length mismatch {} vs {}",
+                    record.members.len(),
+                    bitflags.members.len(),
+                );
+            }
+
+            let mut bitflags_builder = builder.reborrow().init_bitflags();
+            let mut members_builder = bitflags_builder
+                .reborrow()
+                .init_members(record.members.len() as u32);
+
+            for (i, member) in bitflags.members.iter().enumerate() {
+                members_builder.set(i as u32, member.value);
+            }
+        },
+        | (witx::Type::List(witx::TypeRef::Value(ty)), Value::String(string))
+            if matches!(ty.as_ref(), witx::Type::Builtin(witx::BuiltinType::Char)) =>
+        {
+            match string {
+                | StringValue::Utf8(s) => {
+                    builder.reborrow().init_string(s.len() as u32).push_str(s)
+                },
+            }
+        },
+        | (witx::Type::List(tref), Value::Array(array)) => {
+            let mut array_builder = builder.reborrow().init_array();
+            let mut items_builder = array_builder.reborrow().init_items(array.0.len() as u32);
+
+            for (i, element) in array.0.iter().enumerate() {
+                let mut item_builder = items_builder.reborrow().get(i as u32);
+                let mut item_type_builder = item_builder.reborrow().init_type();
+
+                build_type(tref.type_().as_ref(), &mut item_type_builder);
+
+                match element {
+                    | &CallParam::Resource(resource_id) => {
+                        item_builder.reborrow().init_resource().set_id(resource_id);
+                    },
+                    | CallParam::Value(value) => {
+                        let mut item_value_builder = item_builder.reborrow().init_value();
+
+                        build_value(&mut item_value_builder, tref.type_().as_ref(), value);
+                    },
+                }
+            }
+        },
+        | (witx::Type::Record(record_type), Value::Record(record_value)) => {
+            let mut record_builder = builder.reborrow().init_record();
+            let mut members_builder = record_builder
+                .reborrow()
+                .init_members(record_type.members.len() as u32);
+
+            for (i, (member_type, member_value)) in record_type
+                .members
+                .iter()
+                .zip(record_value.0.iter())
+                .enumerate()
+            {
+                let mut member_builder = members_builder.reborrow().get(i as u32);
+                let mut member_type_builder = member_builder.reborrow().init_type();
+
+                build_type(member_type.tref.type_().as_ref(), &mut member_type_builder);
+
+                match &member_value.value {
+                    | &CallParam::Resource(resource_id) => member_builder
+                        .reborrow()
+                        .init_resource()
+                        .set_id(resource_id),
+                    | CallParam::Value(value) => {
+                        let mut member_value_builder = member_builder.reborrow().init_value();
+
+                        build_value(
+                            &mut member_value_builder,
+                            member_type.tref.type_().as_ref(),
+                            value,
+                        );
+                    },
+                }
+            }
+        },
+        | (witx::Type::ConstPointer(tref), Value::ConstPointer(pointer_value)) => {
+            let mut const_pointer_builder = builder
+                .reborrow()
+                .init_const_pointer(pointer_value.0.len() as u32);
+
+            for (i, element_value) in pointer_value.0.iter().enumerate() {
+                let mut element_builder = const_pointer_builder.reborrow().get(i as u32);
+
+                build_value(&mut element_builder, tref.type_().as_ref(), element_value);
+            }
+        },
+        | (witx::Type::Builtin(builtin_type), Value::Builtin(builtin_value)) => {
+            let mut builtin_builder = builder.reborrow().init_builtin();
+
+            match (builtin_type, builtin_value) {
+                | (witx::BuiltinType::U8 { .. }, &BuiltinValue::U8(i)) => builtin_builder.set_u8(i),
+                | (witx::BuiltinType::U32 { .. }, &BuiltinValue::U32(i)) => {
+                    builtin_builder.set_u32(i)
+                },
+                | _ => unimplemented!(),
+            }
+        },
+        | _ => unimplemented!("type is {:#?} {:#?}", ty, value),
     }
 }
 

@@ -210,15 +210,20 @@ struct Value {
   }
 
   struct Array {
-    items @0 :List(Value);
+    items @0 :List(ParamSpec);
   }
 
+  struct Record {
+    members @0 :List(ParamSpec);
+  }
 
   union {
-    builtin  @0 :Builtin;
-    string   @1 :Text;
-    bitflags @2 :Bitflags;
-    handle   @3 :UInt32;
-    array    @4 :Array;
+    builtin      @0 :Builtin;
+    string       @1 :Text;
+    bitflags     @2 :Bitflags;
+    handle       @3 :UInt32;
+    array        @4 :Array;
+    record       @5 :Record;
+    constPointer @6 :List(Value);
   }
 }

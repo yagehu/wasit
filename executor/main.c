@@ -25,8 +25,18 @@ struct resource_map_entry {
 noreturn void fail(const char* err);
 
 // Allocate some memory for the type and set its value.
-void * malloc_set_value(const struct Type, const struct Value, int32_t * len);
-void   set_ptr_value_no_alloc(const struct Type, const struct Value, void * ptr);
+void * malloc_set_value(
+    struct resource_map_entry ** resource_map,
+    const struct Type,
+    const struct Value,
+    int32_t * len
+);
+void set_ptr_value_no_alloc(
+    struct resource_map_entry ** resource_map,
+    const struct Type,
+    const struct Value,
+    void * ptr
+);
 
 void set_value_from_ptr(struct capn_segment **, struct Value *, const struct Type, void * ptr);
 
@@ -44,6 +54,8 @@ void   handle_result_post(
     CallResult_list call_result_list,
     void * ptr
 );
+
+size_t type_size(struct Type type);
 
 int main(void) {
     struct resource_map_entry * resource_map = NULL;
@@ -93,7 +105,12 @@ noreturn void fail(const char* err) {
     exit(1);
 }
 
-void * malloc_set_value(const struct Type type, const struct Value value, int32_t * len) {
+void * malloc_set_value(
+    struct resource_map_entry ** resource_map,
+    const struct Type type,
+    const struct Value value,
+    int32_t * len
+) {
     void * ptr;
 
     switch (type.which) {
@@ -159,17 +176,22 @@ void * malloc_set_value(const struct Type type, const struct Value value, int32_
 
             break;
         }
-        case Type_constPointer: fail("unimplemented: constPointer param");
+        case Type_constPointer: fail("malloc_set_value constPointer"); break;
     }
 
     if (ptr == NULL) fail("failed to alloc");
 
-    set_ptr_value_no_alloc(type, value, ptr);
+    set_ptr_value_no_alloc(resource_map, type, value, ptr);
 
     return ptr;
 }
 
-void set_ptr_value_no_alloc(const struct Type type, const struct Value value, void * ptr) {
+void set_ptr_value_no_alloc(
+    struct resource_map_entry ** resource_map,
+    struct Type type,
+    struct Value value,
+    void * ptr
+) {
     switch (value.which) {
         case Value_builtin: {
             struct Value_Builtin builtin_value;
@@ -226,12 +248,114 @@ void set_ptr_value_no_alloc(const struct Type type, const struct Value value, vo
             read_Type(&item_type, array_type.item);
 
             for (int i = 0; i < capn_len(array_value.items); i++) {
-                struct Value item_value;
+                struct ParamSpec item_spec;
 
-                get_Value(&item_value, array_value.items, i);
+                get_ParamSpec(&item_spec, array_value.items, i);
 
-                set_ptr_value_no_alloc(item_type, item_value, (uint8_t *) ptr + (array_type.itemSize * i));
+                void * element_ptr = (uint8_t *) ptr + (array_type.itemSize * i);
+
+                switch (item_spec.which) {
+                    case ParamSpec_resource: {
+                        struct ResourceRef resource_ref;
+
+                        read_ResourceRef(&resource_ref, item_spec.resource);
+
+                        struct resource_map_entry * resource_entry =
+                            hmgetp_null(*resource_map, resource_ref.id);
+                        if (resource_entry == NULL) fail("array element resource not found");
+
+                        memcpy(element_ptr, resource_entry->value.ptr, resource_entry->value.size);
+
+                        break;
+                    }
+                    case ParamSpec_value: {
+                        struct Value item_value;
+
+                        read_Value(&item_value, item_spec.value);
+                        set_ptr_value_no_alloc(resource_map, item_type, item_value, element_ptr);
+
+                        break;
+                    }
+                }
             }
+
+            break;
+        }
+        case Value_record: {
+            struct Value_Record record_value;
+            struct Type_Record  record_type;
+
+            read_Value_Record(&record_value, value.record);
+            read_Type_Record(&record_type, type.record);
+
+            for (int i = 0; i < capn_len(record_type.members); i++) {
+                struct Type_Record_Member record_member_type;
+                struct ParamSpec          record_member;
+
+                get_Type_Record_Member(&record_member_type, record_type.members, i);
+                get_ParamSpec(&record_member, record_value.members, i);
+
+                void * member_ptr = (uint8_t *) ptr + record_member_type.offset;
+
+                switch (record_member.which) {
+                    case ParamSpec_resource: {
+                        struct ResourceRef resource_ref;
+
+                        read_ResourceRef(&resource_ref, record_member.resource);
+
+                        struct resource_map_entry * resource_entry =
+                            hmgetp_null(*resource_map, resource_ref.id);
+                        if (resource_entry == NULL) fail("record member resource not found");
+
+                        memcpy(member_ptr, resource_entry->value.ptr, resource_entry->value.size);
+
+                        break;
+                    }
+                    case ParamSpec_value: {
+                        struct Value record_member_value;
+                        struct Type  record_member_type;
+
+                        read_Value(&record_member_value, record_member.value);
+                        read_Type(&record_member_type, record_member.type);
+                        set_ptr_value_no_alloc(resource_map, record_member_type, record_member_value, member_ptr);
+
+                        fprintf(stderr, "record %d = %d\n", (int32_t) member_ptr, * (int32_t *) member_ptr);
+
+                        if (* (int32_t *) member_ptr != 2) {
+                            fprintf(stderr, "printf %s\n", * (char **) member_ptr);
+                        }
+
+                        break;
+                    }
+                }
+            }
+
+            break;
+        }
+        case Value_constPointer: {
+            struct Type element_type;
+
+            read_Type(&element_type, type.constPointer);
+
+            const size_t element_size = type_size(element_type);
+            void * elements = malloc(capn_len(value.constPointer) * element_size);
+
+            fprintf(stderr, "elements_len %d %zu\n", capn_len(value.constPointer), element_size);
+
+            for (int i = 0; i < capn_len(value.constPointer); i++) {
+                struct Value element_value;
+
+                get_Value(&element_value, value.constPointer, i);
+
+                void * element_ptr = (uint8_t *) elements + i * element_size;
+
+                set_ptr_value_no_alloc(resource_map, element_type, element_value, element_ptr);
+
+                fprintf(stderr, "element_ptr %d = %d\n", (int32_t) element_ptr, * (char *) element_ptr);
+            }
+
+            fprintf(stderr, "elements ptr %d\n", (int32_t) elements);
+            * (int32_t *) ptr = (int32_t) elements;
 
             break;
         }
@@ -328,6 +452,8 @@ void handle_decl(
         case Value_builtin:
         case Value_string:
         case Value_array:
+        case Value_record:
+        case Value_constPointer:
         case Value_bitflags: fail("only handle can be declared");
         case Value_handle: {
             uint32_t * ptr = malloc(sizeof(uint32_t));
@@ -379,10 +505,11 @@ void handle_call(
             void *  p1_iovs_ptr  = handle_param_pre(resource_map, p1_iovs, &p1_iovs_len);
             void *  r0_size_ptr  = handle_result_pre(resource_map, r0_size);
             int32_t p0_fd_       = * (int32_t *) p0_fd_ptr;
-            int32_t p1_iovs_     = * (int32_t *) p1_iovs_ptr;
+            int32_t p1_iovs_     = (int32_t) p1_iovs_ptr;
             int32_t r0_size_     = (int32_t) r0_size_ptr;
 
-            fprintf(stderr, "fd_write() %d\n", p1_iovs_len);
+            fprintf(stderr, "fd_write() %d = %d\n", p1_iovs_, * (int32_t *) p1_iovs_ptr);
+            fprintf(stderr, "fd_write() %d fd %d iovs_len %d iovs_ptr %d iovs_buf_len %d iovs_buf %d\n", p1_iovs_len, * (int32_t *) p0_fd_ptr, p1_iovs_len, (int32_t) p1_iovs_ptr, (* ((int32_t **) p1_iovs_ptr))[1], ** (int32_t **) p1_iovs_ptr);
 
             int32_t errno = __imported_wasi_snapshot_preview1_fd_write(
                 p0_fd_,
@@ -521,7 +648,7 @@ void * handle_param_pre(
             read_Value(&value, spec.value);
             read_Type(&type, spec.type);
 
-            return malloc_set_value(type, value, len);
+            return malloc_set_value(resource_map, type, value, len);
         }
     }
 
@@ -619,10 +746,10 @@ void handle_result_post(
             break;
         }
         case ResultSpec_resource: {
-            // TODO(huyage): size.
+            const size_t size = type_size(type);
             const struct resource resource = {
                 .ptr  = ptr,
-                .size = 0,
+                .size = size,
             };
 
             hmput(*resource_map, spec.resource, resource);
@@ -677,4 +804,51 @@ void handle_result_post(
     // set_result_value(segment, &value, wasi_type, ptr);
     // set_Value(&value, call_result_list, result_idx);
     set_CallResult(&call_result, call_result_list, result_idx);
+}
+
+size_t type_size(const struct Type type) {
+    switch (type.which) {
+        case Type_builtin: {
+            struct Type_Builtin builtin_type;
+
+            read_Type_Builtin(&builtin_type, type.builtin);
+
+            switch (builtin_type.which) {
+                case Type_Builtin__char: return sizeof(uint8_t);
+                case Type_Builtin_u8:    return sizeof(uint8_t);
+                case Type_Builtin_u16:   return sizeof(uint16_t);
+                case Type_Builtin_u32:   return sizeof(uint32_t);
+                case Type_Builtin_u64:   return sizeof(uint64_t);
+                case Type_Builtin_s8:    return sizeof(int8_t);
+                case Type_Builtin_s16:   return sizeof(int16_t);
+                case Type_Builtin_s32:   return sizeof(int32_t);
+                case Type_Builtin_s64:   return sizeof(int64_t);
+            }
+        }
+        case Type_string: fail("string type does not have a size");
+        case Type_bitflags: {
+            struct Type_Bitflags bitflags_type;
+
+            read_Type_Bitflags(&bitflags_type, type.bitflags);
+
+            switch (bitflags_type.repr) {
+                case Type_IntRepr_u8:  return sizeof(uint8_t);
+                case Type_IntRepr_u16: return sizeof(uint16_t);
+                case Type_IntRepr_u32: return sizeof(uint32_t);
+                case Type_IntRepr_u64: return sizeof(uint64_t);
+            }
+        }
+        case Type_handle: return sizeof(int32_t);
+        case Type_array: fail("array type does not have a size");
+        case Type_record: {
+            struct Type_Record record_type;
+
+            read_Type_Record(&record_type, type.record);
+
+            return record_type.size;
+        }
+        case Type_constPointer: {
+            return sizeof(uint32_t);
+        }
+    }
 }
