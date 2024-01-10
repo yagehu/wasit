@@ -1,0 +1,31 @@
+{
+    "mount_base_dir": false,
+    "calls": [
+        {
+            "func": "environ_sizes_get",
+            "results": [
+                { "resource": 0 },
+                { "resource": 1 }
+            ]
+        },
+        {
+            "func": "environ_get",
+            "params": [
+                {
+                    "value": {
+                        "pointer": {
+                            "alloc": { "resource": 0 }
+                        }
+                    }
+                },
+                {
+                    "value": {
+                        "pointer": {
+                            "alloc": { "resource": 1 }
+                        }
+                    }
+                }
+            ]
+        }
+    ]
+}

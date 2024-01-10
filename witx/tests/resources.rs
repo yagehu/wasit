@@ -11,7 +11,17 @@ fn document() -> wazzi_witx::Document {
 #[test]
 fn resources_exist() {
     let doc = document();
-    let cases = vec!["argv", "argv_buf", "argv_size", "argv_buf_size", "fd"];
+    let cases = vec![
+        "argv",
+        "argv_buf",
+        "argv_size",
+        "argv_buf_size",
+        "fd",
+        "environ",
+        "environ_size",
+        "environ_buf",
+        "environ_buf_size",
+    ];
 
     for case in &cases {
         let resource = doc.resource(&Id::new(case));
@@ -36,6 +46,27 @@ fn argv() {
     assert_eq!(argv_size_can_fulfill[0].tref, args_get.params[0].tref);
     assert_eq!(argv_buf_size_can_fulfill[0].name, Id::new("argv_buf"));
     assert_eq!(argv_buf_size_can_fulfill[0].tref, args_get.params[1].tref);
+}
+
+#[test]
+fn environ() {
+    let doc = document();
+    let module = doc.module(&Id::new("wasi_snapshot_preview1")).unwrap();
+    let environ_get = module.func(&Id::new("environ_get")).unwrap();
+    let environ_sizes_get = module.func(&Id::new("environ_sizes_get")).unwrap();
+    let environ_sizes_get_results = environ_sizes_get.unpack_expected_result();
+    let environ_size_resource = environ_sizes_get_results[0].resource(&doc).unwrap();
+    let environ_buf_size_resource = environ_sizes_get_results[1].resource(&doc).unwrap();
+    let environ_size_can_fulfill = environ_size_resource.can_fulfill(&doc);
+    let environ_buf_size_can_fulfill = environ_buf_size_resource.can_fulfill(&doc);
+
+    assert_eq!(environ_size_can_fulfill[0].name, Id::new("environ"));
+    assert_eq!(environ_size_can_fulfill[0].tref, environ_get.params[0].tref);
+    assert_eq!(environ_buf_size_can_fulfill[0].name, Id::new("environ_buf"));
+    assert_eq!(
+        environ_buf_size_can_fulfill[0].tref,
+        environ_get.params[1].tref
+    );
 }
 
 #[test]

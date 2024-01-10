@@ -535,14 +535,61 @@ void handle_call(
             void * r0_argv_size_ptr      = handle_result_pre(resource_map, r0_argv_size);
             void * r1_argv_buf_size_ptr  = handle_result_pre(resource_map, r1_argv_buf_size);
             int32_t r0_argv_size_        = (int32_t) r0_argv_size_ptr;
-            int32_t r0_argv_buf_size_    = (int32_t) r1_argv_buf_size_ptr;
+            int32_t r1_argv_buf_size_    = (int32_t) r1_argv_buf_size_ptr;
 
-            int32_t errno = __imported_wasi_snapshot_preview1_args_sizes_get(r0_argv_size_, r0_argv_buf_size_);
+            int32_t errno = __imported_wasi_snapshot_preview1_args_sizes_get(r0_argv_size_, r1_argv_buf_size_);
 
             CallResult_list call_result_list = new_CallResult_list(*segment, 2 /* sz */);
 
             handle_result_post(resource_map, segment, r0_argv_size, 0, call_result_list, r0_argv_size_ptr);
             handle_result_post(resource_map, segment, r1_argv_buf_size, 1, call_result_list, r1_argv_buf_size_ptr);
+
+            call_return.which     = CallReturn_errno;
+            call_return.errno     = errno;
+            call_response.results = call_result_list;
+
+            break;
+        }
+        case Func_environGet: {
+            struct ParamSpec p0_environ;
+            struct ParamSpec p1_environ_buf;
+
+            get_ParamSpec(&p0_environ, call.params, 0);
+            get_ParamSpec(&p1_environ_buf, call.params, 1);
+
+            void * p0_environ_ptr     = handle_param_pre(resource_map, p0_environ, NULL);
+            void * p1_environ_buf_ptr = handle_param_pre(resource_map, p1_environ_buf, NULL);
+            int32_t p0_environ_       = * (int32_t *) p0_environ_ptr;
+            int32_t p1_environ_buf_   = * (int32_t *) p1_environ_buf_ptr;
+
+            int32_t errno = __imported_wasi_snapshot_preview1_environ_get(p0_environ_,  p1_environ_buf_);
+
+            CallResult_list call_result_list = new_CallResult_list(*segment, 0 /* sz */);
+
+            call_return.which     = CallReturn_errno;
+            call_return.errno     = errno;
+            call_response.results = call_result_list;
+
+            break;
+        }
+        case Func_environSizesGet: {
+            struct ResultSpec r0_environ_size;
+            struct ResultSpec r1_environ_buf_size;
+
+            get_ResultSpec(&r0_environ_size, call.results, 0);
+            get_ResultSpec(&r1_environ_buf_size, call.results, 1);
+
+            void *  r0_environ_size_ptr      = handle_result_pre(resource_map, r0_environ_size);
+            void *  r1_environ_buf_size_ptr  = handle_result_pre(resource_map, r1_environ_buf_size);
+            int32_t r0_environ_size_         = (int32_t) r0_environ_size_ptr;
+            int32_t r1_environ_buf_size_     = (int32_t) r1_environ_buf_size_ptr;
+
+            int32_t errno = __imported_wasi_snapshot_preview1_environ_sizes_get(r0_environ_size_, r1_environ_buf_size_);
+
+            CallResult_list call_result_list = new_CallResult_list(*segment, 2 /* sz */);
+
+            handle_result_post(resource_map, segment, r0_environ_size, 0, call_result_list, r0_environ_size_ptr);
+            handle_result_post(resource_map, segment, r1_environ_buf_size, 1, call_result_list, r1_environ_buf_size_ptr);
 
             call_return.which     = CallReturn_errno;
             call_return.errno     = errno;

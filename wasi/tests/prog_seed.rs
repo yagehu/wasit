@@ -139,3 +139,26 @@ fn args() {
 
     executor.kill();
 }
+
+#[test]
+fn environ() {
+    let spec = spec();
+    let path = [env!("CARGO_MANIFEST_DIR"), "..", "seeds", "03-environ.json"]
+        .into_iter()
+        .collect::<PathBuf>();
+    let f = fs::OpenOptions::new().read(true).open(&path).unwrap();
+    let seed: ProgSeed = serde_json::from_reader(f).unwrap();
+    let wasmtime = wazzi_runners::Wasmtime::new("wasmtime");
+    let stderr = Arc::new(Mutex::new(Vec::new()));
+    let mut executor = wazzi_executor::ExecutorRunner::new(wasmtime, executor_bin(), None)
+        .run(stderr.clone())
+        .expect("failed to run executor");
+
+    assert!(
+        seed.execute(&mut executor, &spec).is_ok(),
+        "Executor stderr:\n{}",
+        String::from_utf8(stderr.lock().unwrap().deref().clone()).unwrap(),
+    );
+
+    executor.kill();
+}

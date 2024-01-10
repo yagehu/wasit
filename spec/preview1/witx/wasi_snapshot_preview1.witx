@@ -20,6 +20,18 @@
 (typename $argv_buf_size $size)
 (resource $argv_buf_size (type $argv_buf_size) (@alloc $argv_buf))
 
+(typename $environ (@witx pointer (@witx pointer u8)))
+(resource $environ (type $environ))
+
+(typename $environ_buf (@witx pointer u8))
+(resource $environ_buf (type $environ_buf))
+
+(typename $environ_size $size)
+(resource $environ_size (type $environ_size) (@alloc $environ))
+
+(typename $environ_buf_size $size)
+(resource $environ_buf_size (type $environ_buf_size) (@alloc $environ_buf))
+
 (module $wasi_snapshot_preview1
   ;;; Linear memory to be accessed by WASI functions that need it.
   (import "memory" (memory))
@@ -55,15 +67,15 @@
   ;;; The sizes of the buffers should match that returned by `environ_sizes_get`.
   ;;; Key/value pairs are expected to be joined with `=`s, and terminated with `\0`s.
   (@interface func (export "environ_get")
-    (param $environ (@witx pointer (@witx pointer u8)))
-    (param $environ_buf (@witx pointer u8))
+    (param $environ     $environ)
+    (param $environ_buf $environ_buf)
     (result $error (expected (error $errno)))
   )
   ;;; Return environment variable data sizes.
   (@interface func (export "environ_sizes_get")
     ;;; Returns the number of environment variable arguments and the size of the
     ;;; environment variable data.
-    (result $error (expected (tuple $size $size) (error $errno)))
+    (result $error (expected (tuple $environ_size $environ_buf_size) (error $errno)))
   )
 
   ;;; Return the resolution of a clock.

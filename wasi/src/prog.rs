@@ -63,6 +63,10 @@ impl ProgSeed {
                 | "args_sizes_get" => {
                     call_builder.set_func(wazzi_executor_capnp::Func::ArgsSizesGet)
                 },
+                | "environ_get" => call_builder.set_func(wazzi_executor_capnp::Func::EnvironGet),
+                | "environ_sizes_get" => {
+                    call_builder.set_func(wazzi_executor_capnp::Func::EnvironSizesGet)
+                },
                 | "fd_write" => call_builder.set_func(wazzi_executor_capnp::Func::FdWrite),
                 | "path_open" => call_builder.set_func(wazzi_executor_capnp::Func::PathOpen),
                 | _ => panic!(),
