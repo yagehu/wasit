@@ -131,5 +131,6 @@ pub enum PointerValue {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct VariantValue {
-    pub name: String,
+    pub name:    String,
+    pub payload: Option<Box<CallParam>>,
 }

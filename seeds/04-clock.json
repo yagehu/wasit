@@ -11,7 +11,8 @@
             "params": [
                 { "value": { "variant": { "name": "realtime" } } },
                 { "resource": 0 }
-            ]
+            ],
+            "results": [ { "resource": 1 } ]
         }
     ]
 }

@@ -61,7 +61,40 @@ pub(crate) fn build_type(
                 build_type(member.tref.type_().as_ref(), &mut member_type_builder);
             }
         },
-        | witx::Type::Variant(_) => todo!(),
+        | witx::Type::Variant(variant) => {
+            let mut variant_builder = type_builder.reborrow().init_variant();
+
+            variant_builder
+                .reborrow()
+                .set_payload_offset(variant.payload_offset() as u32);
+            variant_builder
+                .reborrow()
+                .set_size(variant.mem_size() as u32);
+            variant_builder
+                .reborrow()
+                .set_tag_repr(from_witx_int_repr(&variant.tag_repr));
+
+            let mut cases_builder = variant_builder.init_cases(variant.cases.len() as u32);
+
+            for (i, case_type) in variant.cases.iter().enumerate() {
+                let mut case_builder = cases_builder.reborrow().get(i as u32);
+
+                case_builder
+                    .reborrow()
+                    .init_name(case_type.name.as_str().len() as u32)
+                    .push_str(case_type.name.as_str());
+
+                let mut case_type_builder = case_builder.reborrow().init_type();
+
+                match &case_type.tref {
+                    | None => case_type_builder.reborrow().set_none(()),
+                    | Some(tref) => build_type(
+                        tref.type_().as_ref(),
+                        &mut case_type_builder.reborrow().init_some(),
+                    ),
+                }
+            }
+        },
         | witx::Type::Handle(_) => type_builder.reborrow().set_handle(()),
         | witx::Type::List(item_tref) => {
             if let witx::Type::Builtin(witx::BuiltinType::Char) = item_tref.type_().as_ref() {

@@ -401,15 +401,50 @@ void set_ptr_value_no_alloc(
             switch (case_type.which) {
                 case Type_Variant_CaseType_none: break;
                 case Type_Variant_CaseType_some: {
-                    struct Type  case_type_;
-                    struct Value case_value;
+                    struct Type case_type_;
+                    struct Value_Variant_CaseValue maybe_case_value;
 
                     read_Type(&case_type_, case_type.some);
-                    read_Value(&case_value, variant_value.caseValue);
+                    read_Value_Variant_CaseValue(&maybe_case_value, variant_value.caseValue);
 
-                    void * payload_ptr = * (uint8_t *) ptr + variant_type.payloadOffset;
+                    switch (maybe_case_value.which) {
+                        case Value_Variant_CaseValue_none: break;
+                        case Value_Variant_CaseValue_some: {
+                            struct ParamSpec case_value__;
 
-                    set_ptr_value_no_alloc(resource_map, case_type_, );
+                            read_ParamSpec(&case_value__, maybe_case_value.some);
+
+                            void * payload_ptr = ((uint8_t *) ptr) + variant_type.payloadOffset;
+
+                            switch (case_value__.which) {
+                                case ParamSpec_resource: {
+                                    struct ResourceRef resource_ref;
+
+                                    read_ResourceRef(&resource_ref, case_value__.resource);
+
+                                    struct resource_map_entry * resource_entry =
+                                        hmgetp_null(*resource_map, resource_ref.id);
+                                    if (resource_entry == NULL) fail("variant case resource not found");
+
+                                    memcpy(payload_ptr, resource_entry->value.ptr, type_size(case_type_));
+
+                                    break;
+                                }
+                                case ParamSpec_value: {
+                                    struct Value value_;
+                                    struct Type  type_;
+
+                                    read_Value(&value_, case_value__.value);
+                                    read_Type(&type_, case_value__.type);
+                                    set_ptr_value_no_alloc(resource_map, type_, value_, payload_ptr);
+                                    
+                                    break;
+                                }
+                            }
+
+                            break;
+                        }
+                    }
 
                     break;
                 }
@@ -486,6 +521,7 @@ void set_value_from_ptr(
         case Type_record: fail("unimplemented: record type result");
         case Type_constPointer: fail("unimplemented: constPointer type result");
         case Type_pointer: fail("unimplemented: pointer type result");
+        case Type_variant: fail("unimplemented: variant type result");
     }
 }
 
@@ -512,6 +548,7 @@ void handle_decl(
         case Value_record:
         case Value_constPointer:
         case Value_pointer:
+        case Value_variant:
         case Value_bitflags: fail("only handle can be declared");
         case Value_handle: {
             uint32_t * ptr = malloc(sizeof(uint32_t));
@@ -919,6 +956,7 @@ void * handle_result_pre(struct resource_map_entry ** resource_map, struct Resul
         case Type_record: fail("result cannot be record");
         case Type_constPointer: fail("result cannot be constPointer");
         case Type_pointer: fail("result cannot be pointer");
+        case Type_variant: fail("result cannot be variant");
     }
 }
 
@@ -1004,5 +1042,12 @@ size_t type_size(const struct Type type) {
         }
         case Type_constPointer: return sizeof(uint32_t);
         case Type_pointer: return sizeof(uint32_t);
+        case Type_variant: {
+            struct Type_Variant variant_type;
+
+            read_Type_Variant(&variant_type, type.variant);
+
+            return variant_type.size;
+        }
     }
 }

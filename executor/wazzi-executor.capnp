@@ -237,12 +237,13 @@ struct Value {
     struct CaseValue {
       union {
         none @0 :Void;
-        some @1 :Value;
+        some @1 :ParamSpec;
       }
     }
 
     caseIdx   @0 :UInt32;
-    caseValue @1 :Value;
+    caseName  @1 :Text;
+    caseValue @2 :CaseValue;
   }
 
   union {

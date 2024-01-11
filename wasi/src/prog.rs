@@ -6,7 +6,7 @@ use wazzi_executor::RunningExecutor;
 
 use crate::{
     call::{BuiltinValue, CallParam, CallResult, PointerValue, StringValue},
-    capnp_mappers::{self, build_type},
+    capnp_mappers,
     Call,
     Value,
 };
@@ -205,7 +205,7 @@ fn build_value(builder: &mut wazzi_executor_capnp::value::Builder, ty: &witx::Ty
                 let mut item_builder = items_builder.reborrow().get(i as u32);
                 let mut item_type_builder = item_builder.reborrow().init_type();
 
-                build_type(tref.type_().as_ref(), &mut item_type_builder);
+                capnp_mappers::build_type(tref.type_().as_ref(), &mut item_type_builder);
 
                 match element {
                     | &CallParam::Resource(resource_id) => {
@@ -234,7 +234,10 @@ fn build_value(builder: &mut wazzi_executor_capnp::value::Builder, ty: &witx::Ty
                 let mut member_builder = members_builder.reborrow().get(i as u32);
                 let mut member_type_builder = member_builder.reborrow().init_type();
 
-                build_type(member_type.tref.type_().as_ref(), &mut member_type_builder);
+                capnp_mappers::build_type(
+                    member_type.tref.type_().as_ref(),
+                    &mut member_type_builder,
+                );
 
                 match &member_value.value {
                     | &CallParam::Resource(resource_id) => member_builder
@@ -281,6 +284,47 @@ fn build_value(builder: &mut wazzi_executor_capnp::value::Builder, ty: &witx::Ty
                     builtin_builder.set_u32(i)
                 },
                 | _ => unimplemented!(),
+            }
+        },
+        | (witx::Type::Variant(variant), Value::Variant(variant_value)) => {
+            let mut variant_builder = builder.reborrow().init_variant();
+            let (case_idx, case) = variant
+                .cases
+                .iter()
+                .enumerate()
+                .find(|(_i, case)| case.name.as_str() == variant_value.name)
+                .unwrap();
+
+            variant_builder.reborrow().set_case_idx(case_idx as u32);
+            variant_builder
+                .reborrow()
+                .init_case_name(case.name.as_str().len() as u32)
+                .push_str(case.name.as_str());
+
+            let mut case_value_builder = variant_builder.reborrow().init_case_value();
+
+            match (&case.tref, &variant_value.payload) {
+                | (None, None) => case_value_builder.reborrow().set_none(()),
+                | (Some(tref), Some(payload)) => {
+                    let mut builder = case_value_builder.reborrow().init_some();
+
+                    capnp_mappers::build_type(
+                        tref.type_().as_ref(),
+                        &mut builder.reborrow().init_type(),
+                    );
+
+                    match payload.as_ref() {
+                        | &CallParam::Resource(resource_id) => {
+                            builder.reborrow().init_resource().set_id(resource_id)
+                        },
+                        | CallParam::Value(value) => build_value(
+                            &mut builder.reborrow().init_value(),
+                            tref.type_().as_ref(),
+                            value,
+                        ),
+                    }
+                },
+                | _ => panic!(),
             }
         },
         | _ => unimplemented!("type is {:#?} {:#?}", ty, value),
