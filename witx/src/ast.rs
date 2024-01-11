@@ -666,6 +666,7 @@ pub struct InterfaceFuncParam {
     pub name: Id,
     pub tref: TypeRef,
     pub docs: String,
+    pub drop: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

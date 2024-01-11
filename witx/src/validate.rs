@@ -861,6 +861,7 @@ impl<'a, 'b> ModuleValidation<'a, 'b> {
                             )?,
                             tref,
                             docs: f.comments.docs(),
+                            drop: f.item.drop,
                         })
                     })
                     .collect::<Result<Vec<_>, _>>()?;
@@ -882,6 +883,7 @@ impl<'a, 'b> ModuleValidation<'a, 'b> {
                             )?,
                             tref,
                             docs: f.comments.docs(),
+                            drop: f.item.drop,
                         })
                     })
                     .collect::<Result<Vec<_>, _>>()?;

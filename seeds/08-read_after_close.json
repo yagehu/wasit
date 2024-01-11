@@ -133,13 +133,42 @@
             ]
         },
         {
-            "func": "fd_allocate",
+            "func": "fd_close",
+            "params": [ { "resource": 1 } ]
+        },
+        {
+            "func": "fd_read",
             "params": [
                 { "resource": 1 },
-                { "value": { "builtin": { "u64": 0 } } },
-                { "value": { "builtin": { "u64": 1 } } }
-            ]
+                {
+                    "value": {
+                        "array": [
+                            {
+                                "value": {
+                                    "record": [
+                                        {
+                                            "name": "buf",
+                                            "value": {
+                                                "value": {
+                                                    "pointer": { "alloc": { "resource": 1 } }
+                                                }
+                                            }
+                                        },
+                                        {
+                                            "name": "buf_len",
+                                            "value": { "value": { "builtin": { "u32": 2 } } }
+                                        }
+                                    ]
+                                }
+                            }
+                        ]
+                    }
+                }
+            ],
+            "results": [ "ignore" ]
         }
     ]
 }
+
+
 

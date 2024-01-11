@@ -8,6 +8,9 @@
 
 (use "typenames.witx")
 
+(typename $newfd $fd)
+(resource $newfd (type $newfd))
+
 (typename $argv (@witx pointer (@witx pointer u8)))
 (resource $argv (type $argv))
 
@@ -105,7 +108,7 @@
   ;;; Provide file advisory information on a file descriptor.
   ;;; Note: This is similar to `posix_fadvise` in POSIX.
   (@interface func (export "fd_advise")
-    (param $fd $fd)
+    (param $fd $newfd)
     ;;; The offset within the file to which the advisory applies.
     (param $offset $filesize)
     ;;; The length of the region to which the advisory applies.
@@ -118,7 +121,7 @@
   ;;; Force the allocation of space in a file.
   ;;; Note: This is similar to `posix_fallocate` in POSIX.
   (@interface func (export "fd_allocate")
-    (param $fd $fd)
+    (param $fd $newfd)
     ;;; The offset at which to start the allocation.
     (param $offset $filesize)
     ;;; The length of the area that is allocated.
@@ -129,7 +132,7 @@
   ;;; Close a file descriptor.
   ;;; Note: This is similar to `close` in POSIX.
   (@interface func (export "fd_close")
-    (param $fd $fd)
+    (param $fd $newfd (@drop))
     (result $error (expected (error $errno)))
   )
 
@@ -243,7 +246,7 @@
   ;;; Read from a file descriptor.
   ;;; Note: This is similar to `readv` in POSIX.
   (@interface func (export "fd_read")
-    (param $fd $fd)
+    (param $fd $newfd)
     ;;; List of scatter/gather vectors to which to store data.
     (param $iovs $iovec_array)
     ;;; The number of bytes read.
@@ -294,7 +297,7 @@
   ;;; Move the offset of a file descriptor.
   ;;; Note: This is similar to `lseek` in POSIX.
   (@interface func (export "fd_seek")
-    (param $fd $fd)
+    (param $fd $newfd)
     ;;; The number of bytes to move.
     (param $offset $filedelta)
     ;;; The base from which the offset is relative.
@@ -325,7 +328,7 @@
   ;;; for a regular file by other threads in the WASI process should not be
   ;;; interleaved while `write` is executed.
   (@interface func (export "fd_write")
-    (param $fd $fd)
+    (param $fd $newfd)
     ;;; List of scatter/gather vectors from which to retrieve data.
     (param $iovs $ciovec_array)
     (result $error (expected $size (error $errno)))
@@ -414,7 +417,7 @@
     (param $fs_rights_inheriting $rights)
     (param $fdflags $fdflags)
     ;;; The file descriptor of the file that has been opened.
-    (result $error (expected $fd (error $errno)))
+    (result $error (expected $newfd (error $errno)))
   )
 
   ;;; Read the contents of a symbolic link.

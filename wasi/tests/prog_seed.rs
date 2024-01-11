@@ -1,3 +1,5 @@
+extern crate wazzi_witx as witx;
+
 use std::{
     env,
     fs,
@@ -6,11 +8,10 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use arbitrary::Unstructured;
 use tempfile::tempdir;
 
 use wazzi_wasi::{InMemorySnapshots, ProgSeed};
-
-extern crate wazzi_witx as witx;
 
 fn repo_root() -> PathBuf {
     [env!("CARGO_MANIFEST_DIR"), ".."].into_iter().collect()
@@ -323,4 +324,64 @@ fn allocate() {
         "snapshot:\n{:#?}\nstderr:\n{stderr_str}",
         fd_allocate_snapshot,
     );
+}
+
+#[test]
+fn read_after_close() {
+    let spec = spec();
+    let path = [
+        env!("CARGO_MANIFEST_DIR"),
+        "..",
+        "seeds",
+        "08-read_after_close.json",
+    ]
+    .into_iter()
+    .collect::<PathBuf>();
+    let f = fs::OpenOptions::new().read(true).open(&path).unwrap();
+    let seed: ProgSeed = serde_json::from_reader(f).unwrap();
+    let base_dir = tempdir().unwrap();
+    let wasmtime = wazzi_runners::Wasmtime::new("wasmtime");
+    let stderr = Arc::new(Mutex::new(Vec::new()));
+    let mut executor = wazzi_executor::ExecutorRunner::new(
+        wasmtime,
+        executor_bin(),
+        Some(base_dir.path().to_owned()),
+    )
+    .run(stderr.clone())
+    .expect("failed to run executor");
+    let mut mem_snapshots = InMemorySnapshots::default();
+    let mut recorder = wazzi_wasi::Recorder::new(&mut mem_snapshots);
+    let execute_result = seed.execute(&mut executor, &spec, &mut recorder);
+
+    assert!(
+        execute_result.is_ok(),
+        "Executor stderr:\n{}",
+        String::from_utf8(stderr.lock().unwrap().deref().clone()).unwrap(),
+    );
+
+    executor.kill();
+
+    let mut prog = execute_result.unwrap();
+    let fd_read_snapshot = mem_snapshots.snapshots.last().unwrap();
+    let stderr_str = String::from_utf8(stderr.try_lock().unwrap().deref().clone()).unwrap();
+
+    assert!(
+        matches!(fd_read_snapshot.errno, Some(errno) if errno != 0),
+        "snapshot:\n{:#?}\nstderr:\n{stderr_str}",
+        fd_read_snapshot,
+    );
+
+    // Since the fd was dropped via `fd_close`, it should be impossible to grow
+    // the prog with say `fd_read` func because it only accepts a `newfd`.
+    assert!(prog
+        .grow_by_func(
+            &mut Unstructured::new(&[]),
+            &spec,
+            &spec
+                .module(&witx::Id::new("wasi_snapshot_preview1"))
+                .unwrap()
+                .func(&witx::Id::new("fd_read"))
+                .unwrap()
+        )
+        .is_err());
 }

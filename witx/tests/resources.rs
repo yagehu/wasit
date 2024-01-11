@@ -90,6 +90,16 @@ fn clock() {
 }
 
 #[test]
+fn fd_close() {
+    let doc = document();
+    let module = doc.module(&Id::new("wasi_snapshot_preview1")).unwrap();
+    let fd_write = module.func(&Id::new("fd_close")).unwrap();
+    let fd = &fd_write.params[0];
+
+    assert!(fd.drop);
+}
+
+#[test]
 fn path_open() {
     let doc = document();
     let module = doc.module(&Id::new("wasi_snapshot_preview1")).unwrap();

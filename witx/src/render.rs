@@ -339,6 +339,10 @@ impl InterfaceFunc {
 
                 v.append(&mut f.tref.to_sexpr());
 
+                if f.drop {
+                    v.push(SExpr::Vec(vec![SExpr::annot("drop")]));
+                }
+
                 SExpr::docs(&f.docs, vec![SExpr::Vec(v)])
             })
             .collect();

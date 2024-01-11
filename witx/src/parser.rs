@@ -63,6 +63,7 @@ mod annotation {
     wast::annotation!(witx);
 
     wast::annotation!(alloc);
+    wast::annotation!(drop);
     wast::annotation!(r#type = "type");
 }
 
@@ -202,7 +203,7 @@ impl<'a, T: Parse<'a>> Parse<'a> for Documented<'a, T> {
         let _r1 = parser.register_annotation("witx");
         let _r1 = parser.register_annotation("interface");
         let _r1 = parser.register_annotation("alloc");
-        let _r1 = parser.register_annotation("resource");
+        let _r1 = parser.register_annotation("drop");
         let _r1 = parser.register_annotation("type");
         let comments = parser.parse()?;
         let item = parser.parse()?;
@@ -567,17 +568,22 @@ impl<'a> Parse<'a> for ResourceSyntax<'a> {
 pub struct FieldSyntax<'a> {
     pub name:  wast::Id<'a>,
     pub type_: TypedefSyntax<'a>,
+    pub drop:  bool,
 }
 
 impl<'a> Parse<'a> for FieldSyntax<'a> {
     fn parse(parser: Parser<'a>) -> Result<Self> {
-        parser.parens(|p| {
-            p.parse::<kw::field>()?;
+        parser.parens(|parser| {
+            parser.parse::<kw::field>()?;
 
-            let name: wast::Id = p.parse()?;
-            let type_ = p.parse()?;
+            let name: wast::Id = parser.parse()?;
+            let type_ = parser.parse()?;
 
-            Ok(FieldSyntax { name, type_ })
+            Ok(FieldSyntax {
+                name,
+                type_,
+                drop: false,
+            })
         })
     }
 }
@@ -807,14 +813,22 @@ enum InterfaceFuncField<'a> {
 }
 impl<'a> Parse<'a> for InterfaceFuncField<'a> {
     fn parse(parser: Parser<'a>) -> Result<Self> {
-        parser.parens(|p| {
-            let mut l = p.lookahead1();
+        parser.parens(|parser| {
+            let mut l = parser.lookahead1();
             if l.peek::<kw::param>() {
                 parser.parse::<kw::param>()?;
 
                 Ok(InterfaceFuncField::Param(FieldSyntax {
                     name:  parser.parse()?,
                     type_: parser.parse()?,
+                    drop:  match parser.peek2::<annotation::drop>() {
+                        | false => false,
+                        | true => parser.parens(|parser| {
+                            parser.parse::<annotation::drop>()?;
+
+                            Ok(true)
+                        })?,
+                    },
                 }))
             } else if l.peek::<kw::result>() {
                 parser.parse::<kw::result>()?;
@@ -822,6 +836,7 @@ impl<'a> Parse<'a> for InterfaceFuncField<'a> {
                 Ok(InterfaceFuncField::Result(FieldSyntax {
                     name:  parser.parse()?,
                     type_: parser.parse()?,
+                    drop:  false,
                 }))
             } else if l.peek::<annotation::witx>() {
                 parser.parse::<annotation::witx>()?;

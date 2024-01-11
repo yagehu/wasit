@@ -831,6 +831,26 @@ void handle_call(
 
             break;
         }
+        case Func_fdClose: {
+            struct ParamSpec  p0_fd_spec;
+
+            get_ParamSpec(&p0_fd_spec, call.params, 0);
+
+            void *  p0_fd_ptr = handle_param_pre(resource_map, p0_fd_spec, NULL);
+            int32_t p0_fd     = * (int32_t *) p0_fd_ptr;
+
+            int32_t errno = __imported_wasi_snapshot_preview1_fd_close(p0_fd);
+
+            CallResult_list call_result_list = new_CallResult_list(*segment, 0 /* sz */);
+
+            handle_param_post(p0_fd_spec, p0_fd_ptr);
+
+            call_return.which     = CallReturn_errno;
+            call_return.errno     = errno;
+            call_response.results = call_result_list;
+
+            break;
+        }
         case Func_fdRead: {
             struct ParamSpec  p0_fd;
             struct ParamSpec  p1_iovs;

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
-use color_eyre::eyre::{self, Context};
+use arbitrary::Unstructured;
+use color_eyre::eyre::{self, Context, ContextCompat};
 use serde::{Deserialize, Serialize};
 use wazzi_executor::RunningExecutor;
 
@@ -73,6 +74,7 @@ impl ProgSeed {
                 | "clock_time_get" => wazzi_executor_capnp::Func::ClockTimeGet,
                 | "fd_advise" => wazzi_executor_capnp::Func::FdAdvise,
                 | "fd_allocate" => wazzi_executor_capnp::Func::FdAllocate,
+                | "fd_close" => wazzi_executor_capnp::Func::FdClose,
                 | "fd_read" => wazzi_executor_capnp::Func::FdRead,
                 | "fd_seek" => wazzi_executor_capnp::Func::FdSeek,
                 | "fd_write" => wazzi_executor_capnp::Func::FdWrite,
@@ -359,6 +361,34 @@ fn build_value(builder: &mut wazzi_executor_capnp::value::Builder, ty: &witx::Ty
 pub struct Prog {
     calls:        Vec<Call>,
     resource_ctx: ResourceContext,
+}
+
+impl Prog {
+    pub fn grow_by_func(
+        &mut self,
+        u: &mut Unstructured,
+        spec: &witx::Document,
+        func_spec: &witx::InterfaceFunc,
+    ) -> Result<(), eyre::Error> {
+        let result_trefs = func_spec.unpack_expected_result();
+        let mut params = Vec::with_capacity(func_spec.params.len());
+        let mut results = Vec::with_capacity(result_trefs.len());
+
+        for (i, param_spec) in func_spec.params.iter().enumerate() {
+            let resource = param_spec
+                .tref
+                .resource(spec)
+                .wrap_err("param is not a resource")?;
+        }
+
+        self.calls.push(Call {
+            func: func_spec.name.as_str().to_owned(),
+            params,
+            results,
+        });
+
+        Ok(())
+    }
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
