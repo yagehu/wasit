@@ -77,6 +77,7 @@ impl ProgSeed {
                 | "clock_time_get" => {
                     call_builder.set_func(wazzi_executor_capnp::Func::ClockTimeGet)
                 },
+                | "fd_advise" => call_builder.set_func(wazzi_executor_capnp::Func::FdAdvise),
                 | "fd_read" => call_builder.set_func(wazzi_executor_capnp::Func::FdRead),
                 | "fd_seek" => call_builder.set_func(wazzi_executor_capnp::Func::FdSeek),
                 | "fd_write" => call_builder.set_func(wazzi_executor_capnp::Func::FdWrite),
@@ -308,6 +309,7 @@ fn build_value(builder: &mut wazzi_executor_capnp::value::Builder, ty: &witx::Ty
                 | (witx::BuiltinType::U32 { .. }, &BuiltinValue::U32(i)) => {
                     builtin_builder.set_u32(i)
                 },
+                | (witx::BuiltinType::U64, &BuiltinValue::U64(i)) => builtin_builder.set_u64(i),
                 | (witx::BuiltinType::S64, &BuiltinValue::S64(i)) => builtin_builder.set_s64(i),
                 | _ => unimplemented!("{:#?}", builtin_type),
             }

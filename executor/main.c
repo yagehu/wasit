@@ -757,6 +757,46 @@ void handle_call(
 
             break;
         }
+        case Func_fdAdvise: {
+            struct ParamSpec  p0_fd_spec;
+            struct ParamSpec  p1_offset_spec;
+            struct ParamSpec  p2_len_spec;
+            struct ParamSpec  p3_advise_spec;
+
+            get_ParamSpec(&p0_fd_spec, call.params, 0);
+            get_ParamSpec(&p1_offset_spec, call.params, 1);
+            get_ParamSpec(&p2_len_spec, call.params, 2);
+            get_ParamSpec(&p3_advise_spec, call.params, 3);
+
+            void *  p0_fd_ptr     = handle_param_pre(resource_map, p0_fd_spec, NULL);
+            void *  p1_offset_ptr = handle_param_pre(resource_map, p1_offset_spec, NULL);
+            void *  p2_len_ptr    = handle_param_pre(resource_map, p2_len_spec, NULL);
+            void *  p3_advise_ptr = handle_param_pre(resource_map, p3_advise_spec, NULL);
+            int32_t p0_fd         = * (int32_t *) p0_fd_ptr;
+            int32_t p1_offset     = * (int64_t *) p1_offset_ptr;
+            int32_t p2_len        = * (int64_t *) p2_len_ptr;
+            int32_t p3_advise     = * (int32_t *) p3_advise_ptr;
+
+            int32_t errno = __imported_wasi_snapshot_preview1_fd_advise(
+                p0_fd,
+                p1_offset,
+                p2_len,
+                p3_advise
+            );
+
+            CallResult_list call_result_list = new_CallResult_list(*segment, 0 /* sz */);
+
+            handle_param_post(p0_fd_spec, p0_fd_ptr);
+            handle_param_post(p1_offset_spec, p1_offset_ptr);
+            handle_param_post(p2_len_spec, p2_len_ptr);
+            handle_param_post(p3_advise_spec, p3_advise_ptr);
+
+            call_return.which     = CallReturn_errno;
+            call_return.errno     = errno;
+            call_response.results = call_result_list;
+
+            break;
+        }
         case Func_fdRead: {
             struct ParamSpec  p0_fd;
             struct ParamSpec  p1_iovs;
