@@ -67,6 +67,10 @@ impl ProgSeed {
                 | "environ_sizes_get" => {
                     call_builder.set_func(wazzi_executor_capnp::Func::EnvironSizesGet)
                 },
+                | "clock_res_get" => call_builder.set_func(wazzi_executor_capnp::Func::ClockResGet),
+                | "clock_time_get" => {
+                    call_builder.set_func(wazzi_executor_capnp::Func::ClockTimeGet)
+                },
                 | "fd_write" => call_builder.set_func(wazzi_executor_capnp::Func::FdWrite),
                 | "path_open" => call_builder.set_func(wazzi_executor_capnp::Func::PathOpen),
                 | _ => panic!(),

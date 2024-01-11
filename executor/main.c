@@ -178,6 +178,15 @@ void * malloc_set_value(
         }
         case Type_constPointer: fail("malloc_set_value constPointer"); break;
         case Type_pointer: ptr = malloc(sizeof(int32_t)); break;
+        case Type_variant: {
+            struct Type_Variant variant_type;
+
+            read_Type_Variant(&variant_type, type.variant);
+
+            ptr = malloc(variant_type.size);
+
+            break;
+        }
     }
 
     if (ptr == NULL) fail("failed to alloc");
@@ -368,6 +377,43 @@ void set_ptr_value_no_alloc(
             * (int32_t *) ptr = (int32_t) malloc(* (uint32_t *) resource_entry->value.ptr);
 
             break;
+        }
+        case Value_variant: {
+            struct Value_Variant variant_value;
+            struct Type_Variant  variant_type;
+
+            read_Value_Variant(&variant_value, value.variant);
+            read_Type_Variant(&variant_type, type.variant);
+
+            switch (variant_type.tagRepr) {
+                case Type_IntRepr_u8:  * (uint8_t *) ptr = variant_value.caseIdx;  break;
+                case Type_IntRepr_u16: * (uint16_t *) ptr = variant_value.caseIdx; break;
+                case Type_IntRepr_u32: * (uint32_t *) ptr = variant_value.caseIdx; break;
+                case Type_IntRepr_u64: fail("unimplemented: u64 variant tag");
+            }
+
+            struct Type_Variant_Case     case_;
+            struct Type_Variant_CaseType case_type;
+
+            get_Type_Variant_Case(&case_, variant_type.cases, variant_value.caseIdx);
+            read_Type_Variant_CaseType(&case_type, case_.type);
+
+            switch (case_type.which) {
+                case Type_Variant_CaseType_none: break;
+                case Type_Variant_CaseType_some: {
+                    struct Type  case_type_;
+                    struct Value case_value;
+
+                    read_Type(&case_type_, case_type.some);
+                    read_Value(&case_value, variant_value.caseValue);
+
+                    void * payload_ptr = * (uint8_t *) ptr + variant_type.payloadOffset;
+
+                    set_ptr_value_no_alloc(resource_map, case_type_, );
+
+                    break;
+                }
+            }
         }
     }
 }
@@ -590,6 +636,58 @@ void handle_call(
 
             handle_result_post(resource_map, segment, r0_environ_size, 0, call_result_list, r0_environ_size_ptr);
             handle_result_post(resource_map, segment, r1_environ_buf_size, 1, call_result_list, r1_environ_buf_size_ptr);
+
+            call_return.which     = CallReturn_errno;
+            call_return.errno     = errno;
+            call_response.results = call_result_list;
+
+            break;
+        }
+        case Func_clockResGet: {
+            struct ParamSpec  p0_clockid_spec;
+            struct ResultSpec r0_clock_res_spec;
+
+            get_ParamSpec(&p0_clockid_spec, call.params, 0);
+            get_ResultSpec(&r0_clock_res_spec, call.results, 0);
+
+            void *  p0_clockid_ptr   = handle_param_pre(resource_map, p0_clockid_spec, NULL);
+            void *  r0_clock_res_ptr = handle_result_pre(resource_map, r0_clock_res_spec);
+            int32_t p0_clockid       = * (int32_t *) p0_clockid_ptr;
+            int32_t r0_clock_res     = (int32_t) r0_clock_res_ptr;
+
+            int32_t errno = __imported_wasi_snapshot_preview1_clock_res_get(p0_clockid, r0_clock_res);
+
+            CallResult_list call_result_list = new_CallResult_list(*segment, 1 /* sz */);
+
+            handle_result_post(resource_map, segment, r0_clock_res_spec, 0, call_result_list, r0_clock_res_ptr);
+
+            call_return.which     = CallReturn_errno;
+            call_return.errno     = errno;
+            call_response.results = call_result_list;
+
+            break;
+        }
+        case Func_clockTimeGet: {
+            struct ParamSpec  p0_clockid_spec;
+            struct ParamSpec  p1_precision_spec;
+            struct ResultSpec r0_time_spec;
+
+            get_ParamSpec(&p0_clockid_spec, call.params, 0);
+            get_ParamSpec(&p1_precision_spec, call.params, 1);
+            get_ResultSpec(&r0_time_spec, call.results, 0);
+
+            void *  p0_clockid_ptr   = handle_param_pre(resource_map, p0_clockid_spec, NULL);
+            void *  p1_precision_ptr = handle_param_pre(resource_map, p1_precision_spec, NULL);
+            void *  r0_time_ptr      = handle_result_pre(resource_map, r0_time_spec);
+            int32_t p0_clockid       = * (int32_t *) p0_clockid_ptr;
+            int64_t p1_precision     = * (int64_t *) p1_precision_ptr;
+            int32_t r0_time          = (int32_t) r0_time_ptr;
+
+            int32_t errno = __imported_wasi_snapshot_preview1_clock_time_get(p0_clockid, p1_precision, r0_time);
+
+            CallResult_list call_result_list = new_CallResult_list(*segment, 1 /* sz */);
+
+            handle_result_post(resource_map, segment, r0_time_spec, 0, call_result_list, r0_time_ptr);
 
             call_return.which     = CallReturn_errno;
             call_return.errno     = errno;

@@ -67,6 +67,7 @@ pub enum Value {
     Record(RecordValue),
     ConstPointer(ConstPointerValue),
     Pointer(PointerValue),
+    Variant(VariantValue),
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Debug)]
@@ -125,4 +126,10 @@ pub struct ConstPointerValue(pub Vec<Value>);
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum PointerValue {
     Alloc { resource: u64 },
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct VariantValue {
+    pub name: String,
 }

@@ -164,9 +164,16 @@ struct Type {
   }
 
   struct Variant {
+    struct CaseType {
+      union {
+        none @0 :Void;
+        some @1 :Type;
+      }
+    }
+
     struct Case {
       name @0 :Text;
-      type @1 :Type;
+      type @1 :CaseType;
     }
 
     tagRepr       @0 :IntRepr;
@@ -178,7 +185,6 @@ struct Type {
   union {
     # record      @1 :Record;
     # array       @2 :Array;
-    # variant     @4 :Variant;
     # allocBuffer @5 :Void;
     builtin      @0 :Builtin;
     string       @1 :Void;
@@ -188,6 +194,7 @@ struct Type {
     record       @5 :Record;
     constPointer @6 :Type;
     pointer      @7 :Type;
+    variant      @8 :Variant;
   }
 }
 
@@ -226,6 +233,18 @@ struct Value {
     alloc @0 :Alloc;
   }
 
+  struct Variant {
+    struct CaseValue {
+      union {
+        none @0 :Void;
+        some @1 :Value;
+      }
+    }
+
+    caseIdx   @0 :UInt32;
+    caseValue @1 :Value;
+  }
+
   union {
     builtin      @0 :Builtin;
     string       @1 :Text;
@@ -235,5 +254,6 @@ struct Value {
     record       @5 :Record;
     constPointer @6 :List(Value);
     pointer      @7 :Pointer;
+    variant      @8 :Variant;
   }
 }
