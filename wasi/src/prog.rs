@@ -64,26 +64,21 @@ impl ProgSeed {
             let mut call_builder =
                 message_builder.init_root::<wazzi_executor_capnp::call_request::Builder>();
 
-            match call.func.as_str() {
-                | "args_get" => call_builder.set_func(wazzi_executor_capnp::Func::ArgsGet),
-                | "args_sizes_get" => {
-                    call_builder.set_func(wazzi_executor_capnp::Func::ArgsSizesGet)
-                },
-                | "environ_get" => call_builder.set_func(wazzi_executor_capnp::Func::EnvironGet),
-                | "environ_sizes_get" => {
-                    call_builder.set_func(wazzi_executor_capnp::Func::EnvironSizesGet)
-                },
-                | "clock_res_get" => call_builder.set_func(wazzi_executor_capnp::Func::ClockResGet),
-                | "clock_time_get" => {
-                    call_builder.set_func(wazzi_executor_capnp::Func::ClockTimeGet)
-                },
-                | "fd_advise" => call_builder.set_func(wazzi_executor_capnp::Func::FdAdvise),
-                | "fd_read" => call_builder.set_func(wazzi_executor_capnp::Func::FdRead),
-                | "fd_seek" => call_builder.set_func(wazzi_executor_capnp::Func::FdSeek),
-                | "fd_write" => call_builder.set_func(wazzi_executor_capnp::Func::FdWrite),
-                | "path_open" => call_builder.set_func(wazzi_executor_capnp::Func::PathOpen),
+            call_builder.set_func(match call.func.as_str() {
+                | "args_get" => wazzi_executor_capnp::Func::ArgsGet,
+                | "args_sizes_get" => wazzi_executor_capnp::Func::ArgsSizesGet,
+                | "environ_get" => wazzi_executor_capnp::Func::EnvironGet,
+                | "environ_sizes_get" => wazzi_executor_capnp::Func::EnvironSizesGet,
+                | "clock_res_get" => wazzi_executor_capnp::Func::ClockResGet,
+                | "clock_time_get" => wazzi_executor_capnp::Func::ClockTimeGet,
+                | "fd_advise" => wazzi_executor_capnp::Func::FdAdvise,
+                | "fd_allocate" => wazzi_executor_capnp::Func::FdAllocate,
+                | "fd_read" => wazzi_executor_capnp::Func::FdRead,
+                | "fd_seek" => wazzi_executor_capnp::Func::FdSeek,
+                | "fd_write" => wazzi_executor_capnp::Func::FdWrite,
+                | "path_open" => wazzi_executor_capnp::Func::PathOpen,
                 | _ => panic!(),
-            }
+            });
 
             let func_spec = module_spec
                 .func(&witx::Id::new(call.func.as_str()))
