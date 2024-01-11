@@ -5,9 +5,11 @@ use serde::{Deserialize, Serialize};
 use wazzi_executor::RunningExecutor;
 
 use crate::{
-    call::{BuiltinValue, CallParam, CallResult, PointerValue, StringValue},
+    call::{BuiltinValue, CallParamSpec, CallResultSpec, PointerValue, StringValue},
     capnp_mappers,
     Call,
+    Recorder,
+    SnapshotHandler,
     Value,
 };
 
@@ -19,12 +21,16 @@ pub struct ProgSeed {
 }
 
 impl ProgSeed {
-    #[tracing::instrument]
-    pub fn execute(
+    #[tracing::instrument(skip(recorder))]
+    pub fn execute<SH>(
         &self,
         executor: &mut RunningExecutor,
         spec: &witx::Document,
-    ) -> Result<Prog, eyre::Error> {
+        recorder: &mut Recorder<SH>,
+    ) -> Result<Prog, eyre::Error>
+    where
+        SH: SnapshotHandler,
+    {
         let module_spec = spec
             .module(&witx::Id::new("wasi_snapshot_preview1"))
             .unwrap();
@@ -72,6 +78,7 @@ impl ProgSeed {
                     call_builder.set_func(wazzi_executor_capnp::Func::ClockTimeGet)
                 },
                 | "fd_read" => call_builder.set_func(wazzi_executor_capnp::Func::FdRead),
+                | "fd_seek" => call_builder.set_func(wazzi_executor_capnp::Func::FdSeek),
                 | "fd_write" => call_builder.set_func(wazzi_executor_capnp::Func::FdWrite),
                 | "path_open" => call_builder.set_func(wazzi_executor_capnp::Func::PathOpen),
                 | _ => panic!(),
@@ -92,7 +99,7 @@ impl ProgSeed {
                 capnp_mappers::build_type(param_spec.tref.type_().as_ref(), &mut type_builder);
 
                 match (&param_spec.tref.resource(spec), &call_param) {
-                    | (Some(_resource_spec), &&CallParam::Resource(resource_id)) => {
+                    | (Some(_resource_spec), &&CallParamSpec::Resource(resource_id)) => {
                         let resource = resource_ctx.get(resource_id).unwrap_or_else(|| {
                             panic!("resource {resource_id} not found in the context")
                         });
@@ -100,13 +107,13 @@ impl ProgSeed {
 
                         resource_builder.set_id(resource.id);
                     },
-                    | (None, &CallParam::Resource(resource_id)) => {
+                    | (None, &CallParamSpec::Resource(resource_id)) => {
                         panic!(
                             "resource {resource_id} ({}) is not specified as a resource",
                             param_spec.name.as_str()
                         );
                     },
-                    | (_, &CallParam::Value(value)) => {
+                    | (_, &CallParamSpec::Value(value)) => {
                         let mut value_builder = param_builder.init_value();
 
                         build_value(&mut value_builder, param_spec.tref.type_().as_ref(), value);
@@ -125,34 +132,53 @@ impl ProgSeed {
                 capnp_mappers::build_type(result_tref.type_().as_ref(), &mut type_builder);
 
                 match result {
-                    | &CallResult::Resource(resource_id) => {
+                    | CallResultSpec::Ignore => result_builder.reborrow().set_ignore(()),
+                    | &CallResultSpec::Resource(resource_id) => {
                         result_builder.reborrow().set_resource(resource_id)
                     },
                 }
             }
 
-            let mut handle_results_ok = || {
-                for (i, _result_tref) in results.iter().enumerate() {
-                    match &call.results[i] {
-                        | &CallResult::Resource(resource_id) => {
-                            resource_ctx.insert(resource_id, Resource { id: resource_id })
-                        },
-                    }
-                }
-            };
             let response = executor
                 .call(call_builder.into_reader())
                 .wrap_err("failed to call function in executor")?;
             let response = response.get()?;
             let ret = response.get_return()?;
+            let mut call_results = Vec::with_capacity(results.len());
+            let mut handle_results_ok = || {
+                for (i, _result_tref) in results.iter().enumerate() {
+                    match &call.results[i] {
+                        | CallResultSpec::Ignore => (),
+                        | &CallResultSpec::Resource(resource_id) => {
+                            resource_ctx.insert(resource_id, Resource { id: resource_id });
+                        },
+                    }
+                }
+            };
+            let errno = match ret.which()? {
+                | wazzi_executor_capnp::call_return::Which::None(_) => {
+                    handle_results_ok();
 
-            match ret.which()? {
-                | wazzi_executor_capnp::call_return::Which::None(_) => handle_results_ok(),
-                | wazzi_executor_capnp::call_return::Which::Errno(0) => handle_results_ok(),
-                | wazzi_executor_capnp::call_return::Which::Errno(errno) => {
-                    println!("errno {errno}")
+                    None
                 },
+                | wazzi_executor_capnp::call_return::Which::Errno(0) => {
+                    handle_results_ok();
+
+                    Some(0)
+                },
+                | wazzi_executor_capnp::call_return::Which::Errno(errno) => Some(errno),
+            };
+            let results_reader = response.get_results()?;
+
+            if errno.is_none() || matches!(errno, Some(0)) {
+                for result in results_reader.iter() {
+                    let call_result = capnp_mappers::from_capnp_call_result(&result)?;
+
+                    call_results.push(call_result);
+                }
             }
+
+            recorder.take_snapshot(errno, call_results);
         }
 
         Ok(Prog {
@@ -207,10 +233,10 @@ fn build_value(builder: &mut wazzi_executor_capnp::value::Builder, ty: &witx::Ty
                 capnp_mappers::build_type(tref.type_().as_ref(), &mut item_type_builder);
 
                 match element {
-                    | &CallParam::Resource(resource_id) => {
+                    | &CallParamSpec::Resource(resource_id) => {
                         item_builder.reborrow().init_resource().set_id(resource_id);
                     },
-                    | CallParam::Value(value) => {
+                    | CallParamSpec::Value(value) => {
                         let mut item_value_builder = item_builder.reborrow().init_value();
 
                         build_value(&mut item_value_builder, tref.type_().as_ref(), value);
@@ -239,11 +265,11 @@ fn build_value(builder: &mut wazzi_executor_capnp::value::Builder, ty: &witx::Ty
                 );
 
                 match &member_value.value {
-                    | &CallParam::Resource(resource_id) => member_builder
+                    | &CallParamSpec::Resource(resource_id) => member_builder
                         .reborrow()
                         .init_resource()
                         .set_id(resource_id),
-                    | CallParam::Value(value) => {
+                    | CallParamSpec::Value(value) => {
                         let mut member_value_builder = member_builder.reborrow().init_value();
 
                         build_value(
@@ -282,7 +308,8 @@ fn build_value(builder: &mut wazzi_executor_capnp::value::Builder, ty: &witx::Ty
                 | (witx::BuiltinType::U32 { .. }, &BuiltinValue::U32(i)) => {
                     builtin_builder.set_u32(i)
                 },
-                | _ => unimplemented!(),
+                | (witx::BuiltinType::S64, &BuiltinValue::S64(i)) => builtin_builder.set_s64(i),
+                | _ => unimplemented!("{:#?}", builtin_type),
             }
         },
         | (witx::Type::Variant(variant), Value::Variant(variant_value)) => {
@@ -313,10 +340,10 @@ fn build_value(builder: &mut wazzi_executor_capnp::value::Builder, ty: &witx::Ty
                     );
 
                     match payload.as_ref() {
-                        | &CallParam::Resource(resource_id) => {
+                        | &CallParamSpec::Resource(resource_id) => {
                             builder.reborrow().init_resource().set_id(resource_id)
                         },
-                        | CallParam::Value(value) => build_value(
+                        | CallParamSpec::Value(value) => build_value(
                             &mut builder.reborrow().init_value(),
                             tref.type_().as_ref(),
                             value,

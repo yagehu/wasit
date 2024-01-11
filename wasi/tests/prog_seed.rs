@@ -8,7 +8,7 @@ use std::{
 
 use tempfile::tempdir;
 
-use wazzi_wasi::ProgSeed;
+use wazzi_wasi::{InMemorySnapshots, ProgSeed};
 
 extern crate wazzi_witx as witx;
 
@@ -59,8 +59,10 @@ fn creat() {
     )
     .run(stderr.clone())
     .expect("failed to run executor");
+    let mut snapshots = InMemorySnapshots::default();
+    let mut recorder = wazzi_wasi::Recorder::new(&mut snapshots);
 
-    let execute_result = seed.execute(&mut executor, &spec);
+    let execute_result = seed.execute(&mut executor, &spec, &mut recorder);
 
     executor.kill();
 
@@ -102,9 +104,11 @@ fn creat_write() {
     )
     .run(stderr.clone())
     .expect("failed to run executor");
+    let mut snapshots = InMemorySnapshots::default();
+    let mut recorder = wazzi_wasi::Recorder::new(&mut snapshots);
 
     assert!(
-        seed.execute(&mut executor, &spec).is_ok(),
+        seed.execute(&mut executor, &spec, &mut recorder).is_ok(),
         "Executor stderr:\n{}",
         String::from_utf8(stderr.lock().unwrap().deref().clone()).unwrap(),
     );
@@ -130,9 +134,11 @@ fn args() {
     let mut executor = wazzi_executor::ExecutorRunner::new(wasmtime, executor_bin(), None)
         .run(stderr.clone())
         .expect("failed to run executor");
+    let mut snapshots = InMemorySnapshots::default();
+    let mut recorder = wazzi_wasi::Recorder::new(&mut snapshots);
 
     assert!(
-        seed.execute(&mut executor, &spec).is_ok(),
+        seed.execute(&mut executor, &spec, &mut recorder).is_ok(),
         "Executor stderr:\n{}",
         String::from_utf8(stderr.lock().unwrap().deref().clone()).unwrap(),
     );
@@ -153,9 +159,11 @@ fn environ() {
     let mut executor = wazzi_executor::ExecutorRunner::new(wasmtime, executor_bin(), None)
         .run(stderr.clone())
         .expect("failed to run executor");
+    let mut snapshots = InMemorySnapshots::default();
+    let mut recorder = wazzi_wasi::Recorder::new(&mut snapshots);
 
     assert!(
-        seed.execute(&mut executor, &spec).is_ok(),
+        seed.execute(&mut executor, &spec, &mut recorder).is_ok(),
         "Executor stderr:\n{}",
         String::from_utf8(stderr.lock().unwrap().deref().clone()).unwrap(),
     );
@@ -176,9 +184,11 @@ fn clock() {
     let mut executor = wazzi_executor::ExecutorRunner::new(wasmtime, executor_bin(), None)
         .run(stderr.clone())
         .expect("failed to run executor");
+    let mut snapshots = InMemorySnapshots::default();
+    let mut recorder = wazzi_wasi::Recorder::new(&mut snapshots);
 
     assert!(
-        seed.execute(&mut executor, &spec).is_ok(),
+        seed.execute(&mut executor, &spec, &mut recorder).is_ok(),
         "Executor stderr:\n{}",
         String::from_utf8(stderr.lock().unwrap().deref().clone()).unwrap(),
     );
@@ -187,13 +197,13 @@ fn clock() {
 }
 
 #[test]
-fn creat_write_read() {
+fn read_after_write() {
     let spec = spec();
     let path = [
         env!("CARGO_MANIFEST_DIR"),
         "..",
         "seeds",
-        "05-creat_write_read.json",
+        "05-read_after_write.json",
     ]
     .into_iter()
     .collect::<PathBuf>();
@@ -209,9 +219,11 @@ fn creat_write_read() {
     )
     .run(stderr.clone())
     .expect("failed to run executor");
+    let mut mem_snapshots = InMemorySnapshots::default();
+    let mut recorder = wazzi_wasi::Recorder::new(&mut mem_snapshots);
 
     assert!(
-        seed.execute(&mut executor, &spec).is_ok(),
+        seed.execute(&mut executor, &spec, &mut recorder).is_ok(),
         "Executor stderr:\n{}",
         String::from_utf8(stderr.lock().unwrap().deref().clone()).unwrap(),
     );
@@ -219,7 +231,16 @@ fn creat_write_read() {
     executor.kill();
 
     let stderr_str = String::from_utf8(stderr.try_lock().unwrap().deref().clone()).unwrap();
-    let content = fs::read(base_dir.path().join("a").canonicalize().unwrap()).unwrap();
+    let fd_read_snapshot = &mem_snapshots.snapshots[3];
 
-    assert_eq!(content, vec![97, 98], "{stderr_str}");
+    assert!(matches!(fd_read_snapshot.errno, Some(0)));
+    assert!(
+        matches!(
+            fd_read_snapshot.results[0].value,
+            wazzi_wasi::Value::Builtin(wazzi_wasi::BuiltinValue::U32(2)),
+        ),
+        "{:#?}\nstderr:\n{}",
+        fd_read_snapshot.results[0].value,
+        stderr_str,
+    );
 }

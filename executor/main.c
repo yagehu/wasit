@@ -175,7 +175,7 @@ void * malloc_set_value(
 
             break;
         }
-        case Type_constPointer: fail("malloc_set_value constPointer"); break;
+        case Type_constPointer: fail("malloc_set_value constPointer");
         case Type_pointer: ptr = malloc(sizeof(int32_t)); break;
         case Type_variant: {
             struct Type_Variant variant_type;
@@ -458,17 +458,40 @@ void set_value_from_ptr(
 
             read_Type_Builtin(&builtin_type, type.builtin);
 
+            struct Value_Builtin builtin_value;
+
             switch (builtin_type.which) {
-                case Type_Builtin_u8:
-                case Type_Builtin_u16:
-                case Type_Builtin_u32:
-                case Type_Builtin_s8:
-                case Type_Builtin_s16:
-                case Type_Builtin_s32:
-                case Type_Builtin__char: ptr = malloc(sizeof(int32_t)); break;
-                case Type_Builtin_u64:
-                case Type_Builtin_s64: ptr = malloc(sizeof(int64_t)); break;
+                case Type_Builtin_u8: {
+                    builtin_value.which = Value_Builtin_u8;
+                    builtin_value.u8    = * (uint8_t *) ptr;
+                    break;
+                }
+                case Type_Builtin_u16: fail("unimplemented: u16");
+                case Type_Builtin_u32: {
+                    builtin_value.which = Value_Builtin_u32;
+                    builtin_value.u32   = * (uint32_t *) ptr;
+                    break;
+                }
+                case Type_Builtin_s8: fail("unimplemented: s8");
+                case Type_Builtin_s16: fail("unimplemented: s16");
+                case Type_Builtin_s32: fail("unimplemented: s32");
+                case Type_Builtin__char: fail("unimplemented: char");
+                case Type_Builtin_u64: {
+                    builtin_value.which = Value_Builtin_u64;
+                    builtin_value.u64   = * (uint64_t *) ptr;
+                    break;
+                }
+                case Type_Builtin_s64: fail("unimplemented: s64");
             }
+
+            Value_Builtin_ptr builtin_ptr = new_Value_Builtin(*segment);
+
+            write_Value_Builtin(&builtin_value, builtin_ptr);
+
+            value->which = Value_builtin;
+            value->builtin = builtin_ptr;
+
+            break;
         }
         case Type_bitflags: {
             struct Type_Bitflags  bitflags_type;
@@ -580,20 +603,23 @@ void handle_call(
     
     switch (call.func) {
         case Func_argsGet: {
-            struct ParamSpec p0_argv;
-            struct ParamSpec p1_argv_buf;
+            struct ParamSpec p0_argv_spec;
+            struct ParamSpec p1_argv_buf_spec;
 
-            get_ParamSpec(&p0_argv, call.params, 0);
-            get_ParamSpec(&p1_argv_buf, call.params, 1);
+            get_ParamSpec(&p0_argv_spec, call.params, 0);
+            get_ParamSpec(&p1_argv_buf_spec, call.params, 1);
 
-            void * p0_argv_ptr     = handle_param_pre(resource_map, p0_argv, NULL);
-            void * p1_argv_buf_ptr = handle_param_pre(resource_map, p1_argv_buf, NULL);
-            int32_t p0_argv_       = * (int32_t *) p0_argv_ptr;
-            int32_t p1_argv_buf_   = * (int32_t *) p1_argv_buf_ptr;
+            void * p0_argv_ptr     = handle_param_pre(resource_map, p0_argv_spec, NULL);
+            void * p1_argv_buf_ptr = handle_param_pre(resource_map, p1_argv_buf_spec, NULL);
+            int32_t p0_argv        = * (int32_t *) p0_argv_ptr;
+            int32_t p1_argv_buf    = * (int32_t *) p1_argv_buf_ptr;
 
-            int32_t errno = __imported_wasi_snapshot_preview1_args_get(p0_argv_,  p1_argv_buf_);
+            int32_t errno = __imported_wasi_snapshot_preview1_args_get(p0_argv,  p1_argv_buf);
 
             CallResult_list call_result_list = new_CallResult_list(*segment, 0 /* sz */);
+
+            handle_param_post(p0_argv_spec, p0_argv_ptr);
+            handle_param_post(p1_argv_buf_spec, p1_argv_buf_ptr);
 
             call_return.which     = CallReturn_errno;
             call_return.errno     = errno;
@@ -627,20 +653,23 @@ void handle_call(
             break;
         }
         case Func_environGet: {
-            struct ParamSpec p0_environ;
-            struct ParamSpec p1_environ_buf;
+            struct ParamSpec p0_environ_spec;
+            struct ParamSpec p1_environ_buf_spec;
 
-            get_ParamSpec(&p0_environ, call.params, 0);
-            get_ParamSpec(&p1_environ_buf, call.params, 1);
+            get_ParamSpec(&p0_environ_spec, call.params, 0);
+            get_ParamSpec(&p1_environ_buf_spec, call.params, 1);
 
-            void * p0_environ_ptr     = handle_param_pre(resource_map, p0_environ, NULL);
-            void * p1_environ_buf_ptr = handle_param_pre(resource_map, p1_environ_buf, NULL);
-            int32_t p0_environ_       = * (int32_t *) p0_environ_ptr;
-            int32_t p1_environ_buf_   = * (int32_t *) p1_environ_buf_ptr;
+            void * p0_environ_ptr     = handle_param_pre(resource_map, p0_environ_spec, NULL);
+            void * p1_environ_buf_ptr = handle_param_pre(resource_map, p1_environ_buf_spec, NULL);
+            int32_t p0_environ        = * (int32_t *) p0_environ_ptr;
+            int32_t p1_environ_buf    = * (int32_t *) p1_environ_buf_ptr;
 
-            int32_t errno = __imported_wasi_snapshot_preview1_environ_get(p0_environ_,  p1_environ_buf_);
+            int32_t errno = __imported_wasi_snapshot_preview1_environ_get(p0_environ,  p1_environ_buf);
 
             CallResult_list call_result_list = new_CallResult_list(*segment, 0 /* sz */);
+
+            handle_param_post(p0_environ_spec, p0_environ_ptr);
+            handle_param_post(p1_environ_buf_spec, p1_environ_buf_ptr);
 
             call_return.which     = CallReturn_errno;
             call_return.errno     = errno;
@@ -689,6 +718,7 @@ void handle_call(
 
             CallResult_list call_result_list = new_CallResult_list(*segment, 1 /* sz */);
 
+            handle_param_post(p0_clockid_spec, p0_clockid_ptr);
             handle_result_post(resource_map, segment, r0_clock_res_spec, 0, call_result_list, r0_clock_res_ptr);
 
             call_return.which     = CallReturn_errno;
@@ -717,6 +747,8 @@ void handle_call(
 
             CallResult_list call_result_list = new_CallResult_list(*segment, 1 /* sz */);
 
+            handle_param_post(p0_clockid_spec, p0_clockid_ptr);
+            handle_param_post(p1_precision_spec, p1_precision_ptr);
             handle_result_post(resource_map, segment, r0_time_spec, 0, call_result_list, r0_time_ptr);
 
             call_return.which     = CallReturn_errno;
@@ -754,6 +786,46 @@ void handle_call(
             handle_param_post(p0_fd, p0_fd_ptr);
             handle_param_post(p1_iovs, p1_iovs_ptr);
             handle_result_post(resource_map, segment, r0_size, 0, call_result_list, r0_size_ptr);
+
+            call_return.which     = CallReturn_errno;
+            call_return.errno     = errno;
+            call_response.results = call_result_list;
+
+            break;
+        }
+        case Func_fdSeek: {
+            struct ParamSpec  p0_fd_spec;
+            struct ParamSpec  p1_offset_spec;
+            struct ParamSpec  p2_whence_spec;
+            struct ResultSpec r0_offset_spec;
+
+            get_ParamSpec(&p0_fd_spec, call.params, 0);
+            get_ParamSpec(&p1_offset_spec, call.params, 1);
+            get_ParamSpec(&p2_whence_spec, call.params, 2);
+            get_ResultSpec(&r0_offset_spec, call.results, 0);
+
+            void *  p0_fd_ptr     = handle_param_pre(resource_map, p0_fd_spec, NULL);
+            void *  p1_offset_ptr = handle_param_pre(resource_map, p1_offset_spec, NULL);
+            void *  p2_whence_ptr = handle_param_pre(resource_map, p2_whence_spec, NULL);
+            void *  r0_offset_ptr = handle_result_pre(resource_map, r0_offset_spec);
+            int32_t p0_fd         = * (int32_t *) p0_fd_ptr;
+            int32_t p1_offset     = * (int64_t *) p1_offset_ptr;
+            int32_t p2_whence     = * (int32_t *) p2_whence_ptr;
+            int32_t r0_offset     = (int32_t) r0_offset_ptr;
+
+            int32_t errno = __imported_wasi_snapshot_preview1_fd_seek(
+                p0_fd,
+                p1_offset,
+                p2_whence,
+                r0_offset
+            );
+
+            CallResult_list call_result_list = new_CallResult_list(*segment, 1 /* sz */);
+
+            handle_param_post(p0_fd_spec, p0_fd_ptr);
+            handle_param_post(p1_offset_spec, p1_offset_ptr);
+            handle_param_post(p2_whence_spec, p2_whence_ptr);
+            handle_result_post(resource_map, segment, r0_offset_spec, 0, call_result_list, r0_offset_ptr);
 
             call_return.which     = CallReturn_errno;
             call_return.errno     = errno;
@@ -1000,6 +1072,7 @@ void handle_result_post(
     set_value_from_ptr(segment, &value, type, ptr);
 
     call_result.memoryOffset = (uint32_t) ptr;
+    call_result.value = new_Value(*segment);
     write_Value(&value, call_result.value);
 
     switch (spec.which) {

@@ -1,11 +1,60 @@
 use witx::Layout;
 
+use crate::{call::BuiltinValue, recorder::CallResult, Value};
+
 pub(crate) fn from_witx_int_repr(x: &witx::IntRepr) -> wazzi_executor_capnp::type_::IntRepr {
     match x {
         | witx::IntRepr::U8 => wazzi_executor_capnp::type_::IntRepr::U8,
         | witx::IntRepr::U16 => wazzi_executor_capnp::type_::IntRepr::U16,
         | witx::IntRepr::U32 => wazzi_executor_capnp::type_::IntRepr::U32,
         | witx::IntRepr::U64 => wazzi_executor_capnp::type_::IntRepr::U64,
+    }
+}
+
+pub(crate) fn from_capnp_call_result(
+    reader: &wazzi_executor_capnp::call_result::Reader,
+) -> Result<CallResult, capnp::Error> {
+    let value_reader = reader.get_value()?;
+    let value = from_capnp_value(&value_reader)?;
+
+    Ok(CallResult {
+        memory_offset: reader.get_memory_offset(),
+        value,
+    })
+}
+
+pub(crate) fn from_capnp_value(
+    reader: &wazzi_executor_capnp::value::Reader,
+) -> Result<Value, capnp::Error> {
+    use wazzi_executor_capnp::value::Which;
+
+    match reader.which()? {
+        | Which::Builtin(builtin) => {
+            use wazzi_executor_capnp::value::builtin::Which;
+
+            let builtin = builtin?;
+            let builtin_value = match builtin.which()? {
+                | Which::U8(i) => BuiltinValue::U8(i),
+                | Which::U16(_) => todo!(),
+                | Which::U32(i) => BuiltinValue::U32(i),
+                | Which::U64(i) => BuiltinValue::U64(i),
+                | Which::S8(_) => todo!(),
+                | Which::S16(_) => todo!(),
+                | Which::S32(_) => todo!(),
+                | Which::S64(_) => todo!(),
+                | Which::Char(_) => todo!(),
+            };
+
+            Ok(Value::Builtin(builtin_value))
+        },
+        | Which::String(_) => todo!(),
+        | Which::Bitflags(_) => todo!(),
+        | Which::Handle(fd) => Ok(Value::Handle(fd)),
+        | Which::Array(_) => todo!(),
+        | Which::Record(_) => todo!(),
+        | Which::ConstPointer(_) => todo!(),
+        | Which::Pointer(_) => todo!(),
+        | Which::Variant(_) => todo!(),
     }
 }
 

@@ -169,6 +169,15 @@
             ]
         },
         {
+            "func": "fd_seek",
+            "params": [
+                { "resource": 1 },
+                { "value": { "builtin": { "s64": 0 } } },
+                { "value": { "variant": { "name": "set" } } }
+            ],
+            "results": [ "ignore" ]
+        },
+        {
             "func": "fd_read",
             "params": [
                 { "resource": 1 },
