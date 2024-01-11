@@ -161,7 +161,6 @@ void * malloc_set_value(
             read_Type_Array(&array_type, type.array);
             read_Value_Array(&array_value, value.array);
 
-            fprintf(stderr, "Type_array %d %d\n", capn_len(array_value.items), array_type.itemSize);
             ptr = malloc(capn_len(array_value.items) * array_type.itemSize);
             * len = capn_len(array_value.items);
 
@@ -328,12 +327,6 @@ void set_ptr_value_no_alloc(
                         read_Value(&record_member_value, record_member.value);
                         read_Type(&record_member_type, record_member.type);
                         set_ptr_value_no_alloc(resource_map, record_member_type, record_member_value, member_ptr);
-
-                        fprintf(stderr, "record %d = %d\n", (int32_t) member_ptr, * (int32_t *) member_ptr);
-
-                        if (* (int32_t *) member_ptr != 2) {
-                            fprintf(stderr, "printf %s\n", * (char **) member_ptr);
-                        }
 
                         break;
                     }
@@ -732,6 +725,42 @@ void handle_call(
 
             break;
         }
+        case Func_fdRead: {
+            struct ParamSpec  p0_fd;
+            struct ParamSpec  p1_iovs;
+            struct ResultSpec r0_size;
+
+            get_ParamSpec(&p0_fd, call.params, 0);
+            get_ParamSpec(&p1_iovs, call.params, 1);
+            get_ResultSpec(&r0_size, call.results, 0);
+
+            int32_t p1_iovs_len = 0;
+            void *  p0_fd_ptr    = handle_param_pre(resource_map, p0_fd, NULL);
+            void *  p1_iovs_ptr  = handle_param_pre(resource_map, p1_iovs, &p1_iovs_len);
+            void *  r0_size_ptr  = handle_result_pre(resource_map, r0_size);
+            int32_t p0_fd_       = * (int32_t *) p0_fd_ptr;
+            int32_t p1_iovs_     = (int32_t) p1_iovs_ptr;
+            int32_t r0_size_     = (int32_t) r0_size_ptr;
+
+            int32_t errno = __imported_wasi_snapshot_preview1_fd_read(
+                p0_fd_,
+                p1_iovs_,
+                p1_iovs_len,
+                r0_size_
+            );
+
+            CallResult_list call_result_list = new_CallResult_list(*segment, 1 /* sz */);
+
+            handle_param_post(p0_fd, p0_fd_ptr);
+            handle_param_post(p1_iovs, p1_iovs_ptr);
+            handle_result_post(resource_map, segment, r0_size, 0, call_result_list, r0_size_ptr);
+
+            call_return.which     = CallReturn_errno;
+            call_return.errno     = errno;
+            call_response.results = call_result_list;
+
+            break;
+        }
         case Func_fdWrite: {
             struct ParamSpec  p0_fd;
             struct ParamSpec  p1_iovs;
@@ -755,8 +784,6 @@ void handle_call(
                 p1_iovs_len,
                 r0_size_
             );
-
-            fprintf(stderr, "fd_write() ret %d written %d\n", errno, * (int32_t *) r0_size_ptr);
 
             CallResult_list call_result_list = new_CallResult_list(*segment, 1 /* sz */);
 
@@ -805,8 +832,6 @@ void handle_call(
             int64_t p5_fs_rights_inheriting_    = * (int64_t *) p5_fs_rights_inheriting_ptr;
             int32_t p6_fdflags_                 = * (int32_t *) p6_fdflags_ptr;
 
-            fprintf(stderr, "path_open()\n");
-
             int32_t errno = __imported_wasi_snapshot_preview1_path_open(
                 p0_fd_,
                 p1_dirflags_,
@@ -819,7 +844,6 @@ void handle_call(
                 (int32_t) r0_fd_ptr
             );
 
-            fprintf(stderr, "%s %d\n", (char *) p2_path_ptr, * (int32_t *) p3_oflags_);
             fprintf(stderr, "path_open() ret %d %d\n", errno, * (int32_t *) r0_fd_ptr);
 
             CallResult_list call_result_list = new_CallResult_list(*segment, 1 /* sz */);

@@ -71,6 +71,7 @@ impl ProgSeed {
                 | "clock_time_get" => {
                     call_builder.set_func(wazzi_executor_capnp::Func::ClockTimeGet)
                 },
+                | "fd_read" => call_builder.set_func(wazzi_executor_capnp::Func::FdRead),
                 | "fd_write" => call_builder.set_func(wazzi_executor_capnp::Func::FdWrite),
                 | "path_open" => call_builder.set_func(wazzi_executor_capnp::Func::PathOpen),
                 | _ => panic!(),
