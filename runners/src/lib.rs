@@ -46,7 +46,7 @@ impl WasiRunner for Wasmtime<'_> {
     }
 
     fn prepare_command(&self, wasm_path: PathBuf, base_dir: Option<PathBuf>) -> process::Command {
-        let mut command = process::Command::new(&self.path);
+        let mut command = process::Command::new(self.path);
         let mut args = vec![OsString::from("run")];
 
         args.extend(self.mount_base_dir(base_dir));

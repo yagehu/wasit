@@ -57,7 +57,7 @@ fn main() {
                 out_dir.display()
             ),
             &format!("--src-prefix={}", schema_path.parent().unwrap().display()),
-            &schema_path.to_string_lossy().to_string(),
+            schema_path.to_string_lossy().as_ref(),
         ])
         .spawn()
         .unwrap()

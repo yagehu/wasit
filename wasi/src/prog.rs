@@ -148,9 +148,7 @@ impl ProgSeed {
 
             match ret.which()? {
                 | wazzi_executor_capnp::call_return::Which::None(_) => handle_results_ok(),
-                | wazzi_executor_capnp::call_return::Which::Errno(errno) if errno == 0 => {
-                    handle_results_ok()
-                },
+                | wazzi_executor_capnp::call_return::Which::Errno(0) => handle_results_ok(),
                 | wazzi_executor_capnp::call_return::Which::Errno(errno) => {
                     println!("errno {errno}")
                 },

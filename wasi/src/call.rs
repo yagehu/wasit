@@ -28,7 +28,7 @@ impl Call {
         let func_specs = module_spec.funcs().collect::<Vec<_>>();
         let func_spec = u.choose(&func_specs)?;
 
-        Self::arbitrary_from_func_spec(u, prog, &func_spec)
+        Self::arbitrary_from_func_spec(u, prog, func_spec)
     }
 
     pub fn arbitrary_from_func_spec(
