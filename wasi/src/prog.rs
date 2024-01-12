@@ -90,6 +90,7 @@ impl ProgSeed {
                 | "fd_advise" => wazzi_executor_capnp::Func::FdAdvise,
                 | "fd_allocate" => wazzi_executor_capnp::Func::FdAllocate,
                 | "fd_close" => wazzi_executor_capnp::Func::FdClose,
+                | "fd_datasync" => wazzi_executor_capnp::Func::FdDatasync,
                 | "fd_read" => wazzi_executor_capnp::Func::FdRead,
                 | "fd_seek" => wazzi_executor_capnp::Func::FdSeek,
                 | "fd_write" => wazzi_executor_capnp::Func::FdWrite,

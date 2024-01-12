@@ -381,3 +381,42 @@ fn read_after_close() {
         grow_result
     );
 }
+
+#[test]
+fn datasync() {
+    let spec = spec();
+    let path = [
+        env!("CARGO_MANIFEST_DIR"),
+        "..",
+        "seeds",
+        "09-datasync.json",
+    ]
+    .into_iter()
+    .collect::<PathBuf>();
+    let f = fs::OpenOptions::new().read(true).open(&path).unwrap();
+    let seed: ProgSeed = serde_json::from_reader(f).unwrap();
+    let base_dir = tempdir().unwrap();
+    let wasmtime = wazzi_runners::Wasmtime::new("wasmtime");
+    let stderr = Arc::new(Mutex::new(Vec::new()));
+    let mut executor = wazzi_executor::ExecutorRunner::new(
+        wasmtime,
+        executor_bin(),
+        Some(base_dir.path().to_owned()),
+    )
+    .run(stderr.clone())
+    .expect("failed to run executor");
+    let mut mem_snapshots = InMemorySnapshots::default();
+    let mut recorder = wazzi_wasi::Recorder::new(&mut mem_snapshots);
+
+    assert!(
+        seed.execute(&mut executor, &spec, &mut recorder).is_ok(),
+        "Executor stderr:\n{}",
+        String::from_utf8(stderr.lock().unwrap().deref().clone()).unwrap(),
+    );
+
+    executor.kill();
+
+    let fd_datasync_snapshot = mem_snapshots.snapshots.last().unwrap();
+
+    assert!(matches!(fd_datasync_snapshot.errno, Some(0)));
+}
