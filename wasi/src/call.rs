@@ -129,7 +129,14 @@ pub struct ConstPointerValue(pub Vec<Value>);
 #[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Debug)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum PointerValue {
-    Alloc { resource: u64 },
+    Alloc(PointerAlloc),
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum PointerAlloc {
+    Resource(u64),
+    Value(u32),
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Debug)]

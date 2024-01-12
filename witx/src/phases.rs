@@ -1,10 +1,12 @@
 use anyhow::{bail, Result};
-use std::env;
-use std::path::{Path, PathBuf};
+use std::{
+    env,
+    path::{Path, PathBuf},
+};
 
 pub fn docs_path(phase_paths: &[PathBuf]) -> PathBuf {
     phase_paths
-        .get(0)
+        .first()
         .expect("at least one path")
         .parent()
         .expect("drop file")

@@ -1,12 +1,26 @@
-use std::collections::HashMap;
+pub use self::error::GrowError;
+
+mod error;
+
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use arbitrary::Unstructured;
-use color_eyre::eyre::{self, Context, ContextCompat};
+use color_eyre::eyre::{self, Context};
 use serde::{Deserialize, Serialize};
 use wazzi_executor::RunningExecutor;
 
 use crate::{
-    call::{BuiltinValue, CallParamSpec, CallResultSpec, PointerValue, StringValue},
+    call::{
+        ArrayValue,
+        BuiltinValue,
+        CallParamSpec,
+        CallResultSpec,
+        PointerAlloc,
+        PointerValue,
+        RecordMemberValue,
+        RecordValue,
+        StringValue,
+    },
     capnp_mappers,
     Call,
     Recorder,
@@ -57,6 +71,7 @@ impl ProgSeed {
                 Resource {
                     id: BASE_DIR_RESOURCE_ID,
                 },
+                "fd",
             );
         }
 
@@ -88,6 +103,7 @@ impl ProgSeed {
             let mut params_builder = call_builder
                 .reborrow()
                 .init_params(func_spec.params.len() as u32);
+            let mut params_resource = vec![None; func_spec.params.len()];
 
             for (i, param_spec) in func_spec.params.iter().enumerate() {
                 let call_param = call.params.get(i).unwrap();
@@ -97,13 +113,14 @@ impl ProgSeed {
                 capnp_mappers::build_type(param_spec.tref.type_().as_ref(), &mut type_builder);
 
                 match (&param_spec.tref.resource(spec), &call_param) {
-                    | (Some(_resource_spec), &&CallParamSpec::Resource(resource_id)) => {
+                    | (&Some(_resource_spec), &&CallParamSpec::Resource(resource_id)) => {
                         let resource = resource_ctx.get(resource_id).unwrap_or_else(|| {
                             panic!("resource {resource_id} not found in the context")
                         });
                         let mut resource_builder = param_builder.reborrow().init_resource();
 
                         resource_builder.set_id(resource.id);
+                        params_resource.get_mut(i).unwrap().replace(resource_id);
                     },
                     | (None, &CallParamSpec::Resource(resource_id)) => {
                         panic!(
@@ -144,11 +161,17 @@ impl ProgSeed {
             let ret = response.get_return()?;
             let mut call_results = Vec::with_capacity(results.len());
             let mut handle_results_ok = || {
-                for (i, _result_tref) in results.iter().enumerate() {
+                for (i, result_tref) in results.iter().enumerate() {
                     match &call.results[i] {
                         | CallResultSpec::Ignore => (),
                         | &CallResultSpec::Resource(resource_id) => {
-                            resource_ctx.insert(resource_id, Resource { id: resource_id });
+                            let resource_spec = result_tref.resource(spec).unwrap();
+
+                            resource_ctx.insert(
+                                resource_id,
+                                Resource { id: resource_id },
+                                resource_spec.name.as_str(),
+                            );
                         },
                     }
                 }
@@ -161,6 +184,13 @@ impl ProgSeed {
                 },
                 | wazzi_executor_capnp::call_return::Which::Errno(0) => {
                     handle_results_ok();
+
+                    // This only applies to fd_close dropping fd.
+                    for (i, param_spec) in func_spec.params.iter().enumerate() {
+                        if param_spec.drop {
+                            resource_ctx.drop(params_resource[i].unwrap());
+                        }
+                    }
 
                     Some(0)
                 },
@@ -295,7 +325,12 @@ fn build_value(builder: &mut wazzi_executor_capnp::value::Builder, ty: &witx::Ty
             let mut alloc_builder = pointer_builder.reborrow().init_alloc();
 
             match pointer_value {
-                | &PointerValue::Alloc { resource } => alloc_builder.set_resource_id(resource),
+                | &PointerValue::Alloc(PointerAlloc::Resource(resource)) => {
+                    alloc_builder.set_resource(resource)
+                },
+                | &PointerValue::Alloc(PointerAlloc::Value(value)) => {
+                    alloc_builder.set_value(value)
+                },
             }
         },
         | (witx::Type::Builtin(builtin_type), Value::Builtin(builtin_value)) => {
@@ -369,16 +404,14 @@ impl Prog {
         u: &mut Unstructured,
         spec: &witx::Document,
         func_spec: &witx::InterfaceFunc,
-    ) -> Result<(), eyre::Error> {
+    ) -> Result<(), GrowError> {
         let result_trefs = func_spec.unpack_expected_result();
         let mut params = Vec::with_capacity(func_spec.params.len());
-        let mut results = Vec::with_capacity(result_trefs.len());
+        // TODO(huayge):
+        let results = Vec::with_capacity(result_trefs.len());
 
-        for (i, param_spec) in func_spec.params.iter().enumerate() {
-            let resource = param_spec
-                .tref
-                .resource(spec)
-                .wrap_err("param is not a resource")?;
+        for param_spec in func_spec.params.iter() {
+            params.push(self.pick_or_generate_param(u, spec, &param_spec.tref)?);
         }
 
         self.calls.push(Call {
@@ -388,6 +421,134 @@ impl Prog {
         });
 
         Ok(())
+    }
+
+    fn pick_or_generate_param(
+        &self,
+        u: &mut Unstructured,
+        spec: &witx::Document,
+        tref: &witx::TypeRef,
+    ) -> Result<CallParamSpec, GrowError> {
+        let mut gen_value = || {
+            match tref.type_().as_ref() {
+                | witx::Type::Record(record) => {
+                    let mut members = Vec::with_capacity(record.members.len());
+
+                    // First, check if the first record member can be fulfilled by the second via alloc.
+                    if record.members.len() == 2 {
+                        match (
+                            record.members[0].tref.resource(spec),
+                            record.members[1].tref.resource(spec),
+                        ) {
+                            | (Some(resource), Some(other_resource))
+                                if resource.fulfilled_by(spec).into_iter().any(|candidate| {
+                                    if candidate != other_resource {
+                                        return false;
+                                    }
+
+                                    spec.resource_relation(&candidate.name, &resource.name)
+                                        == witx::ResourceRelation::Alloc
+                                }) =>
+                            {
+                                //
+
+                                let member_1 =
+                                    self.pick_or_generate_param(u, spec, &record.members[1].tref)?;
+                                let member_0 = match &member_1 {
+                                    | &CallParamSpec::Resource(resource) => {
+                                        CallParamSpec::Value(Value::Pointer(PointerValue::Alloc(
+                                            PointerAlloc::Resource(resource),
+                                        )))
+                                    },
+                                    | &CallParamSpec::Value(Value::Builtin(BuiltinValue::U32(
+                                        i,
+                                    ))) => CallParamSpec::Value(Value::Pointer(
+                                        PointerValue::Alloc(PointerAlloc::Value(i)),
+                                    )),
+                                    | _ => unreachable!(),
+                                };
+
+                                return Ok(CallParamSpec::Value(Value::Record(RecordValue(vec![
+                                    RecordMemberValue {
+                                        name:  record.members[0].name.as_str().to_owned(),
+                                        value: member_0,
+                                    },
+                                    RecordMemberValue {
+                                        name:  record.members[1].name.as_str().to_owned(),
+                                        value: member_1,
+                                    },
+                                ]))));
+                            },
+                            | _ => (),
+                        }
+                    }
+
+                    for member_spec in &record.members {
+                        let member = self.pick_or_generate_param(u, spec, &member_spec.tref)?;
+
+                        members.push(RecordMemberValue {
+                            name:  member_spec.name.as_str().to_owned(),
+                            value: member,
+                        });
+                    }
+
+                    Ok(CallParamSpec::Value(Value::Record(RecordValue(members))))
+                },
+                | witx::Type::Variant(_) => todo!(),
+                | witx::Type::Handle(_) => todo!(),
+                | witx::Type::List(element_tref) => {
+                    let len = u.int_in_range(0..=2)? as usize;
+                    let mut elements = Vec::with_capacity(len);
+                    let element = self.pick_or_generate_param(u, spec, element_tref)?;
+
+                    elements.push(element);
+
+                    Ok(CallParamSpec::Value(Value::Array(ArrayValue(elements))))
+                },
+                | witx::Type::Pointer(_) => todo!("{:#?}", tref),
+                | witx::Type::ConstPointer(_) => todo!(),
+                | witx::Type::Builtin(builtin) => {
+                    Ok(CallParamSpec::Value(Value::Builtin(match builtin {
+                        | witx::BuiltinType::Char => todo!(),
+                        | witx::BuiltinType::U8 { .. } => todo!(),
+                        | witx::BuiltinType::U16 => todo!(),
+                        | witx::BuiltinType::U32 { .. } => BuiltinValue::U32(u.arbitrary()?),
+                        | witx::BuiltinType::U64 => todo!(),
+                        | witx::BuiltinType::S8 => todo!(),
+                        | witx::BuiltinType::S16 => todo!(),
+                        | witx::BuiltinType::S32 => todo!(),
+                        | witx::BuiltinType::S64 => todo!(),
+                        | witx::BuiltinType::F32 => todo!(),
+                        | witx::BuiltinType::F64 => todo!(),
+                    })))
+                },
+            }
+        };
+
+        match tref.resource(spec) {
+            | Some(resource) => {
+                let resource_pools = self
+                    .resource_ctx
+                    .fulfilling_resource_pools(spec, resource.name.as_str());
+
+                if resource_pools.is_empty() {
+                    if let witx::Type::Builtin(_) = tref.type_().as_ref() {
+                        return gen_value();
+                    }
+
+                    return Err(GrowError::NoResource {
+                        name: resource.name.as_str().to_owned(),
+                    });
+                }
+
+                let resource_pool = *u.choose(&resource_pools)?;
+                let resource_pool = resource_pool.iter().collect::<Vec<_>>();
+                let resource = **u.choose(&resource_pool)?;
+
+                Ok(CallParamSpec::Resource(resource))
+            },
+            | None => gen_value(),
+        }
     }
 }
 
@@ -400,21 +561,52 @@ struct Resource {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 struct ResourceContext {
-    map: HashMap<u64, Resource>,
+    map:   HashMap<u64, Resource>,
+    types: BTreeMap<String, BTreeSet<u64>>,
 }
 
 impl ResourceContext {
     fn new() -> Self {
         Self {
-            map: Default::default(),
+            map:   Default::default(),
+            types: Default::default(),
         }
     }
 
-    fn insert(&mut self, id: u64, resource: Resource) {
+    fn insert(&mut self, id: u64, resource: Resource, r#type: &str) {
         self.map.insert(id, resource);
+        self.types.entry(r#type.to_owned()).or_default().insert(id);
+    }
+
+    fn drop(&mut self, id: u64) {
+        for pool in self.types.values_mut() {
+            pool.remove(&id);
+        }
+
+        self.map.remove(&id);
     }
 
     fn get(&self, id: u64) -> Option<&Resource> {
         self.map.get(&id)
+    }
+
+    fn fulfilling_resource_pools<'a>(
+        &'a self,
+        spec: &witx::Document,
+        r#type: &str,
+    ) -> Vec<&'a BTreeSet<u64>> {
+        let resource_spec = spec.resource(&witx::Id::new(r#type)).unwrap();
+        let candidate_resource_specs = resource_spec.fulfilled_by(spec);
+        let mut resource_pools = Vec::new();
+
+        for candidate in candidate_resource_specs {
+            match self.types.get(candidate.name.as_str()) {
+                | None => continue,
+                | Some(resources) if resources.is_empty() => continue,
+                | Some(resources) => resource_pools.push(resources),
+            }
+        }
+
+        resource_pools
     }
 }

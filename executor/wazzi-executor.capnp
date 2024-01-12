@@ -227,7 +227,10 @@ struct Value {
 
   struct Pointer {
     struct Alloc {
-      resourceId @0 :UInt64;
+      union {
+        resource @0 :UInt64;
+        value    @1 :UInt32;
+      }
     }
 
     alloc @0 :Alloc;

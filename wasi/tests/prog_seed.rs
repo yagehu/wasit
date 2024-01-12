@@ -11,7 +11,7 @@ use std::{
 use arbitrary::Unstructured;
 use tempfile::tempdir;
 
-use wazzi_wasi::{InMemorySnapshots, ProgSeed};
+use wazzi_wasi::{prog, InMemorySnapshots, ProgSeed};
 
 fn repo_root() -> PathBuf {
     [env!("CARGO_MANIFEST_DIR"), ".."].into_iter().collect()
@@ -333,7 +333,7 @@ fn read_after_close() {
         env!("CARGO_MANIFEST_DIR"),
         "..",
         "seeds",
-        "08-read_after_close.json",
+        "08-close_after_write.json",
     ]
     .into_iter()
     .collect::<PathBuf>();
@@ -362,26 +362,22 @@ fn read_after_close() {
     executor.kill();
 
     let mut prog = execute_result.unwrap();
-    let fd_read_snapshot = mem_snapshots.snapshots.last().unwrap();
-    let stderr_str = String::from_utf8(stderr.try_lock().unwrap().deref().clone()).unwrap();
-
-    assert!(
-        matches!(fd_read_snapshot.errno, Some(errno) if errno != 0),
-        "snapshot:\n{:#?}\nstderr:\n{stderr_str}",
-        fd_read_snapshot,
-    );
 
     // Since the fd was dropped via `fd_close`, it should be impossible to grow
     // the prog with say `fd_read` func because it only accepts a `newfd`.
-    assert!(prog
-        .grow_by_func(
-            &mut Unstructured::new(&[]),
-            &spec,
-            &spec
-                .module(&witx::Id::new("wasi_snapshot_preview1"))
-                .unwrap()
-                .func(&witx::Id::new("fd_read"))
-                .unwrap()
-        )
-        .is_err());
+    let grow_result = prog.grow_by_func(
+        &mut Unstructured::new(&[]),
+        &spec,
+        &spec
+            .module(&witx::Id::new("wasi_snapshot_preview1"))
+            .unwrap()
+            .func(&witx::Id::new("fd_read"))
+            .unwrap(),
+    );
+
+    assert!(
+        matches!(&grow_result, Err(prog::GrowError::NoResource { name }) if name == "newfd"),
+        "{:#?}",
+        grow_result
+    );
 }

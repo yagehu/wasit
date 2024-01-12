@@ -364,10 +364,22 @@ void set_ptr_value_no_alloc(
             read_Value_Pointer(&pointer_value, value.pointer);
             read_Value_Pointer_Alloc(&alloc, pointer_value.alloc);
 
-            struct resource_map_entry * resource_entry = hmgetp_null(*resource_map, alloc.resourceId);
-            if (resource_entry == NULL) fail("pointer resource not found");
+            switch (alloc.which) {
+                case Value_Pointer_Alloc_resource: {
+                    struct resource_map_entry * resource_entry = hmgetp_null(*resource_map, alloc.resource);
+                    if (resource_entry == NULL) fail("pointer resource not found");
 
-            * (int32_t *) ptr = (int32_t) malloc(* (uint32_t *) resource_entry->value.ptr);
+                    * (int32_t *) ptr = (int32_t) malloc(* (uint32_t *) resource_entry->value.ptr);
+
+                    break;
+                }
+                case Value_Pointer_Alloc_value: {
+                    * (int32_t *) ptr = (int32_t) malloc(alloc.value);
+
+                    break;
+                }
+            }
+
 
             break;
         }

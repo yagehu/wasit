@@ -75,6 +75,14 @@ impl Document {
         self.resources.node_weight(id)
     }
 
+    pub fn resource_relation(&self, src: &Id, dst: &Id) -> ResourceRelation {
+        let src_id = *self.resources_map.get(src).unwrap();
+        let dst_id = *self.resources_map.get(dst).unwrap();
+        let mut edges = self.resources.edges_connecting(src_id, dst_id);
+
+        *edges.next().unwrap().weight()
+    }
+
     pub fn typename_resource(&self, name: &Id) -> Option<&Resource> {
         let id = *self.typename_resource_map.get(name)?;
 
@@ -689,7 +697,7 @@ impl Resource {
         let neighbor_ids = doc
             .resources
             .neighbors_directed(node_id, Direction::Outgoing);
-        let mut neighbors = Vec::new();
+        let mut neighbors = vec![doc.resources.node_weight(node_id).unwrap()];
 
         for neighbor_id in neighbor_ids {
             let _edge_id = doc.resources.find_edge(node_id, neighbor_id).unwrap();
@@ -700,9 +708,26 @@ impl Resource {
 
         neighbors
     }
+
+    pub fn fulfilled_by<'a>(&self, spec: &'a Document) -> Vec<&'a Resource> {
+        let node_id = *spec.resources_map.get(&self.name).unwrap();
+        let neighbor_ids = spec
+            .resources
+            .neighbors_directed(node_id, Direction::Incoming);
+        let mut neighbors = vec![spec.resources.node_weight(node_id).unwrap()];
+
+        for neighbor_id in neighbor_ids {
+            let _edge_id = spec.resources.find_edge(neighbor_id, node_id).unwrap();
+            let neighbor = spec.resources.node_weight(neighbor_id).unwrap();
+
+            neighbors.push(neighbor);
+        }
+
+        neighbors
+    }
 }
 
-#[derive(PartialEq, Eq, Hash, Clone, Debug)]
+#[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
 pub enum ResourceRelation {
     Alloc,
     Subtype,

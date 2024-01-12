@@ -6,6 +6,7 @@
 ;; for an explanation of what that means.
 
 (typename $size u32)
+(resource $size (type $size))
 
 ;;; Non-negative file size or length of a region within a file.
 (typename $filesize u64)
@@ -286,14 +287,19 @@
 (resource $fd (type $fd))
 
 ;;; A region of memory for scatter/gather reads.
+(typename $read_buf (@witx pointer u8))
+(typename $read_buf_len $size)
 (typename $iovec
   (record
     ;;; The address of the buffer to be filled.
-    (field $buf (@witx pointer u8))
+    (field $buf $read_buf)
     ;;; The length of the buffer to be filled.
-    (field $buf_len $size)
+    (field $buf_len $read_buf_len)
   )
 )
+(resource $read_buf     (type $read_buf))
+(resource $read_buf_len (type $read_buf_len) (@alloc $read_buf))
+;;(resource $iovec        (type $iovec))
 
 ;;; A region of memory for scatter/gather writes.
 (typename $write_buf (@witx const_pointer u8))
@@ -308,7 +314,7 @@
 )
 (resource $write_buf     (type $write_buf))
 (resource $write_buf_len (type $write_buf_len) (@alloc $write_buf))
-(resource $ciovec        (type $ciovec))
+;;(resource $ciovec        (type $ciovec))
 
 (typename $iovec_array (list $iovec))
 (typename $ciovec_array (list $ciovec))

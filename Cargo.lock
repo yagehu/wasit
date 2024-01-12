@@ -606,6 +606,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "thiserror",
  "tracing",
  "wazzi-executor",
  "wazzi-executor-capnp",

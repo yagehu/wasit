@@ -1,4 +1,4 @@
-use wazzi_witx::Id;
+use wazzi_witx::{Id, ResourceRelation};
 
 fn document() -> wazzi_witx::Document {
     wazzi_witx::load(&[
@@ -9,6 +9,35 @@ fn document() -> wazzi_witx::Document {
 }
 
 #[test]
+fn resource_relations() {
+    struct Case<'a> {
+        from:     &'a str,
+        to:       &'a str,
+        expected: ResourceRelation,
+    }
+
+    let doc = document();
+    let cases = vec![
+        Case {
+            from:     "newfd",
+            to:       "fd",
+            expected: ResourceRelation::Subtype,
+        },
+        Case {
+            from:     "argv_size",
+            to:       "argv",
+            expected: ResourceRelation::Alloc,
+        },
+    ];
+
+    for case in cases {
+        let rel = doc.resource_relation(&Id::new(case.from), &Id::new(case.to));
+
+        assert_eq!(rel, case.expected);
+    }
+}
+
+#[test]
 fn resources_exist() {
     let doc = document();
     let cases = vec![
@@ -16,11 +45,12 @@ fn resources_exist() {
         "argv_buf",
         "argv_size",
         "argv_buf_size",
-        "fd",
         "environ",
         "environ_size",
         "environ_buf",
         "environ_buf_size",
+        "fd",
+        "newfd",
     ];
 
     for case in &cases {
@@ -42,10 +72,18 @@ fn argv() {
     let argv_size_can_fulfill = argv_size_resource.can_fulfill(&doc);
     let argv_buf_size_can_fulfill = argv_buf_size_resource.can_fulfill(&doc);
 
-    assert_eq!(argv_size_can_fulfill[0].name, Id::new("argv"));
-    assert_eq!(argv_size_can_fulfill[0].tref, args_get.params[0].tref);
-    assert_eq!(argv_buf_size_can_fulfill[0].name, Id::new("argv_buf"));
-    assert_eq!(argv_buf_size_can_fulfill[0].tref, args_get.params[1].tref);
+    assert!(argv_size_can_fulfill
+        .iter()
+        .any(|resource| resource.name.as_str() == "argv"));
+    assert!(argv_size_can_fulfill
+        .iter()
+        .any(|resource| resource.tref == args_get.params[0].tref));
+    assert!(argv_buf_size_can_fulfill
+        .iter()
+        .any(|resource| resource.name.as_str() == "argv_buf"));
+    assert!(argv_buf_size_can_fulfill
+        .iter()
+        .any(|resource| resource.tref == args_get.params[1].tref));
 }
 
 #[test]
@@ -60,13 +98,18 @@ fn environ() {
     let environ_size_can_fulfill = environ_size_resource.can_fulfill(&doc);
     let environ_buf_size_can_fulfill = environ_buf_size_resource.can_fulfill(&doc);
 
-    assert_eq!(environ_size_can_fulfill[0].name, Id::new("environ"));
-    assert_eq!(environ_size_can_fulfill[0].tref, environ_get.params[0].tref);
-    assert_eq!(environ_buf_size_can_fulfill[0].name, Id::new("environ_buf"));
-    assert_eq!(
-        environ_buf_size_can_fulfill[0].tref,
-        environ_get.params[1].tref
-    );
+    assert!(environ_size_can_fulfill
+        .iter()
+        .any(|resource| resource.name.as_str() == "environ"));
+    assert!(environ_size_can_fulfill
+        .iter()
+        .any(|resource| resource.tref == environ_get.params[0].tref));
+    assert!(environ_buf_size_can_fulfill
+        .iter()
+        .any(|resource| resource.name.as_str() == "environ_buf"));
+    assert!(environ_buf_size_can_fulfill
+        .iter()
+        .any(|resource| resource.tref == environ_get.params[1].tref));
 }
 
 #[test]
@@ -119,9 +162,6 @@ fn fd_write() {
         | wazzi_witx::Type::List(tref) => tref,
         | _ => panic!(),
     };
-
-    assert!(ciovec_tref.resource(&doc).is_some());
-
     let ciovec_record = match ciovec_tref.type_().as_ref() {
         | wazzi_witx::Type::Record(record) => record,
         | _ => panic!(),

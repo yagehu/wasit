@@ -605,7 +605,7 @@ impl<B: Bindgen> Generator<'_, B> {
         // If necessary for our ABI, insert return pointers for any returned
         // values through a result.
         assert!(func.results.len() < 2);
-        if let Some(result) = func.results.get(0) {
+        if let Some(result) = func.results.first() {
             self.prep_return_pointer(result.tref.type_());
         }
 
@@ -618,7 +618,7 @@ impl<B: Bindgen> Generator<'_, B> {
         });
 
         // Lift the return value if one is present.
-        if let Some(result) = func.results.get(0) {
+        if let Some(result) = func.results.first() {
             self.lift(&result.tref, true);
         }
 
@@ -652,7 +652,7 @@ impl<B: Bindgen> Generator<'_, B> {
 
         // Like above the current ABI only has at most one result, so lower it
         // here if necessary.
-        if let Some(result) = func.results.get(0) {
+        if let Some(result) = func.results.first() {
             self.lower(&result.tref, Some(&mut nth));
         }
 
