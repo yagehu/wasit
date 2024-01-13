@@ -1,7 +1,7 @@
 use std::{fs, io, path::PathBuf};
 
 use super::SnapshotStore;
-use crate::WasiSnapshot;
+use crate::snapshot::WasiSnapshot;
 
 #[derive(Debug, Clone)]
 pub struct FsSnapshotStore {
@@ -83,6 +83,8 @@ mod tests {
         let mut store = FsSnapshotStore::new(root.path().to_path_buf());
         let snapshot = WasiSnapshot {
             errno:         Some(21),
+            params:        vec![],
+            results:       vec![],
             linear_memory: vec![42],
         };
 

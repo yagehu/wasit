@@ -10,7 +10,6 @@ members = [
     "executor/capnp-c",
     "executor/capnpc-c",
     "runners",
-    "snapshot",
     "wasi",
     "witx",
 ]

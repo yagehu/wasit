@@ -70,6 +70,11 @@ fn main() {
         target_dir.join("wazzi-executor.capnp.h"),
     )
     .unwrap();
+    fs::copy(
+        out_dir.join("wazzi-executor.capnp.c"),
+        target_dir.join("wazzi-executor.capnp.c"),
+    )
+    .unwrap();
 
     assert!(process::Command::new(clang_path)
         .arg("--sysroot")

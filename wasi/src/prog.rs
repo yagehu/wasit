@@ -11,7 +11,6 @@ use arbitrary::Unstructured;
 use color_eyre::eyre::{self, Context};
 use serde::{Deserialize, Serialize};
 use wazzi_executor::RunningExecutor;
-use wazzi_snapshot::{store::SnapshotStore, WasiSnapshot};
 
 use crate::{
     call::{
@@ -28,6 +27,7 @@ use crate::{
         Value,
     },
     capnp_mappers,
+    snapshot::{store::SnapshotStore, WasiSnapshot},
 };
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
@@ -164,7 +164,7 @@ impl ProgSeed {
                 .wrap_err("failed to call function in executor")?;
             let response = response.get()?;
             let ret = response.get_return()?;
-            // let mut call_results = Vec::with_capacity(results.len());
+            let mut call_results = Vec::with_capacity(results.len());
             let mut handle_results_ok = || {
                 for (i, result_tref) in results.iter().enumerate() {
                     match &call.results[i] {
@@ -201,19 +201,21 @@ impl ProgSeed {
                 },
                 | wazzi_executor_capnp::call_return::Which::Errno(errno) => Some(errno),
             };
-            // let results_reader = response.get_results()?;
+            let results_reader = response.get_results()?;
 
-            // if errno.is_none() || matches!(errno, Some(0)) {
-            //     for result in results_reader.iter() {
-            //         let call_result = capnp_mappers::from_capnp_call_result(&result)?;
+            if errno.is_none() || matches!(errno, Some(0)) {
+                for result in results_reader.iter() {
+                    let call_result = capnp_mappers::from_capnp_call_result(&result)?;
 
-            //         call_results.push(call_result);
-            //     }
-            // }
+                    call_results.push(call_result);
+                }
+            }
 
             snapshot_store
                 .push_snapshot(WasiSnapshot {
                     errno,
+                    params: call.params.clone(),
+                    results: call_results,
                     linear_memory: Vec::new(),
                 })
                 .wrap_err("failed to record snapshot")?;
@@ -373,10 +375,10 @@ fn build_value(builder: &mut wazzi_executor_capnp::value::Builder, ty: &witx::Ty
                 .unwrap();
 
             variant_builder.reborrow().set_case_idx(case_idx as u32);
-            variant_builder
-                .reborrow()
-                .init_case_name(case.name.as_str().len() as u32)
-                .push_str(case.name.as_str());
+            // variant_builder
+            //     .reborrow()
+            //     .init_case_name(case.name.as_str().len() as u32)
+            //     .push_str(case.name.as_str());
 
             let mut case_value_builder = variant_builder.reborrow().init_case_value();
 

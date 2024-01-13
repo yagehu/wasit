@@ -597,15 +597,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "wazzi-snapshot"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
 name = "wazzi-wasi"
 version = "0.1.0"
 dependencies = [
@@ -620,7 +611,6 @@ dependencies = [
  "wazzi-executor",
  "wazzi-executor-capnp",
  "wazzi-runners",
- "wazzi-snapshot",
  "wazzi-witx",
 ]
 

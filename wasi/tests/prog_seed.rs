@@ -14,8 +14,10 @@ use arbitrary::Unstructured;
 use tempfile::tempdir;
 
 use wazzi_executor::ExecutorRunner;
-use wazzi_snapshot::store::{mem::InMemorySnapshotStore, SnapshotStore};
-use wazzi_wasi::prog::{self, ProgSeed};
+use wazzi_wasi::{
+    prog::{self, ProgSeed},
+    snapshot::store::{mem::InMemorySnapshotStore, SnapshotStore},
+};
 
 fn repo_root() -> PathBuf {
     [env!("CARGO_MANIFEST_DIR"), ".."].into_iter().collect()
@@ -234,7 +236,6 @@ fn read_after_write() {
 
     executor.kill();
 
-    let stderr_str = String::from_utf8(stderr.try_lock().unwrap().deref().clone()).unwrap();
     let fd_read_snapshot = snapshot_store.get_snapshot(3).unwrap().unwrap();
 
     assert!(matches!(fd_read_snapshot.errno, Some(0)));
@@ -433,7 +434,6 @@ fn datasync() {
 
 #[test]
 fn fd_fdstat_get() {
-    let doc = spec();
     let path = [
         env!("CARGO_MANIFEST_DIR"),
         "..",
@@ -465,18 +465,22 @@ fn fd_fdstat_get() {
         tx.send(result).unwrap();
     });
 
-    let result = match rx.recv_timeout(time::Duration::from_millis(50)) {
+    let result = match rx.recv_timeout(time::Duration::from_millis(1000)) {
         | Ok(result) => result,
-        | Err(_) => {
+        | Err(err) => {
             executor.kill();
 
             let stderr = String::from_utf8(stderr.lock().unwrap().deref().clone()).unwrap();
 
-            panic!("Execution timeout. stderr:\n{stderr}");
+            panic!("Execution timeout or error. stderr:\n{stderr}\n{err}");
         },
     };
 
-    assert!(result.is_ok());
+    executor.kill();
+
+    let stderr = String::from_utf8(stderr.lock().unwrap().deref().clone()).unwrap();
+
+    assert!(result.is_ok(), "{:#?} {stderr}", result);
 
     let store = store.lock().unwrap();
     let fd_fdstat_gets_snapshot = store

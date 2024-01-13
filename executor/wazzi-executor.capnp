@@ -250,8 +250,7 @@ struct Value {
     }
 
     caseIdx   @0 :UInt32;
-    caseName  @1 :Text;
-    caseValue @2 :CaseValue;
+    caseValue @1 :CaseValue;
   }
 
   union {

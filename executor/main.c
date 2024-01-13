@@ -583,7 +583,10 @@ void set_value_from_ptr(
                 record_member_value_.spec = new_ParamSpec(*segment);
                 write_ParamSpec(&member_param_spec, record_member_value_.spec);
                 capn_ptr name_ptr = capn_new_string(*segment, record_member_type.name.str, record_member_type.name.len);
-                capn_set_text(name_ptr, 0, record_member_value_.name);
+                record_member_value_.name.len = record_member_type.name.len;
+                record_member_value_.name.str = name_ptr.data;
+                record_member_value_.name.seg = *segment;
+                // capn_set_text(name_ptr, 0, record_member_value_.name);
 
                 set_Value_Record_Member(&record_member_value_, record_value.members, i);
             }
@@ -640,21 +643,33 @@ void set_value_from_ptr(
 
                     case_value.which = Value_Variant_CaseValue_some;
                     case_value.some  = new_ParamSpec(*segment);
+                    write_ParamSpec(&payload_param_spec, case_value.some);
 
                     break;
                 }
             }
 
-            capn_ptr case_name_ptr = capn_new_string(*segment, case_type.name.str, case_type.name.len);
+            Value_Variant_CaseValue_ptr vp = new_Value_Variant_CaseValue(*segment);
 
-            variant_value.caseIdx  = case_idx;
-            capn_set_text(case_name_ptr, 0, variant_value.caseName);
-            variant_value.caseValue = new_Value_Variant_CaseValue(*segment);
-            write_Value_Variant_CaseValue(&case_value, variant_value.caseValue);
+            variant_value.caseIdx   = case_idx;
+            // variant_value.caseValue = new_Value_Variant_CaseValue(*segment);
+            write_Value_Variant_CaseValue(&case_value, vp);
+            variant_value.caseValue = vp;
+
+            // capn_ptr case_name_ptr = capn_new_string(*segment, case_type.name.str, case_type.name.len);
+            // variant_value.caseName.len = case_type.name.len;
+            // variant_value.caseName.str = case_name_ptr.data;
+            // variant_value.caseName.seg = *segment;
+            // capn_set_text(case_name_ptr, 0, variant_value.caseName);
+
 
             value->which   = Value_variant;
-            value->variant = new_Value_Variant(*segment);
-            write_Value_Variant(&variant_value, value->variant);
+            Value_Variant_ptr variant_ptr = new_Value_Variant(*segment);
+            write_Value_Variant(&variant_value, variant_ptr);
+            value->variant = variant_ptr;
+            // value->variant = new_Value_Variant(*segment);
+            // write_Value_Variant(&variant_value, value->variant);
+    // fprintf(stderr, "caseName asdf %s %d %d\n", variant_value.caseName.str, case_name_ptr.datasz, variant_value.caseName.len);
 
             break;
         }
