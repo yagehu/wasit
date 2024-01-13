@@ -146,7 +146,7 @@
   ;;; Get the attributes of a file descriptor.
   ;;; Note: This returns similar flags to `fcntl(fd, F_GETFL)` in POSIX, as well as additional fields.
   (@interface func (export "fd_fdstat_get")
-    (param $fd $fd)
+    (param $fd $newfd)
     ;;; The buffer where the file descriptor's attributes are stored.
     (result $error (expected $fdstat (error $errno)))
   )

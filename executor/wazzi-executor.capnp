@@ -222,7 +222,12 @@ struct Value {
   }
 
   struct Record {
-    members @0 :List(ParamSpec);
+    struct Member {
+      name @0 :Text;
+      spec @1 :ParamSpec;
+    }
+
+    members @0 :List(Member);
   }
 
   struct Pointer {

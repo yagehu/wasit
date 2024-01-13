@@ -298,19 +298,21 @@ void set_ptr_value_no_alloc(
             read_Type_Record(&record_type, type.record);
 
             for (int i = 0; i < capn_len(record_type.members); i++) {
-                struct Type_Record_Member record_member_type;
-                struct ParamSpec          record_member;
+                struct Type_Record_Member  record_member_type;
+                struct Value_Record_Member record_member_value;
+                struct ParamSpec           record_member_spec;
 
                 get_Type_Record_Member(&record_member_type, record_type.members, i);
-                get_ParamSpec(&record_member, record_value.members, i);
+                get_Value_Record_Member(&record_member_value, record_value.members, i);
+                read_ParamSpec(&record_member_spec, record_member_value.spec);
 
                 void * member_ptr = (uint8_t *) ptr + record_member_type.offset;
 
-                switch (record_member.which) {
+                switch (record_member_spec.which) {
                     case ParamSpec_resource: {
                         struct ResourceRef resource_ref;
 
-                        read_ResourceRef(&resource_ref, record_member.resource);
+                        read_ResourceRef(&resource_ref, record_member_spec.resource);
 
                         struct resource_map_entry * resource_entry =
                             hmgetp_null(*resource_map, resource_ref.id);
@@ -324,8 +326,8 @@ void set_ptr_value_no_alloc(
                         struct Value record_member_value;
                         struct Type  record_member_type;
 
-                        read_Value(&record_member_value, record_member.value);
-                        read_Type(&record_member_type, record_member.type);
+                        read_Value(&record_member_value, record_member_spec.value);
+                        read_Type(&record_member_type, record_member_spec.type);
                         set_ptr_value_no_alloc(resource_map, record_member_type, record_member_value, member_ptr);
 
                         break;
@@ -546,10 +548,116 @@ void set_value_from_ptr(
             break;
         }
         case Type_array: fail("unimplemented: array type result");
-        case Type_record: fail("unimplemented: record type result");
+        case Type_record: {
+            struct Type_Record record_type;
+
+            read_Type_Record(&record_type, type.record);
+
+            struct Value_Record record_value;
+
+            record_value.members = new_Value_Record_Member_list(*segment, capn_len(record_type.members));
+
+            for (int i = 0; i < capn_len(record_type.members); i++) {
+                struct Type_Record_Member record_member_type;
+                struct Value              record_member_value;
+                struct Type               member_type;
+
+                Type_ptr ret_member_type = new_Type(*segment);
+
+                get_Type_Record_Member(&record_member_type, record_type.members, i);
+                read_Type(&member_type, record_member_type.type);
+                write_Type(&member_type, ret_member_type);
+
+                void * member_ptr = ((uint8_t *) ptr) + record_member_type.offset;
+
+                set_value_from_ptr(segment, &record_member_value, member_type, member_ptr);
+
+                struct ParamSpec member_param_spec;
+
+                member_param_spec.which = ParamSpec_value;
+                member_param_spec.type  = ret_member_type;
+                member_param_spec.value = new_Value(*segment);
+                write_Value(&record_member_value, member_param_spec.value);
+
+                struct Value_Record_Member record_member_value_;
+                record_member_value_.spec = new_ParamSpec(*segment);
+                write_ParamSpec(&member_param_spec, record_member_value_.spec);
+                capn_ptr name_ptr = capn_new_string(*segment, record_member_type.name.str, record_member_type.name.len);
+                capn_set_text(name_ptr, 0, record_member_value_.name);
+
+                set_Value_Record_Member(&record_member_value_, record_value.members, i);
+            }
+
+            value->which  = Value_record;
+            value->record = new_Value_Record(*segment);
+            write_Value_Record(&record_value, value->record);
+
+            break;
+        }
         case Type_constPointer: fail("unimplemented: constPointer type result");
         case Type_pointer: fail("unimplemented: pointer type result");
-        case Type_variant: fail("unimplemented: variant type result");
+        case Type_variant: {
+            struct Type_Variant  variant_type;
+            struct Value_Variant variant_value;
+
+            read_Type_Variant(&variant_type, type.variant);
+
+            uint64_t case_idx = 0;
+
+            switch (variant_type.tagRepr) {
+                case Type_IntRepr_u8:  case_idx = * (uint8_t *)  ptr; break;
+                case Type_IntRepr_u16: case_idx = * (uint16_t *) ptr; break;
+                case Type_IntRepr_u32: case_idx = * (uint32_t *) ptr; break;
+                case Type_IntRepr_u64: case_idx = * (uint64_t *) ptr; break;
+            }
+
+            struct Type_Variant_Case       case_type;
+            struct Type_Variant_CaseType   case_type_;
+            struct Value_Variant_CaseValue case_value;
+
+            get_Type_Variant_Case(&case_type, variant_type.cases, case_idx);
+            read_Type_Variant_CaseType(&case_type_, case_type.type);
+
+            switch (case_type_.which) {
+                case Type_Variant_CaseType_none: case_value.which = Value_Variant_CaseValue_none; break;
+                case Type_Variant_CaseType_some: {
+                    struct Type  case_payload_type;
+                    struct Value case_payload_value;
+
+                    void *   payload_ptr  = ((uint8_t *) ptr + variant_type.payloadOffset);
+                    Type_ptr payload_type = new_Type(*segment);
+
+                    read_Type(&case_payload_type, case_type_.some);
+                    set_value_from_ptr(segment, &case_payload_value, case_payload_type, payload_ptr);
+                    write_Type(&case_payload_type, payload_type);
+
+                    struct ParamSpec payload_param_spec;
+
+                    payload_param_spec.which = ParamSpec_value;
+                    payload_param_spec.type  = payload_type;
+                    payload_param_spec.value = new_Value(*segment);
+                    write_Value(&case_payload_value, payload_param_spec.value);
+
+                    case_value.which = Value_Variant_CaseValue_some;
+                    case_value.some  = new_ParamSpec(*segment);
+
+                    break;
+                }
+            }
+
+            capn_ptr case_name_ptr = capn_new_string(*segment, case_type.name.str, case_type.name.len);
+
+            variant_value.caseIdx  = case_idx;
+            capn_set_text(case_name_ptr, 0, variant_value.caseName);
+            variant_value.caseValue = new_Value_Variant_CaseValue(*segment);
+            write_Value_Variant_CaseValue(&case_value, variant_value.caseValue);
+
+            value->which   = Value_variant;
+            value->variant = new_Value_Variant(*segment);
+            write_Value_Variant(&variant_value, value->variant);
+
+            break;
+        }
     }
 }
 
@@ -883,6 +991,31 @@ void handle_call(
 
             break;
         }
+        case Func_fdFdstatGet: {
+            struct ParamSpec  p0_fd_spec;
+            struct ResultSpec r0_fdstat_spec;
+
+            get_ParamSpec(&p0_fd_spec, call.params, 0);
+            get_ResultSpec(&r0_fdstat_spec, call.results, 0);
+
+            void *  p0_fd_ptr     = handle_param_pre(resource_map, p0_fd_spec, NULL);
+            void *  r0_fdstat_ptr = handle_result_pre(resource_map, r0_fdstat_spec);
+            int32_t p0_fd         = * (int32_t *) p0_fd_ptr;
+            int32_t r0_fdstat     = (int32_t) r0_fdstat_ptr;
+
+            int32_t errno = __imported_wasi_snapshot_preview1_fd_fdstat_get(p0_fd, r0_fdstat);
+
+            CallResult_list call_result_list = new_CallResult_list(*segment, 1 /* sz */);
+
+            handle_result_post(resource_map, segment, r0_fdstat_spec, 0, call_result_list, r0_fdstat_ptr);
+            handle_param_post(p0_fd_spec, p0_fd_ptr);
+
+            call_return.which     = CallReturn_errno;
+            call_return.errno     = errno;
+            call_response.results = call_result_list;
+
+            break;
+        }
         case Func_fdRead: {
             struct ParamSpec  p0_fd;
             struct ParamSpec  p1_iovs;
@@ -1175,7 +1308,13 @@ void * handle_result_pre(struct resource_map_entry ** resource_map, struct Resul
         }
         case Type_handle: return malloc(sizeof(int32_t));
         case Type_array: fail("result cannot be array");
-        case Type_record: fail("result cannot be record");
+        case Type_record: {
+            struct Type_Record record_type;
+
+            read_Type_Record(&record_type, type.record);
+
+            return malloc(record_type.size);
+        }
         case Type_constPointer: fail("result cannot be constPointer");
         case Type_pointer: fail("result cannot be pointer");
         case Type_variant: fail("result cannot be variant");

@@ -91,6 +91,7 @@ impl ProgSeed {
                 | "fd_allocate" => wazzi_executor_capnp::Func::FdAllocate,
                 | "fd_close" => wazzi_executor_capnp::Func::FdClose,
                 | "fd_datasync" => wazzi_executor_capnp::Func::FdDatasync,
+                | "fd_fdstat_get" => wazzi_executor_capnp::Func::FdFdstatGet,
                 | "fd_read" => wazzi_executor_capnp::Func::FdRead,
                 | "fd_seek" => wazzi_executor_capnp::Func::FdSeek,
                 | "fd_write" => wazzi_executor_capnp::Func::FdWrite,
@@ -286,7 +287,14 @@ fn build_value(builder: &mut wazzi_executor_capnp::value::Builder, ty: &witx::Ty
                 .enumerate()
             {
                 let mut member_builder = members_builder.reborrow().get(i as u32);
-                let mut member_type_builder = member_builder.reborrow().init_type();
+
+                member_builder
+                    .reborrow()
+                    .init_name(member_type.name.as_str().len() as u32)
+                    .push_str(member_type.name.as_str());
+
+                let mut member_spec_builder = member_builder.reborrow().init_spec();
+                let mut member_type_builder = member_spec_builder.reborrow().init_type();
 
                 capnp_mappers::build_type(
                     member_type.tref.type_().as_ref(),
@@ -294,12 +302,12 @@ fn build_value(builder: &mut wazzi_executor_capnp::value::Builder, ty: &witx::Ty
                 );
 
                 match &member_value.value {
-                    | &CallParamSpec::Resource(resource_id) => member_builder
+                    | &CallParamSpec::Resource(resource_id) => member_spec_builder
                         .reborrow()
                         .init_resource()
                         .set_id(resource_id),
                     | CallParamSpec::Value(value) => {
-                        let mut member_value_builder = member_builder.reborrow().init_value();
+                        let mut member_value_builder = member_spec_builder.reborrow().init_value();
 
                         build_value(
                             &mut member_value_builder,

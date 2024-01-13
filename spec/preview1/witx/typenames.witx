@@ -431,6 +431,7 @@
     (field $fs_rights_inheriting $rights)
   )
 )
+(resource $fdstat (type $fdstat))
 
 ;;; Identifier for a device containing a file system. Can be used in combination
 ;;; with `inode` to uniquely identify a file or directory in the filesystem.

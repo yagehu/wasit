@@ -1,6 +1,10 @@
 use witx::Layout;
 
-use crate::{call::BuiltinValue, recorder::CallResult, Value};
+use crate::{
+    call::{BuiltinValue, CallParamSpec, RecordMemberValue, RecordValue},
+    recorder::CallResult,
+    Value,
+};
 
 pub(crate) fn from_witx_int_repr(x: &witx::IntRepr) -> wazzi_executor_capnp::type_::IntRepr {
     match x {
@@ -51,7 +55,27 @@ pub(crate) fn from_capnp_value(
         | Which::Bitflags(_) => todo!(),
         | Which::Handle(fd) => Ok(Value::Handle(fd)),
         | Which::Array(_) => todo!(),
-        | Which::Record(_) => todo!(),
+        | Which::Record(record) => {
+            let record = record?;
+            let memebers_reader = record.get_members()?;
+            let mut members = Vec::with_capacity(memebers_reader.len() as usize);
+
+            for member_reader in memebers_reader {
+                let name = member_reader.get_name()?.to_str().unwrap().to_owned();
+                let spec = match member_reader.get_spec()?.which()? {
+                    | wazzi_executor_capnp::param_spec::Which::Resource(_) => unreachable!(),
+                    | wazzi_executor_capnp::param_spec::Which::Value(rdr) => rdr?,
+                };
+                let value = from_capnp_value(&spec)?;
+
+                members.push(RecordMemberValue {
+                    name,
+                    value: CallParamSpec::Value(value),
+                });
+            }
+
+            Ok(Value::Record(RecordValue(members)))
+        },
         | Which::ConstPointer(_) => todo!(),
         | Which::Pointer(_) => todo!(),
         | Which::Variant(_) => todo!(),
