@@ -50,10 +50,10 @@ where
 
 #[derive(Debug)]
 pub struct RunningExecutor {
-    child:              process::Child,
+    child:              Arc<Mutex<process::Child>>,
     stdin:              process::ChildStdin,
-    stdout:             process::ChildStdout,
-    stderr_copy_handle: thread::JoinHandle<u64>,
+    stdout:             Arc<Mutex<process::ChildStdout>>,
+    stderr_copy_handle: Arc<Mutex<Option<thread::JoinHandle<u64>>>>,
     base_dir_fd:        u32,
 }
 
@@ -68,21 +68,27 @@ impl RunningExecutor {
         let stdout = child.stdout.take().unwrap();
 
         Self {
-            child,
+            child: Arc::new(Mutex::new(child)),
             stdin,
-            stdout,
-            stderr_copy_handle,
+            stdout: Arc::new(Mutex::new(stdout)),
+            stderr_copy_handle: Arc::new(Mutex::new(Some(stderr_copy_handle))),
             base_dir_fd,
         }
     }
 
-    pub fn kill(mut self) {
-        self.child.kill().unwrap();
-        self.stderr_copy_handle.join().unwrap();
+    pub fn kill(&self) {
+        self.child.lock().unwrap().kill().unwrap();
+        self.stderr_copy_handle
+            .lock()
+            .unwrap()
+            .take()
+            .unwrap()
+            .join()
+            .unwrap();
     }
 
     pub fn call(
-        &mut self,
+        &self,
         call: wazzi_executor_capnp::call_request::Reader,
     ) -> Result<
         capnp::message::TypedReader<
@@ -98,7 +104,7 @@ impl RunningExecutor {
         capnp::serialize::write_message(&self.stdin, &message)?;
 
         let message = capnp::serialize::read_message(
-            &mut self.stdout,
+            self.stdout.lock().unwrap().deref_mut(),
             capnp::message::DEFAULT_READER_OPTIONS,
         )?;
 
@@ -106,7 +112,7 @@ impl RunningExecutor {
     }
 
     pub fn decl(
-        &mut self,
+        &self,
         request: wazzi_executor_capnp::decl_request::Reader,
     ) -> Result<(), capnp::Error> {
         let mut message = capnp::message::Builder::new_default();
@@ -116,7 +122,7 @@ impl RunningExecutor {
         capnp::serialize::write_message(&self.stdin, &message)?;
 
         let _message = capnp::serialize::read_message(
-            &mut self.stdout,
+            self.stdout.lock().unwrap().deref_mut(),
             capnp::message::DEFAULT_READER_OPTIONS,
         )?;
 

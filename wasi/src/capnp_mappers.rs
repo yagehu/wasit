@@ -1,9 +1,12 @@
 use witx::Layout;
 
-use crate::{
-    call::{BuiltinValue, CallParamSpec, RecordMemberValue, RecordValue},
-    recorder::CallResult,
+use crate::call::{
+    BuiltinValue,
+    CallParamSpec,
+    RecordMemberValue,
+    RecordValue,
     Value,
+    VariantValue,
 };
 
 pub(crate) fn from_witx_int_repr(x: &witx::IntRepr) -> wazzi_executor_capnp::type_::IntRepr {
@@ -15,18 +18,19 @@ pub(crate) fn from_witx_int_repr(x: &witx::IntRepr) -> wazzi_executor_capnp::typ
     }
 }
 
-pub(crate) fn from_capnp_call_result(
-    reader: &wazzi_executor_capnp::call_result::Reader,
-) -> Result<CallResult, capnp::Error> {
-    let value_reader = reader.get_value()?;
-    let value = from_capnp_value(&value_reader)?;
+// pub(crate) fn from_capnp_call_result(
+//     reader: &wazzi_executor_capnp::call_result::Reader,
+// ) -> Result<CallResult, capnp::Error> {
+//     let value_reader = reader.get_value()?;
+//     let value = from_capnp_value(&value_reader)?;
 
-    Ok(CallResult {
-        memory_offset: reader.get_memory_offset(),
-        value,
-    })
-}
+//     Ok(CallResult {
+//         memory_offset: reader.get_memory_offset(),
+//         value,
+//     })
+// }
 
+#[allow(unused)]
 pub(crate) fn from_capnp_value(
     reader: &wazzi_executor_capnp::value::Reader,
 ) -> Result<Value, capnp::Error> {
@@ -78,7 +82,25 @@ pub(crate) fn from_capnp_value(
         },
         | Which::ConstPointer(_) => todo!(),
         | Which::Pointer(_) => todo!(),
-        | Which::Variant(_) => todo!(),
+        | Which::Variant(variant) => {
+            let variant = variant?;
+            let name = variant.get_case_name()?.to_string()?;
+            let payload_reader = variant.get_case_value()?;
+            let payload = match payload_reader.which()? {
+                | wazzi_executor_capnp::value::variant::case_value::Which::None(_) => None,
+                | wazzi_executor_capnp::value::variant::case_value::Which::Some(reader) => {
+                    let reader = reader?;
+                    let reader = match reader.which()? {
+                        | wazzi_executor_capnp::param_spec::Which::Resource(_) => unreachable!(),
+                        | wazzi_executor_capnp::param_spec::Which::Value(rdr) => rdr?,
+                    };
+
+                    Some(Box::new(CallParamSpec::Value(from_capnp_value(&reader)?)))
+                },
+            };
+
+            Ok(Value::Variant(VariantValue { name, payload }))
+        },
     }
 }
 

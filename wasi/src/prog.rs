@@ -2,17 +2,22 @@ pub use self::error::GrowError;
 
 mod error;
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap},
+    fmt,
+};
 
 use arbitrary::Unstructured;
 use color_eyre::eyre::{self, Context};
 use serde::{Deserialize, Serialize};
 use wazzi_executor::RunningExecutor;
+use wazzi_snapshot::{store::SnapshotStore, WasiSnapshot};
 
 use crate::{
     call::{
         ArrayValue,
         BuiltinValue,
+        Call,
         CallParamSpec,
         CallResultSpec,
         PointerAlloc,
@@ -20,12 +25,9 @@ use crate::{
         RecordMemberValue,
         RecordValue,
         StringValue,
+        Value,
     },
     capnp_mappers,
-    Call,
-    Recorder,
-    SnapshotHandler,
-    Value,
 };
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
@@ -36,15 +38,16 @@ pub struct ProgSeed {
 }
 
 impl ProgSeed {
-    #[tracing::instrument(skip(recorder))]
-    pub fn execute<SH>(
+    #[tracing::instrument]
+    pub fn execute<S>(
         &self,
-        executor: &mut RunningExecutor,
+        executor: &RunningExecutor,
         spec: &witx::Document,
-        recorder: &mut Recorder<SH>,
+        snapshot_store: &mut S,
     ) -> Result<Prog, eyre::Error>
     where
-        SH: SnapshotHandler,
+        S: SnapshotStore<Snapshot = WasiSnapshot> + fmt::Debug,
+        <S as SnapshotStore>::Error: std::error::Error + Send + Sync + 'static,
     {
         let module_spec = spec
             .module(&witx::Id::new("wasi_snapshot_preview1"))
@@ -161,7 +164,7 @@ impl ProgSeed {
                 .wrap_err("failed to call function in executor")?;
             let response = response.get()?;
             let ret = response.get_return()?;
-            let mut call_results = Vec::with_capacity(results.len());
+            // let mut call_results = Vec::with_capacity(results.len());
             let mut handle_results_ok = || {
                 for (i, result_tref) in results.iter().enumerate() {
                     match &call.results[i] {
@@ -198,17 +201,22 @@ impl ProgSeed {
                 },
                 | wazzi_executor_capnp::call_return::Which::Errno(errno) => Some(errno),
             };
-            let results_reader = response.get_results()?;
+            // let results_reader = response.get_results()?;
 
-            if errno.is_none() || matches!(errno, Some(0)) {
-                for result in results_reader.iter() {
-                    let call_result = capnp_mappers::from_capnp_call_result(&result)?;
+            // if errno.is_none() || matches!(errno, Some(0)) {
+            //     for result in results_reader.iter() {
+            //         let call_result = capnp_mappers::from_capnp_call_result(&result)?;
 
-                    call_results.push(call_result);
-                }
-            }
+            //         call_results.push(call_result);
+            //     }
+            // }
 
-            recorder.take_snapshot(errno, call_results);
+            snapshot_store
+                .push_snapshot(WasiSnapshot {
+                    errno,
+                    linear_memory: Vec::new(),
+                })
+                .wrap_err("failed to record snapshot")?;
         }
 
         Ok(Prog {

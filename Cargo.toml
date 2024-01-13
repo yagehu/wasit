@@ -10,6 +10,7 @@ members = [
     "executor/capnp-c",
     "executor/capnpc-c",
     "runners",
+    "snapshot",
     "wasi",
     "witx",
 ]
@@ -20,6 +21,7 @@ wazzi-executor.path = "executor"
 wazzi-executor-capnp.path = "executor/capnp"
 wazzi-executor-capnp-c.path = "executor/capnp-c"
 wazzi-runners.path = "runners"
+wazzi-snapshot.path = "snapshot"
 wazzi-wasi.path = "wasi"
 wazzi-witx.path = "witx"
 

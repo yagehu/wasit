@@ -8,6 +8,7 @@ publish.workspace = true
 wazzi-executor.workspace = true
 wazzi-executor-capnp.workspace = true
 wazzi-runners.workspace = true
+wazzi-snapshot.workspace = true
 wazzi-witx.workspace = true
 
 arbitrary.workspace = true
