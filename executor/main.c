@@ -562,11 +562,8 @@ void set_value_from_ptr(
                 struct Value              record_member_value;
                 struct Type               member_type;
 
-                Type_ptr ret_member_type = new_Type(*segment);
-
                 get_Type_Record_Member(&record_member_type, record_type.members, i);
                 read_Type(&member_type, record_member_type.type);
-                write_Type(&member_type, ret_member_type);
 
                 void * member_ptr = ((uint8_t *) ptr) + record_member_type.offset;
 
@@ -575,8 +572,9 @@ void set_value_from_ptr(
                 struct ParamSpec member_param_spec;
 
                 member_param_spec.which = ParamSpec_value;
-                member_param_spec.type  = ret_member_type;
+                member_param_spec.type  = new_Type(*segment);
                 member_param_spec.value = new_Value(*segment);
+                write_Type(&member_type, member_param_spec.type);
                 write_Value(&record_member_value, member_param_spec.value);
 
                 struct Value_Record_Member record_member_value_;
@@ -649,27 +647,26 @@ void set_value_from_ptr(
                 }
             }
 
-            Value_Variant_CaseValue_ptr vp = new_Value_Variant_CaseValue(*segment);
-
             variant_value.caseIdx   = case_idx;
-            // variant_value.caseValue = new_Value_Variant_CaseValue(*segment);
-            write_Value_Variant_CaseValue(&case_value, vp);
-            variant_value.caseValue = vp;
+            variant_value.caseValue = new_Value_Variant_CaseValue(*segment);
+            write_Value_Variant_CaseValue(&case_value, variant_value.caseValue);
 
-            // capn_ptr case_name_ptr = capn_new_string(*segment, case_type.name.str, case_type.name.len);
-            // variant_value.caseName.len = case_type.name.len;
-            // variant_value.caseName.str = case_name_ptr.data;
-            // variant_value.caseName.seg = *segment;
+
+            capn_ptr case_name_ptr = capn_new_string(*segment, case_type.name.str, case_type.name.len);
+            variant_value.caseName.len = case_type.name.len;
+            variant_value.caseName.str = case_name_ptr.data;
+            variant_value.caseName.seg = NULL;
+            fprintf(stderr, "seg %d\n", variant_value.caseName.seg == NULL);
             // capn_set_text(case_name_ptr, 0, variant_value.caseName);
-
+            fprintf(stderr, "  set_text end %s\n", variant_value.caseName.str);
 
             value->which   = Value_variant;
-            Value_Variant_ptr variant_ptr = new_Value_Variant(*segment);
-            write_Value_Variant(&variant_value, variant_ptr);
-            value->variant = variant_ptr;
-            // value->variant = new_Value_Variant(*segment);
-            // write_Value_Variant(&variant_value, value->variant);
+            value->variant = new_Value_Variant(*segment);
+            write_Value_Variant(&variant_value, value->variant);
+            // capn_set_text(value->variant.p, 0, case_name);
     // fprintf(stderr, "caseName asdf %s %d %d\n", variant_value.caseName.str, case_name_ptr.datasz, variant_value.caseName.len);
+
+            fprintf(stderr, "seg end %d\n", value->variant.p.type);
 
             break;
         }
@@ -1220,6 +1217,8 @@ void handle_call(
 
     call_response._return = call_return_ptr;
     write_CallResponse(&call_response, call_response_ptr);
+
+    capn_resolve(&call_response_ptr.p);
 
     const int ret = capn_setp(capn_ptr, 0, call_response_ptr.p);
     if (ret != 0) fail("failed to capn_setp");

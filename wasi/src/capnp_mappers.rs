@@ -1,7 +1,17 @@
 use witx::Layout;
 
 use crate::{
-    call::{BuiltinValue, CallParamSpec, RecordMemberValue, RecordValue, Value, VariantValue},
+    call::{
+        BitflagsMember,
+        BitflagsRepr,
+        BitflagsValue,
+        BuiltinValue,
+        CallParamSpec,
+        RecordMemberValue,
+        RecordValue,
+        Value,
+        VariantValue,
+    },
     snapshot::CallResult,
 };
 
@@ -15,10 +25,11 @@ pub(crate) fn from_witx_int_repr(x: &witx::IntRepr) -> wazzi_executor_capnp::typ
 }
 
 pub(crate) fn from_capnp_call_result(
+    ty: &witx::Type,
     reader: &wazzi_executor_capnp::call_result::Reader,
 ) -> Result<CallResult, capnp::Error> {
     let value_reader = reader.get_value()?;
-    let value = from_capnp_value(&value_reader)?;
+    let value = from_capnp_value(ty, &value_reader)?;
 
     Ok(CallResult {
         memory_offset: reader.get_memory_offset(),
@@ -27,12 +38,13 @@ pub(crate) fn from_capnp_call_result(
 }
 
 pub(crate) fn from_capnp_value(
+    ty: &witx::Type,
     reader: &wazzi_executor_capnp::value::Reader,
 ) -> Result<Value, capnp::Error> {
     use wazzi_executor_capnp::value::Which;
 
-    match reader.which()? {
-        | Which::Builtin(builtin) => {
+    match (ty, reader.which()?) {
+        | (_, Which::Builtin(builtin)) => {
             use wazzi_executor_capnp::value::builtin::Which;
 
             let builtin = builtin?;
@@ -50,23 +62,45 @@ pub(crate) fn from_capnp_value(
 
             Ok(Value::Builtin(builtin_value))
         },
-        | Which::String(_) => todo!(),
-        | Which::Bitflags(_) => todo!(),
-        | Which::Handle(fd) => Ok(Value::Handle(fd)),
-        | Which::Array(_) => todo!(),
-        | Which::Record(record) => {
+        | (_, Which::String(_)) => todo!(),
+        | (witx::Type::Record(record_type), Which::Bitflags(bitflags)) => {
+            let bitflags_reader = bitflags?;
+            let members_reader = bitflags_reader.get_members()?;
+            let mut members = Vec::with_capacity(members_reader.len() as usize);
+            let repr = match &record_type.bitflags_repr().unwrap() {
+                | witx::IntRepr::U8 => BitflagsRepr::U8,
+                | witx::IntRepr::U16 => BitflagsRepr::U16,
+                | witx::IntRepr::U32 => BitflagsRepr::U32,
+                | witx::IntRepr::U64 => BitflagsRepr::U64,
+            };
+
+            for (value, member_type) in members_reader.iter().zip(record_type.members.iter()) {
+                members.push(BitflagsMember {
+                    name: member_type.name.as_str().to_owned(),
+                    value,
+                });
+            }
+
+            Ok(Value::Bitflags(BitflagsValue { repr, members }))
+        },
+        | (_, Which::Handle(fd)) => Ok(Value::Handle(fd)),
+        | (_, Which::Array(_)) => todo!(),
+        | (_, Which::Record(record)) => {
             let record = record?;
             let memebers_reader = record.get_members()?;
             let mut members = Vec::with_capacity(memebers_reader.len() as usize);
+            let member_types = match ty {
+                | witx::Type::Record(record) => &record.members,
+                | _ => unreachable!(),
+            };
 
-            for member_reader in memebers_reader {
-                // eprintln!("whoaasdf {:#?} abcasdfk", member_reader);
+            for (member_reader, member_type) in memebers_reader.iter().zip(member_types.iter()) {
                 let name = member_reader.get_name()?.to_str().unwrap().to_owned();
                 let spec = match member_reader.get_spec()?.which()? {
                     | wazzi_executor_capnp::param_spec::Which::Resource(_) => unreachable!(),
                     | wazzi_executor_capnp::param_spec::Which::Value(rdr) => rdr?,
                 };
-                let value = from_capnp_value(&spec)?;
+                let value = from_capnp_value(member_type.tref.type_(), &spec)?;
 
                 members.push(RecordMemberValue {
                     name,
@@ -76,31 +110,46 @@ pub(crate) fn from_capnp_value(
 
             Ok(Value::Record(RecordValue(members)))
         },
-        | Which::ConstPointer(_) => todo!(),
-        | Which::Pointer(_) => todo!(),
-        | Which::Variant(variant) => {
-            let variant = variant?;
-            // eprintln!("whoaasdf {:#?} abcasdfk", variant);
-            // let name = variant.get_case_name()?.to_string()?;
-            let payload_reader = variant.get_case_value()?;
-            let payload = match payload_reader.which()? {
-                | wazzi_executor_capnp::value::variant::case_value::Which::None(_) => None,
-                | wazzi_executor_capnp::value::variant::case_value::Which::Some(reader) => {
+        | (_, Which::ConstPointer(_)) => todo!(),
+        | (_, Which::Pointer(_)) => todo!(),
+        | (witx::Type::Variant(variant_type), Which::Variant(variant_reader)) => {
+            use wazzi_executor_capnp::value::variant::case_value::Which;
+
+            let variant_reader = variant_reader?;
+            println!(
+                "{:#?}\n===",
+                // variant_reader,
+                variant_reader.get_case_value()?
+            );
+            let name = variant_reader.get_case_name()?.to_string()?;
+            eprintln!("whoa {name}");
+            let payload_reader = variant_reader.get_case_value()?;
+            let case_type = variant_type
+                .cases
+                .iter()
+                .find(|case| case.name.as_str() == name)
+                .unwrap();
+            let payload = match (&case_type.tref, payload_reader.which()?) {
+                | (Some(tref), Which::Some(reader)) => {
+                    use wazzi_executor_capnp::param_spec::Which;
+
                     let reader = reader?;
                     let reader = match reader.which()? {
-                        | wazzi_executor_capnp::param_spec::Which::Resource(_) => unreachable!(),
-                        | wazzi_executor_capnp::param_spec::Which::Value(rdr) => rdr?,
+                        | Which::Resource(_) => unreachable!(),
+                        | Which::Value(rdr) => rdr?,
                     };
 
-                    Some(Box::new(CallParamSpec::Value(from_capnp_value(&reader)?)))
+                    Some(Box::new(CallParamSpec::Value(from_capnp_value(
+                        tref.type_().as_ref(),
+                        &reader,
+                    )?)))
                 },
+                | (_, _) => None,
             };
 
-            Ok(Value::Variant(VariantValue {
-                name: "asdf".to_owned(),
-                payload,
-            }))
+            Ok(Value::Variant(VariantValue { name, payload }))
         },
+        | _ => unreachable!(),
     }
 }
 

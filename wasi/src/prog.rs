@@ -204,8 +204,11 @@ impl ProgSeed {
             let results_reader = response.get_results()?;
 
             if errno.is_none() || matches!(errno, Some(0)) {
-                for result in results_reader.iter() {
-                    let call_result = capnp_mappers::from_capnp_call_result(&result)?;
+                for (result_reader, result_tref) in results_reader.iter().zip(results.iter()) {
+                    let call_result = capnp_mappers::from_capnp_call_result(
+                        result_tref.type_().as_ref(),
+                        &result_reader,
+                    )?;
 
                     call_results.push(call_result);
                 }

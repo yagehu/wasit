@@ -5,7 +5,7 @@ publish = false
 [workspace]
 resolver = "2"
 members = [
-    "executor",
+    "executor", "executor-pb/pb-c",
     "executor/capnp",
     "executor/capnp-c",
     "executor/capnpc-c",
@@ -25,8 +25,10 @@ wazzi-wasi.path = "wasi"
 wazzi-witx.path = "witx"
 
 arbitrary = "1"
-capnp = "0.18"
-capnpc = "0.18"
+# capnp = "0.18"
+capnp.path = "../capnproto-rust/capnp"
+capnpc.path = "../capnproto-rust/capnpc"
+# capnpc = "0.18"
 cc = "*"
 color-eyre = "0.6"
 petgraph = "0.6"

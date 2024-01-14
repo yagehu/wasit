@@ -249,8 +249,9 @@ struct Value {
       }
     }
 
-    caseIdx   @0 :UInt32;
+    caseIdx   @2 :UInt32;
     caseValue @1 :CaseValue;
+    caseName  @0 :Text;
   }
 
   union {
