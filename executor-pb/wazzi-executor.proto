@@ -1,11 +1,17 @@
 syntax = "proto3";
 
 message Request {
+    message Call {
+        string func = 1;
+    }
+
     oneof which {
         Call call = 1;
     }
 }
 
-message Call {
-    string func = 1;
+message CallRequest {
+}
+
+message CallResponse {
 }

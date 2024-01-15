@@ -7,3 +7,6 @@
 [submodule "executor/c-capnproto"]
 	path = executor/c-capnproto
 	url = https://gitlab.com/dkml/ext/c-capnproto.git
+[submodule "executor-pb/protobuf-c/upstream"]
+	path = executor-pb/protobuf-c/upstream
+	url = https://github.com/protobuf-c/protobuf-c.git

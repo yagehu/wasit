@@ -5,7 +5,11 @@ publish = false
 [workspace]
 resolver = "2"
 members = [
-    "executor", "executor-pb/pb-c",
+    "executor",
+    "executor-pb",
+    "executor-pb/pb/c",
+    "executor-pb/pb/rust",
+    "executor-pb/protobuf-c/wasm",
     "executor/capnp",
     "executor/capnp-c",
     "executor/capnpc-c",
@@ -19,19 +23,22 @@ capnpc-c.path = "executor/capnpc-c"
 wazzi-executor.path = "executor"
 wazzi-executor-capnp.path = "executor/capnp"
 wazzi-executor-capnp-c.path = "executor/capnp-c"
+wazzi-executor-pb-c.path = "executor-pb/pb/c"
+wazzi-executor-protobuf-c-wasm.path = "executor-pb/protobuf-c/wasm"
 wazzi-runners.path = "runners"
 wazzi-snapshot.path = "snapshot"
 wazzi-wasi.path = "wasi"
 wazzi-witx.path = "witx"
 
 arbitrary = "1"
-# capnp = "0.18"
-capnp.path = "../capnproto-rust/capnp"
-capnpc.path = "../capnproto-rust/capnpc"
-# capnpc = "0.18"
+capnp = "0.18"
+capnpc = "0.18"
+# capnp.path = "../capnproto-rust/capnp"
+# capnpc.path = "../capnproto-rust/capnpc"
 cc = "*"
 color-eyre = "0.6"
 petgraph = "0.6"
+protobuf = "3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tempfile = "3"
