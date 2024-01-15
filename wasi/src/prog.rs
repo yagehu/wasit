@@ -38,6 +38,30 @@ pub struct ProgSeed {
 }
 
 impl ProgSeed {
+    #[tracing::instrument(skip(snapshot_store))]
+    pub fn execute_pb<S>(
+        &self,
+        executor: &RunningExecutor,
+        spec: &witx::Document,
+        snapshot_store: &mut S,
+    ) -> Result<Prog, eyre::Error>
+    where
+        S: SnapshotStore,
+    {
+        for call in self.calls.iter() {
+            let mut call_request = executor_pb::request::Call {
+                func: call.func.clone(),
+                ..Default::default()
+            };
+            let call_response = executor.call_pb(call_request);
+        }
+
+        Ok(Prog {
+            calls:        todo!(),
+            resource_ctx: todo!(),
+        })
+    }
+
     #[tracing::instrument]
     pub fn execute<S>(
         &self,

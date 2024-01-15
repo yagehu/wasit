@@ -1,3 +1,4 @@
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,27 +14,45 @@ noreturn static void fail(const char* err) {
     exit(1);
 }
 
-static size_t read_buffer (unsigned int max_length, uint8_t * out) {
-    size_t cur_len = 0;
-    size_t nread;
+static uint64_t u64_from_bytes(const uint8_t m[8]) {
+    return ((uint64_t)m[7] << 56)
+        | ((uint64_t)m[6] << 48)
+        | ((uint64_t)m[5] << 40)
+        | ((uint64_t)m[4] << 32)
+        | ((uint64_t)m[3] << 24)
+        | ((uint64_t)m[2] << 16)
+        | ((uint64_t)m[1] << 8)
+        | ((uint64_t)m[0] << 0);
+}
 
-    while ((nread = fread(out + cur_len, 1, max_length - cur_len, stdin)) != 0) {
-        cur_len += nread;
+static Request * read_request(void) {
+    uint8_t size_buf[8];
 
-        if (cur_len == max_length) fail("max message length exceeded");
-    }
+    // Read message size as u64.
+    size_t nread = fread(size_buf, 1, 8, stdin);
+    if (nread != 8) fail("failed to read message size");
 
-    return cur_len;
+    const uint64_t message_size = u64_from_bytes(size_buf);
+    uint8_t *      buf          = malloc(message_size);
+
+    nread = fread(buf, 1, message_size, stdin);
+    if (nread != message_size) fail("failed to read message");
+
+    Request * req = request__unpack(NULL, message_size, buf);
+    if (req == NULL) fail("failed to unpack request");
+
+    free(buf);
+
+    return req;
+}
+
+static void free_request(Request * req) {
+    request__free_unpacked(req, NULL);
 }
 
 int main(void) {
-    uint8_t buf[MAX_MSG_SIZE];
-
     while (true) {
-        size_t msg_len = read_buffer(MAX_MSG_SIZE, buf);
-
-        Request * req = request__unpack(NULL, msg_len, buf);	
-        if (req == NULL) fail("failed to unpack request");
+        Request * req = read_request();
 
         switch (req->which_case) {
             case REQUEST__WHICH_CALL: {
@@ -44,5 +63,7 @@ int main(void) {
             case REQUEST__WHICH__NOT_SET:
             case _REQUEST__WHICH__CASE_IS_INT_SIZE: fail("invalid request");
         }
+
+        free_request(req);
     }
 }

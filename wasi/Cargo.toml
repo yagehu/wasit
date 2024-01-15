@@ -7,6 +7,7 @@ publish.workspace = true
 [dependencies]
 wazzi-executor.workspace = true
 wazzi-executor-capnp.workspace = true
+wazzi-executor-pb-rust.workspace = true
 wazzi-runners.workspace = true
 wazzi-witx.workspace = true
 
@@ -19,4 +20,6 @@ thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+wazzi-executor-pb.workspace = true
+
 tempfile.workspace = true

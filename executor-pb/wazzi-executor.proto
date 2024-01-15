@@ -10,8 +10,11 @@ message Request {
     }
 }
 
-message CallRequest {
-}
+message Response {
+    message Call {
+    }
 
-message CallResponse {
+    oneof which {
+        Call call = 1;
+    }
 }

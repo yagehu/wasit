@@ -10,6 +10,8 @@ wazzi-executor-capnp-c.workspace = true
 
 [dependencies]
 wazzi-executor-capnp.workspace = true
+wazzi-executor-pb-rust.workspace = true
 wazzi-runners.workspace = true
 
 capnp.workspace = true
+protobuf.workspace = true

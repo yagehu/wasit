@@ -4,7 +4,7 @@
             "name": "main",
             "includePath": [
                 "${workspaceFolder}/target/debug",
-                "${workspaceFolder}/executor-pb/protobuf-c",
+                "${workspaceFolder}/executor-pb/protobuf-c/upstream",
                 "${workspaceFolder}/executor/c-capnproto/lib"
             ]
         }

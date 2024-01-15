@@ -1,12 +1,15 @@
+extern crate wazzi_executor_pb_rust as pb;
+
 use std::{
     io,
-    ops::DerefMut,
+    ops::{Deref, DerefMut},
     path::PathBuf,
     process,
     sync::{Arc, Mutex},
     thread,
 };
 
+use protobuf::Message;
 use wazzi_runners::WasiRunner;
 
 #[derive(Debug)]
@@ -51,7 +54,7 @@ where
 #[derive(Debug)]
 pub struct RunningExecutor {
     child:              Arc<Mutex<process::Child>>,
-    stdin:              process::ChildStdin,
+    stdin:              Arc<Mutex<process::ChildStdin>>,
     stdout:             Arc<Mutex<process::ChildStdout>>,
     stderr_copy_handle: Arc<Mutex<Option<thread::JoinHandle<u64>>>>,
     base_dir_fd:        u32,
@@ -69,7 +72,7 @@ impl RunningExecutor {
 
         Self {
             child: Arc::new(Mutex::new(child)),
-            stdin,
+            stdin: Arc::new(Mutex::new(stdin)),
             stdout: Arc::new(Mutex::new(stdout)),
             stderr_copy_handle: Arc::new(Mutex::new(Some(stderr_copy_handle))),
             base_dir_fd,
@@ -87,6 +90,24 @@ impl RunningExecutor {
             .unwrap();
     }
 
+    pub fn call_pb(&self, call: pb::request::Call) -> pb::response::Call {
+        let mut stdin = self.stdin.lock().unwrap();
+        let mut stdout = self.stdout.lock().unwrap();
+        let mut os = protobuf::CodedOutputStream::new(stdin.deref_mut());
+        let mut is = protobuf::CodedInputStream::new(stdout.deref_mut());
+        let mut request = pb::Request::new();
+
+        request.set_call(call);
+
+        let message_size = request.compute_size();
+
+        os.write_raw_bytes(&message_size.to_le_bytes()).unwrap();
+        request.write_to(&mut os).unwrap();
+        os.flush().unwrap();
+
+        pb::Response::parse_from(&mut is).unwrap().take_call()
+    }
+
     pub fn call(
         &self,
         call: wazzi_executor_capnp::call_request::Reader,
@@ -101,7 +122,7 @@ impl RunningExecutor {
         let mut request_builder = message.init_root::<wazzi_executor_capnp::request::Builder>();
 
         request_builder.reborrow().set_call(call)?;
-        capnp::serialize::write_message(&self.stdin, &message)?;
+        capnp::serialize::write_message(self.stdin.lock().unwrap().deref(), &message)?;
 
         let message = capnp::serialize::read_message(
             self.stdout.lock().unwrap().deref_mut(),
@@ -119,7 +140,7 @@ impl RunningExecutor {
         let mut request_builder = message.init_root::<wazzi_executor_capnp::request::Builder>();
 
         request_builder.reborrow().set_decl(request)?;
-        capnp::serialize::write_message(&self.stdin, &message)?;
+        capnp::serialize::write_message(self.stdin.lock().unwrap().deref(), &message)?;
 
         let _message = capnp::serialize::read_message(
             self.stdout.lock().unwrap().deref_mut(),

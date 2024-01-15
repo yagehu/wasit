@@ -16,7 +16,10 @@ use tempfile::tempdir;
 use wazzi_executor::ExecutorRunner;
 use wazzi_wasi::{
     prog::{self, ProgSeed},
-    snapshot::store::{mem::InMemorySnapshotStore, SnapshotStore},
+    snapshot::{
+        store::{mem::InMemorySnapshotStore, SnapshotStore},
+        WasiSnapshot,
+    },
 };
 
 fn repo_root() -> PathBuf {
@@ -44,6 +47,21 @@ fn executor_bin() -> PathBuf {
         .join("target")
         .join(&profile)
         .join("wazzi-executor.wasm")
+        .canonicalize()
+        .unwrap()
+}
+
+fn executor_pb_bin() -> PathBuf {
+    let profile = std::env!("OUT_DIR")
+        .split(std::path::MAIN_SEPARATOR)
+        .nth_back(3)
+        .unwrap_or_else(|| "unknown")
+        .to_string();
+
+    repo_root()
+        .join("target")
+        .join(&profile)
+        .join("wazzi-executor-pb.wasm")
         .canonicalize()
         .unwrap()
 }
@@ -484,6 +502,69 @@ fn fd_fdstat_get() {
 
     let store = store.lock().unwrap();
     let fd_fdstat_gets_snapshot = store
+        .get_snapshot(store.snapshot_count() - 1)
+        .unwrap()
+        .unwrap();
+
+    assert!(matches!(fd_fdstat_gets_snapshot.errno, Some(0)));
+}
+
+#[test]
+fn pb() {
+    let path = [
+        env!("CARGO_MANIFEST_DIR"),
+        "..",
+        "seeds",
+        "10-fdstat_get.json",
+    ]
+    .into_iter()
+    .collect::<PathBuf>();
+    let f = fs::OpenOptions::new().read(true).open(&path).unwrap();
+    let seed: ProgSeed = serde_json::from_reader(f).unwrap();
+    let base_dir = tempdir().unwrap();
+    let wasmtime = wazzi_runners::Wasmtime::new("wasmtime");
+    let stderr = Arc::new(Mutex::new(Vec::new()));
+    let executor = Arc::new(
+        ExecutorRunner::new(
+            wasmtime,
+            executor_pb_bin(),
+            Some(base_dir.path().to_owned()),
+        )
+        .run(stderr.clone())
+        .expect("failed to run executor"),
+    );
+    let store = Arc::new(Mutex::new(InMemorySnapshotStore::default()));
+    let (tx, rx) = mpsc::channel();
+    let store_ = store.clone();
+    let mut executor_ = executor.clone();
+
+    thread::spawn(move || {
+        let spec = spec();
+        let mut store = store_.lock().unwrap();
+        let result = seed.execute_pb(&mut executor_, &spec, store.deref_mut());
+
+        tx.send(result).unwrap();
+    });
+
+    let result = match rx.recv_timeout(time::Duration::from_millis(250)) {
+        | Ok(result) => result,
+        | Err(err) => {
+            executor.kill();
+
+            let stderr = String::from_utf8(stderr.lock().unwrap().deref().clone()).unwrap();
+
+            panic!("Execution timeout or error. stderr:\n{stderr}\n{err}");
+        },
+    };
+
+    executor.kill();
+
+    let stderr = String::from_utf8(stderr.lock().unwrap().deref().clone()).unwrap();
+
+    assert!(result.is_ok(), "{:#?} {stderr}", result);
+
+    let store = store.lock().unwrap();
+    let fd_fdstat_gets_snapshot: WasiSnapshot = store
         .get_snapshot(store.snapshot_count() - 1)
         .unwrap()
         .unwrap();
