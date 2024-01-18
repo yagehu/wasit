@@ -58,7 +58,7 @@ pub fn to_type(ty: &witx::Type) -> executor_pb::Type {
             item_size:      element_tref.mem_size() as u32,
             special_fields: protobuf::SpecialFields::new(),
         }),
-        | witx::Type::Pointer(_) => todo!(),
+        | witx::Type::Pointer(tref) => Which::Pointer(Box::new(to_type(tref.type_().as_ref()))),
         | witx::Type::ConstPointer(pointer) => {
             Which::ConstPointer(Box::new(to_type(pointer.type_().as_ref())))
         },

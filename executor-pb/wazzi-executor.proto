@@ -95,6 +95,7 @@ message Type {
         Array array = 5;
         Record record = 6;
         Type const_pointer = 7;
+        Type pointer = 8;
     }
 }
 

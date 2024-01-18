@@ -108,6 +108,7 @@ static size_t type_size(Type * type) {
         case TYPE__WHICH_ARRAY: fail("unimplemented: type_size array");
         case TYPE__WHICH_RECORD: return type->record->size;
         case TYPE__WHICH_CONST_POINTER: return sizeof(void *);
+        case TYPE__WHICH_POINTER: return sizeof(void *);
         case TYPE__WHICH__NOT_SET:
         case _TYPE__WHICH__CASE_IS_INT_SIZE: fail("invalid type");
     }
@@ -455,8 +456,38 @@ static void handle_call(Request__Call * call) {
 
             break;
         };
-        case WASI_FUNC__WASI_FUNC_ENVIRON_GET: fail("unimplemented: environ_get");
-        case WASI_FUNC__WASI_FUNC_ENVIRON_SIZES_GET: fail("unimplemented: environ_sizes_get");
+        case WASI_FUNC__WASI_FUNC_ENVIRON_GET: {
+            void *  p0_environ_ptr     = handle_param_pre(call->params[0], NULL);
+            void *  p1_environ_buf_ptr = handle_param_pre(call->params[1], NULL);
+            int32_t p0_environ         = * (int32_t *) p0_environ_ptr;
+            int32_t p1_environ_buf     = * (int32_t *) p1_environ_buf_ptr;
+
+            int32_t errno = __imported_wasi_snapshot_preview1_environ_get(p0_environ, p1_environ_buf);
+
+            handle_param_post(call->params[0], p0_environ_ptr);
+            handle_param_post(call->params[1], p1_environ_buf_ptr);
+
+            return_.which_case = RETURN_VALUE__WHICH_ERRNO;
+            return_.errno      = errno;
+
+            break;
+        }
+        case WASI_FUNC__WASI_FUNC_ENVIRON_SIZES_GET: {
+            void *  r0_environ_size_ptr     = handle_result_pre(call->results[0]);
+            void *  r1_environ_buf_size_ptr = handle_result_pre(call->results[1]);
+            int32_t r0_environ_size         = (int32_t) r0_environ_size_ptr;
+            int32_t r1_environ_buf_size     = (int32_t) r1_environ_buf_size_ptr;
+
+            int32_t errno = __imported_wasi_snapshot_preview1_environ_sizes_get(r0_environ_size, r1_environ_buf_size);
+
+            handle_result_post(call->results[0], r0_environ_size_ptr);
+            handle_result_post(call->results[1], r1_environ_buf_size_ptr);
+
+            return_.which_case = RETURN_VALUE__WHICH_ERRNO;
+            return_.errno      = errno;
+
+            break;
+        }
         case WASI_FUNC__WASI_FUNC_CLOCK_RES_GET: fail("unimplemented: clock_res_get");
         case WASI_FUNC__WASI_FUNC_CLOCK_TIME_GET: fail("unimplemented: clock_time_get");
         case WASI_FUNC__WASI_FUNC_FD_ADVISE: fail("unimplemented: fd_advise");

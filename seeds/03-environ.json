@@ -12,14 +12,14 @@
             "func": "environ_get",
             "params": [
                 {
-                    "value": {
+                    "raw_value": {
                         "pointer": {
                             "alloc": { "resource": 0 }
                         }
                     }
                 },
                 {
-                    "value": {
+                    "raw_value": {
                         "pointer": {
                             "alloc": { "resource": 1 }
                         }
