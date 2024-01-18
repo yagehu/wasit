@@ -8,7 +8,16 @@ use std::{
 };
 
 use arbitrary::Unstructured;
-use color_eyre::eyre::{self, Context};
+use color_eyre::eyre::{self, Context, ContextCompat};
+use executor_pb::WasiFunc::{
+    WASI_FUNC_ARGS_GET,
+    WASI_FUNC_ARGS_SIZES_GET,
+    WASI_FUNC_CLOCK_RES_GET,
+    WASI_FUNC_CLOCK_TIME_GET,
+    WASI_FUNC_ENVIRON_GET,
+    WASI_FUNC_ENVIRON_SIZES_GET,
+    WASI_FUNC_PATH_OPEN,
+};
 use serde::{Deserialize, Serialize};
 use wazzi_executor::RunningExecutor;
 
@@ -17,16 +26,17 @@ use crate::{
         ArrayValue,
         BuiltinValue,
         Call,
-        CallParamSpec,
         CallResultSpec,
         PointerAlloc,
         PointerValue,
+        RawValue,
         RecordMemberValue,
         RecordValue,
         StringValue,
         Value,
     },
     capnp_mappers,
+    pb,
     snapshot::{store::SnapshotStore, WasiSnapshot},
 };
 
@@ -37,33 +47,286 @@ pub struct ProgSeed {
     calls:          Vec<Call>,
 }
 
+fn handle_params(
+    resource_ctx: &ResourceContext,
+    param_specs: &[witx::InterfaceFuncParam],
+    value_specs: &[Value],
+) -> Result<Vec<executor_pb::ValueSpec>, eyre::Error> {
+    let mut params = Vec::with_capacity(param_specs.len());
+
+    for (param_spec, param_value) in param_specs.iter().zip(value_specs.iter()) {
+        let param = match param_value {
+            | &Value::Resource(resource_id) => {
+                let resource = resource_ctx
+                    .get(resource_id)
+                    .wrap_err(format!("resource {resource_id} not in context"))?;
+
+                executor_pb::ValueSpec {
+                    special_fields: protobuf::SpecialFields::new(),
+                    type_:          Some(pb::to_type(param_spec.tref.type_().as_ref())).into(),
+                    which:          Some(executor_pb::value_spec::Which::Resource(
+                        executor_pb::Resource {
+                            id:             resource.id,
+                            special_fields: protobuf::SpecialFields::new(),
+                        },
+                    )),
+                }
+            },
+            | Value::RawValue(value) => {
+                let raw_value = match (param_spec.tref.type_().as_ref(), value) {
+                    | (witx::Type::Builtin(_), RawValue::Builtin(builtin)) => {
+                        executor_pb::raw_value::Which::Builtin(executor_pb::raw_value::Builtin {
+                            special_fields: protobuf::SpecialFields::new(),
+                            which:          Some(match builtin {
+                                | &BuiltinValue::U8(i) => {
+                                    executor_pb::raw_value::builtin::Which::U8(i as u32)
+                                },
+                                | &BuiltinValue::U32(i) => {
+                                    executor_pb::raw_value::builtin::Which::U32(i)
+                                },
+                                | &BuiltinValue::U64(i) => {
+                                    executor_pb::raw_value::builtin::Which::U64(i)
+                                },
+                                | &BuiltinValue::S64(i) => {
+                                    executor_pb::raw_value::builtin::Which::S64(i)
+                                },
+                            }),
+                        })
+                    },
+                    | (witx::Type::Pointer(_), RawValue::String(_)) => todo!(),
+                    | (witx::Type::Record(record), RawValue::Bitflags(bitflags))
+                        if record.bitflags_repr().is_some() =>
+                    {
+                        let mut members = Vec::with_capacity(record.members.len());
+
+                        for member in &bitflags.members {
+                            members.push(member.value);
+                        }
+
+                        executor_pb::raw_value::Which::Bitflags(executor_pb::raw_value::Bitflags {
+                            members,
+                            special_fields: protobuf::SpecialFields::new(),
+                        })
+                    },
+                    | (witx::Type::Handle(_), RawValue::Handle(_)) => todo!(),
+                    | (witx::Type::List(_), RawValue::Array(_)) => todo!(),
+                    | (witx::Type::List(_), RawValue::String(string)) => {
+                        let bytes = match string {
+                            | StringValue::Utf8(s) => s.as_bytes(),
+                        };
+
+                        executor_pb::raw_value::Which::String(bytes.to_vec())
+                    },
+                    | (witx::Type::Record(_), RawValue::Record(_)) => todo!(),
+                    | (witx::Type::ConstPointer(_), RawValue::ConstPointer(_)) => todo!(),
+                    | (witx::Type::Pointer(tref), RawValue::Pointer(pointer)) => {
+                        let alloc = match pointer {
+                            | PointerValue::Alloc(alloc) => {
+                                let value_spec = match alloc {
+                                    | &PointerAlloc::Resource(resource_id) => {
+                                        executor_pb::value_spec::Which::Resource(
+                                            executor_pb::Resource {
+                                                id:             resource_id,
+                                                special_fields: protobuf::SpecialFields::new(),
+                                            },
+                                        )
+                                    },
+                                    | &PointerAlloc::Value(i) => {
+                                        executor_pb::value_spec::Which::RawValue(
+                                            executor_pb::RawValue {
+                                                which:          Some(
+                                                    executor_pb::raw_value::Which::Builtin(
+                                                        executor_pb::raw_value::Builtin {
+                                                            which:          Some(executor_pb::raw_value::builtin::Which::U32(i)),
+                                                            special_fields: protobuf::SpecialFields::new(),
+                                                        },
+                                                    ),
+                                                ),
+                                                special_fields: protobuf::SpecialFields::new(),
+                                            },
+                                        )
+                                    },
+                                };
+
+                                executor_pb::ValueSpec {
+                                    type_:          Some(pb::to_type(tref.type_().as_ref())).into(),
+                                    which:          Some(value_spec),
+                                    special_fields: protobuf::SpecialFields::new(),
+                                }
+                            },
+                        };
+
+                        executor_pb::raw_value::Which::Pointer(executor_pb::raw_value::Pointer {
+                            alloc:          Some(alloc).into(),
+                            special_fields: protobuf::SpecialFields::new(),
+                        })
+                    },
+                    | (witx::Type::Variant(_), RawValue::Variant(_)) => todo!(),
+                    | x => unreachable!("{:?}", x),
+                };
+
+                executor_pb::ValueSpec {
+                    special_fields: protobuf::SpecialFields::new(),
+                    type_:          Some(pb::to_type(param_spec.tref.type_().as_ref())).into(),
+                    which:          Some(executor_pb::value_spec::Which::RawValue(
+                        executor_pb::RawValue {
+                            special_fields: protobuf::SpecialFields::new(),
+                            which:          Some(raw_value),
+                        },
+                    )),
+                }
+            },
+        };
+
+        params.push(param);
+    }
+
+    Ok(params)
+}
+
+fn call_results_ok(
+    spec: &witx::Document,
+    resource_ctx: &mut ResourceContext,
+    result_trefs: &[witx::TypeRef],
+    result_specs: &[CallResultSpec],
+) {
+    for (result_tref, result_spec) in result_trefs.iter().zip(result_specs.iter()) {
+        match result_spec {
+            | CallResultSpec::Ignore => (),
+            | &CallResultSpec::Resource(id) => resource_ctx.insert(
+                id,
+                Resource { id },
+                result_tref.resource(spec).unwrap().name.as_str(),
+            ),
+        }
+    }
+}
+
 impl ProgSeed {
     #[tracing::instrument(skip(snapshot_store))]
-    pub fn execute_pb<S>(
+    pub fn execute<S>(
         &self,
         executor: &RunningExecutor,
         spec: &witx::Document,
         snapshot_store: &mut S,
     ) -> Result<Prog, eyre::Error>
     where
-        S: SnapshotStore,
+        S: SnapshotStore<Snapshot = WasiSnapshot>,
+        <S as SnapshotStore>::Error: std::error::Error + Send + Sync + 'static,
     {
+        let mut resource_ctx = ResourceContext::new();
+        let module_spec = spec
+            .module(&witx::Id::new("wasi_snapshot_preview1"))
+            .unwrap();
+
+        if self.mount_base_dir {
+            const BASE_DIR_RESOURCE_ID: u64 = 0;
+
+            executor
+                .decl(executor_pb::request::Decl {
+                    resource_id:    BASE_DIR_RESOURCE_ID,
+                    value:          Some(executor_pb::RawValue {
+                        which:          Some(executor_pb::raw_value::Which::Handle(
+                            executor_pb::raw_value::Handle {
+                                value:          executor.base_dir_fd(),
+                                special_fields: protobuf::SpecialFields::new(),
+                            },
+                        )),
+                        special_fields: protobuf::SpecialFields::new(),
+                    })
+                    .into(),
+                    special_fields: protobuf::SpecialFields::new(),
+                })
+                .wrap_err("failed to declare base dir resource")?;
+            resource_ctx.insert(
+                BASE_DIR_RESOURCE_ID,
+                Resource {
+                    id: BASE_DIR_RESOURCE_ID,
+                },
+                "fd",
+            );
+        }
+
         for call in self.calls.iter() {
-            let mut call_request = executor_pb::request::Call {
-                func: call.func.clone(),
-                ..Default::default()
+            let func = match call.func.as_str() {
+                | "args_get" => WASI_FUNC_ARGS_GET,
+                | "args_sizes_get" => WASI_FUNC_ARGS_SIZES_GET,
+                | "environ_get" => WASI_FUNC_ENVIRON_GET,
+                | "environ_sizes_get" => WASI_FUNC_ENVIRON_SIZES_GET,
+                | "clock_res_get" => WASI_FUNC_CLOCK_RES_GET,
+                | "clock_time_get" => WASI_FUNC_CLOCK_TIME_GET,
+                | "path_open" => WASI_FUNC_PATH_OPEN,
+                | _ => panic!("{}", call.func.as_str()),
             };
-            let call_response = executor.call_pb(call_request);
+            let func_spec = module_spec
+                .func(&witx::Id::new(call.func.as_str()))
+                .unwrap();
+            let params = handle_params(&resource_ctx, &func_spec.params, &call.params)?;
+            let mut results = Vec::with_capacity(call.results.len());
+            let result_trefs = func_spec.unpack_expected_result();
+
+            for (result_tref, result_spec) in result_trefs.iter().zip(call.results.iter()) {
+                let pb_type = Some(pb::to_type(result_tref.type_().as_ref()));
+                let which = match result_spec {
+                    | CallResultSpec::Ignore => {
+                        executor_pb::result_spec::Which::Ignore(Default::default())
+                    },
+                    | &CallResultSpec::Resource(resource_id) => {
+                        executor_pb::result_spec::Which::Resource(executor_pb::Resource {
+                            id:             resource_id,
+                            special_fields: protobuf::SpecialFields::new(),
+                        })
+                    },
+                };
+
+                results.push(executor_pb::ResultSpec {
+                    type_:          pb_type.into(),
+                    which:          Some(which),
+                    special_fields: protobuf::SpecialFields::new(),
+                });
+            }
+
+            let call_request = executor_pb::request::Call {
+                func: protobuf::EnumOrUnknown::new(func),
+                params,
+                results,
+                special_fields: protobuf::SpecialFields::new(),
+            };
+            let call_response = executor.call(call_request)?;
+            let errno = match call_response.return_.unwrap().which.unwrap() {
+                | executor_pb::return_value::Which::None(_) => {
+                    call_results_ok(spec, &mut resource_ctx, &result_trefs, &call.results);
+
+                    None
+                },
+                | executor_pb::return_value::Which::Errno(errno) => {
+                    if errno == 0 {
+                        call_results_ok(spec, &mut resource_ctx, &result_trefs, &call.results);
+                    }
+
+                    Some(errno)
+                },
+                | _ => unreachable!(),
+            };
+
+            snapshot_store
+                .push_snapshot(WasiSnapshot {
+                    errno,
+                    params: call.params.clone(),
+                    results: Vec::new(),
+                    linear_memory: Vec::new(),
+                })
+                .wrap_err("failed to record snapshot")?;
         }
 
         Ok(Prog {
-            calls:        todo!(),
-            resource_ctx: todo!(),
+            calls: self.calls.clone(),
+            resource_ctx,
         })
     }
 
     #[tracing::instrument]
-    pub fn execute<S>(
+    pub fn execute_capn<S>(
         &self,
         executor: &RunningExecutor,
         spec: &witx::Document,
@@ -91,7 +354,7 @@ impl ProgSeed {
                 .set_resource_id(BASE_DIR_RESOURCE_ID);
             decl_builder.reborrow().init_value().set_handle(base_dir_fd);
             executor
-                .decl(decl_builder.into_reader())
+                .decl_capn(decl_builder.into_reader())
                 .wrap_err("failed to declare base dir resource")?;
             resource_ctx.insert(
                 BASE_DIR_RESOURCE_ID,
@@ -142,7 +405,7 @@ impl ProgSeed {
                 capnp_mappers::build_type(param_spec.tref.type_().as_ref(), &mut type_builder);
 
                 match (&param_spec.tref.resource(spec), &call_param) {
-                    | (&Some(_resource_spec), &&CallParamSpec::Resource(resource_id)) => {
+                    | (&Some(_resource_spec), &&Value::Resource(resource_id)) => {
                         let resource = resource_ctx.get(resource_id).unwrap_or_else(|| {
                             panic!("resource {resource_id} not found in the context")
                         });
@@ -151,13 +414,13 @@ impl ProgSeed {
                         resource_builder.set_id(resource.id);
                         params_resource.get_mut(i).unwrap().replace(resource_id);
                     },
-                    | (None, &CallParamSpec::Resource(resource_id)) => {
+                    | (None, &Value::Resource(resource_id)) => {
                         panic!(
                             "resource {resource_id} ({}) is not specified as a resource",
                             param_spec.name.as_str()
                         );
                     },
-                    | (_, &CallParamSpec::Value(value)) => {
+                    | (_, &Value::RawValue(value)) => {
                         let mut value_builder = param_builder.init_value();
 
                         build_value(&mut value_builder, param_spec.tref.type_().as_ref(), value);
@@ -184,7 +447,7 @@ impl ProgSeed {
             }
 
             let response = executor
-                .call(call_builder.into_reader())
+                .call_capn(call_builder.into_reader())
                 .wrap_err("failed to call function in executor")?;
             let response = response.get()?;
             let ret = response.get_return()?;
@@ -255,12 +518,16 @@ impl ProgSeed {
     }
 }
 
-fn build_value(builder: &mut wazzi_executor_capnp::value::Builder, ty: &witx::Type, value: &Value) {
+fn build_value(
+    builder: &mut wazzi_executor_capnp::value::Builder,
+    ty: &witx::Type,
+    value: &RawValue,
+) {
     match (ty, value) {
-        | (witx::Type::Pointer(_tref), Value::String(StringValue::Utf8(s))) => {
+        | (witx::Type::Pointer(_tref), RawValue::String(StringValue::Utf8(s))) => {
             builder.reborrow().init_string(s.len() as u32).push_str(s);
         },
-        | (witx::Type::Record(record), Value::Bitflags(bitflags))
+        | (witx::Type::Record(record), RawValue::Bitflags(bitflags))
             if record.bitflags_repr().is_some() =>
         {
             if bitflags.members.len() != record.members.len() {
@@ -280,7 +547,7 @@ fn build_value(builder: &mut wazzi_executor_capnp::value::Builder, ty: &witx::Ty
                 members_builder.set(i as u32, member.value);
             }
         },
-        | (witx::Type::List(witx::TypeRef::Value(ty)), Value::String(string))
+        | (witx::Type::List(witx::TypeRef::Value(ty)), RawValue::String(string))
             if matches!(ty.as_ref(), witx::Type::Builtin(witx::BuiltinType::Char)) =>
         {
             match string {
@@ -289,7 +556,7 @@ fn build_value(builder: &mut wazzi_executor_capnp::value::Builder, ty: &witx::Ty
                 },
             }
         },
-        | (witx::Type::List(tref), Value::Array(array)) => {
+        | (witx::Type::List(tref), RawValue::Array(array)) => {
             let mut array_builder = builder.reborrow().init_array();
             let mut items_builder = array_builder.reborrow().init_items(array.0.len() as u32);
 
@@ -300,10 +567,10 @@ fn build_value(builder: &mut wazzi_executor_capnp::value::Builder, ty: &witx::Ty
                 capnp_mappers::build_type(tref.type_().as_ref(), &mut item_type_builder);
 
                 match element {
-                    | &CallParamSpec::Resource(resource_id) => {
+                    | &Value::Resource(resource_id) => {
                         item_builder.reborrow().init_resource().set_id(resource_id);
                     },
-                    | CallParamSpec::Value(value) => {
+                    | Value::RawValue(value) => {
                         let mut item_value_builder = item_builder.reborrow().init_value();
 
                         build_value(&mut item_value_builder, tref.type_().as_ref(), value);
@@ -311,7 +578,7 @@ fn build_value(builder: &mut wazzi_executor_capnp::value::Builder, ty: &witx::Ty
                 }
             }
         },
-        | (witx::Type::Record(record_type), Value::Record(record_value)) => {
+        | (witx::Type::Record(record_type), RawValue::Record(record_value)) => {
             let mut record_builder = builder.reborrow().init_record();
             let mut members_builder = record_builder
                 .reborrow()
@@ -339,11 +606,11 @@ fn build_value(builder: &mut wazzi_executor_capnp::value::Builder, ty: &witx::Ty
                 );
 
                 match &member_value.value {
-                    | &CallParamSpec::Resource(resource_id) => member_spec_builder
+                    | &Value::Resource(resource_id) => member_spec_builder
                         .reborrow()
                         .init_resource()
                         .set_id(resource_id),
-                    | CallParamSpec::Value(value) => {
+                    | Value::RawValue(value) => {
                         let mut member_value_builder = member_spec_builder.reborrow().init_value();
 
                         build_value(
@@ -355,7 +622,7 @@ fn build_value(builder: &mut wazzi_executor_capnp::value::Builder, ty: &witx::Ty
                 }
             }
         },
-        | (witx::Type::ConstPointer(tref), Value::ConstPointer(pointer_value)) => {
+        | (witx::Type::ConstPointer(tref), RawValue::ConstPointer(pointer_value)) => {
             let mut const_pointer_builder = builder
                 .reborrow()
                 .init_const_pointer(pointer_value.0.len() as u32);
@@ -366,7 +633,7 @@ fn build_value(builder: &mut wazzi_executor_capnp::value::Builder, ty: &witx::Ty
                 build_value(&mut element_builder, tref.type_().as_ref(), element_value);
             }
         },
-        | (witx::Type::Pointer(_tref), Value::Pointer(pointer_value)) => {
+        | (witx::Type::Pointer(_tref), RawValue::Pointer(pointer_value)) => {
             let mut pointer_builder = builder.reborrow().init_pointer();
             let mut alloc_builder = pointer_builder.reborrow().init_alloc();
 
@@ -379,7 +646,7 @@ fn build_value(builder: &mut wazzi_executor_capnp::value::Builder, ty: &witx::Ty
                 },
             }
         },
-        | (witx::Type::Builtin(builtin_type), Value::Builtin(builtin_value)) => {
+        | (witx::Type::Builtin(builtin_type), RawValue::Builtin(builtin_value)) => {
             let mut builtin_builder = builder.reborrow().init_builtin();
 
             match (builtin_type, builtin_value) {
@@ -392,7 +659,7 @@ fn build_value(builder: &mut wazzi_executor_capnp::value::Builder, ty: &witx::Ty
                 | _ => unimplemented!("{:#?}", builtin_type),
             }
         },
-        | (witx::Type::Variant(variant), Value::Variant(variant_value)) => {
+        | (witx::Type::Variant(variant), RawValue::Variant(variant_value)) => {
             let mut variant_builder = builder.reborrow().init_variant();
             let (case_idx, case) = variant
                 .cases
@@ -420,10 +687,10 @@ fn build_value(builder: &mut wazzi_executor_capnp::value::Builder, ty: &witx::Ty
                     );
 
                     match payload.as_ref() {
-                        | &CallParamSpec::Resource(resource_id) => {
+                        | &Value::Resource(resource_id) => {
                             builder.reborrow().init_resource().set_id(resource_id)
                         },
-                        | CallParamSpec::Value(value) => build_value(
+                        | Value::RawValue(value) => build_value(
                             &mut builder.reborrow().init_value(),
                             tref.type_().as_ref(),
                             value,
@@ -474,7 +741,7 @@ impl Prog {
         u: &mut Unstructured,
         spec: &witx::Document,
         tref: &witx::TypeRef,
-    ) -> Result<CallParamSpec, GrowError> {
+    ) -> Result<Value, GrowError> {
         let mut gen_value = || {
             match tref.type_().as_ref() {
                 | witx::Type::Record(record) => {
@@ -501,20 +768,20 @@ impl Prog {
                                 let member_1 =
                                     self.pick_or_generate_param(u, spec, &record.members[1].tref)?;
                                 let member_0 = match &member_1 {
-                                    | &CallParamSpec::Resource(resource) => {
-                                        CallParamSpec::Value(Value::Pointer(PointerValue::Alloc(
+                                    | &Value::Resource(resource) => {
+                                        Value::RawValue(RawValue::Pointer(PointerValue::Alloc(
                                             PointerAlloc::Resource(resource),
                                         )))
                                     },
-                                    | &CallParamSpec::Value(Value::Builtin(BuiltinValue::U32(
-                                        i,
-                                    ))) => CallParamSpec::Value(Value::Pointer(
-                                        PointerValue::Alloc(PointerAlloc::Value(i)),
-                                    )),
+                                    | &Value::RawValue(RawValue::Builtin(BuiltinValue::U32(i))) => {
+                                        Value::RawValue(RawValue::Pointer(PointerValue::Alloc(
+                                            PointerAlloc::Value(i),
+                                        )))
+                                    },
                                     | _ => unreachable!(),
                                 };
 
-                                return Ok(CallParamSpec::Value(Value::Record(RecordValue(vec![
+                                return Ok(Value::RawValue(RawValue::Record(RecordValue(vec![
                                     RecordMemberValue {
                                         name:  record.members[0].name.as_str().to_owned(),
                                         value: member_0,
@@ -538,7 +805,7 @@ impl Prog {
                         });
                     }
 
-                    Ok(CallParamSpec::Value(Value::Record(RecordValue(members))))
+                    Ok(Value::RawValue(RawValue::Record(RecordValue(members))))
                 },
                 | witx::Type::Variant(_) => todo!(),
                 | witx::Type::Handle(_) => todo!(),
@@ -549,12 +816,12 @@ impl Prog {
 
                     elements.push(element);
 
-                    Ok(CallParamSpec::Value(Value::Array(ArrayValue(elements))))
+                    Ok(Value::RawValue(RawValue::Array(ArrayValue(elements))))
                 },
                 | witx::Type::Pointer(_) => todo!("{:#?}", tref),
                 | witx::Type::ConstPointer(_) => todo!(),
                 | witx::Type::Builtin(builtin) => {
-                    Ok(CallParamSpec::Value(Value::Builtin(match builtin {
+                    Ok(Value::RawValue(RawValue::Builtin(match builtin {
                         | witx::BuiltinType::Char => todo!(),
                         | witx::BuiltinType::U8 { .. } => todo!(),
                         | witx::BuiltinType::U16 => todo!(),
@@ -591,7 +858,7 @@ impl Prog {
                 let resource_pool = resource_pool.iter().collect::<Vec<_>>();
                 let resource = **u.choose(&resource_pool)?;
 
-                Ok(CallParamSpec::Resource(resource))
+                Ok(Value::Resource(resource))
             },
             | None => gen_value(),
         }

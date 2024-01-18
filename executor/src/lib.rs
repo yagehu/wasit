@@ -90,7 +90,28 @@ impl RunningExecutor {
             .unwrap();
     }
 
-    pub fn call_pb(&self, call: pb::request::Call) -> pb::response::Call {
+    pub fn decl(&self, decl: pb::request::Decl) -> Result<pb::response::Decl, protobuf::Error> {
+        let mut stdin = self.stdin.lock().unwrap();
+        let mut stdout = self.stdout.lock().unwrap();
+        let mut os = protobuf::CodedOutputStream::new(stdin.deref_mut());
+        let mut is = protobuf::CodedInputStream::new(stdout.deref_mut());
+        let mut request = pb::Request::new();
+
+        request.set_decl(decl);
+
+        let message_size = request.compute_size();
+
+        os.write_raw_bytes(&message_size.to_le_bytes()).unwrap();
+        request.write_to(&mut os)?;
+        drop(os);
+
+        let msg_size = is.read_fixed64()?;
+        let raw_bytes = is.read_raw_bytes(msg_size as u32)?;
+
+        Ok(pb::Response::parse_from_bytes(&raw_bytes)?.take_decl())
+    }
+
+    pub fn call(&self, call: pb::request::Call) -> Result<pb::response::Call, protobuf::Error> {
         let mut stdin = self.stdin.lock().unwrap();
         let mut stdout = self.stdout.lock().unwrap();
         let mut os = protobuf::CodedOutputStream::new(stdin.deref_mut());
@@ -102,13 +123,16 @@ impl RunningExecutor {
         let message_size = request.compute_size();
 
         os.write_raw_bytes(&message_size.to_le_bytes()).unwrap();
-        request.write_to(&mut os).unwrap();
-        os.flush().unwrap();
+        request.write_to(&mut os)?;
+        drop(os);
 
-        pb::Response::parse_from(&mut is).unwrap().take_call()
+        let msg_size = is.read_fixed64()?;
+        let raw_bytes = is.read_raw_bytes(msg_size as u32)?;
+
+        Ok(pb::Response::parse_from_bytes(&raw_bytes)?.take_call())
     }
 
-    pub fn call(
+    pub fn call_capn(
         &self,
         call: wazzi_executor_capnp::call_request::Reader,
     ) -> Result<
@@ -132,7 +156,7 @@ impl RunningExecutor {
         Ok(message.into_typed())
     }
 
-    pub fn decl(
+    pub fn decl_capn(
         &self,
         request: wazzi_executor_capnp::decl_request::Reader,
     ) -> Result<(), capnp::Error> {

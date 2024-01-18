@@ -5,6 +5,7 @@ publish = false
 [workspace]
 resolver = "2"
 members = [
+    "compile-time",
     "executor",
     "executor-pb",
     "executor-pb/pb/c",
@@ -20,6 +21,7 @@ members = [
 
 [workspace.dependencies]
 capnpc-c.path = "executor/capnpc-c"
+wazzi-compile-time.path = "compile-time"
 wazzi-executor.path = "executor"
 wazzi-executor-capnp.path = "executor/capnp"
 wazzi-executor-capnp-c.path = "executor/capnp-c"

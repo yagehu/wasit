@@ -1,0 +1,73 @@
+fn to_int_repr(x: &witx::IntRepr) -> executor_pb::IntRepr {
+    match x {
+        | witx::IntRepr::U8 => executor_pb::IntRepr::INT_REPR_U8,
+        | witx::IntRepr::U16 => executor_pb::IntRepr::INT_REPR_U16,
+        | witx::IntRepr::U32 => executor_pb::IntRepr::INT_REPR_U32,
+        | witx::IntRepr::U64 => executor_pb::IntRepr::INT_REPR_U64,
+    }
+}
+
+pub fn to_type(ty: &witx::Type) -> executor_pb::Type {
+    use executor_pb::type_::Which;
+
+    let which = Some(match ty {
+        | witx::Type::Record(record) if record.bitflags_repr().is_some() => {
+            let members = record
+                .members
+                .iter()
+                .map(|member| member.name.as_str().to_owned())
+                .collect::<Vec<_>>();
+
+            Which::Bitflags(executor_pb::type_::Bitflags {
+                members,
+                repr: protobuf::EnumOrUnknown::new(to_int_repr(&record.bitflags_repr().unwrap())),
+                special_fields: protobuf::SpecialFields::new(),
+            })
+        },
+        | witx::Type::Record(_) => todo!(),
+        | witx::Type::Variant(_) => todo!(),
+        | witx::Type::Handle(_) => Which::Handle(Default::default()),
+        | witx::Type::List(element)
+            if matches!(
+                element.type_().as_ref(),
+                witx::Type::Builtin(witx::BuiltinType::Char)
+            ) =>
+        {
+            Which::String(Default::default())
+        },
+        | witx::Type::List(_) => todo!(),
+        | witx::Type::Pointer(_) => todo!(),
+        | witx::Type::ConstPointer(_) => todo!(),
+        | witx::Type::Builtin(builtin) => {
+            let which = Some(match builtin {
+                | witx::BuiltinType::Char => todo!(),
+                | witx::BuiltinType::U8 { .. } => {
+                    executor_pb::type_::builtin::Which::U8(Default::default())
+                },
+                | witx::BuiltinType::U16 => todo!(),
+                | witx::BuiltinType::U32 { .. } => {
+                    executor_pb::type_::builtin::Which::U32(Default::default())
+                },
+                | witx::BuiltinType::U64 => {
+                    executor_pb::type_::builtin::Which::U64(Default::default())
+                },
+                | witx::BuiltinType::S8 => todo!(),
+                | witx::BuiltinType::S16 => todo!(),
+                | witx::BuiltinType::S32 => todo!(),
+                | witx::BuiltinType::S64 => todo!(),
+                | witx::BuiltinType::F32 => todo!(),
+                | witx::BuiltinType::F64 => todo!(),
+            });
+
+            Which::Builtin(executor_pb::type_::Builtin {
+                which,
+                special_fields: protobuf::SpecialFields::new(),
+            })
+        },
+    });
+
+    executor_pb::Type {
+        which,
+        special_fields: protobuf::SpecialFields::new(),
+    }
+}

@@ -6,7 +6,7 @@ use crate::{
         BitflagsRepr,
         BitflagsValue,
         BuiltinValue,
-        CallParamSpec,
+        RawValue,
         RecordMemberValue,
         RecordValue,
         Value,
@@ -40,7 +40,7 @@ pub(crate) fn from_capnp_call_result(
 pub(crate) fn from_capnp_value(
     ty: &witx::Type,
     reader: &wazzi_executor_capnp::value::Reader,
-) -> Result<Value, capnp::Error> {
+) -> Result<RawValue, capnp::Error> {
     use wazzi_executor_capnp::value::Which;
 
     match (ty, reader.which()?) {
@@ -60,7 +60,7 @@ pub(crate) fn from_capnp_value(
                 | Which::Char(_) => todo!(),
             };
 
-            Ok(Value::Builtin(builtin_value))
+            Ok(RawValue::Builtin(builtin_value))
         },
         | (_, Which::String(_)) => todo!(),
         | (witx::Type::Record(record_type), Which::Bitflags(bitflags)) => {
@@ -81,9 +81,9 @@ pub(crate) fn from_capnp_value(
                 });
             }
 
-            Ok(Value::Bitflags(BitflagsValue { repr, members }))
+            Ok(RawValue::Bitflags(BitflagsValue { repr, members }))
         },
-        | (_, Which::Handle(fd)) => Ok(Value::Handle(fd)),
+        | (_, Which::Handle(fd)) => Ok(RawValue::Handle(fd)),
         | (_, Which::Array(_)) => todo!(),
         | (_, Which::Record(record)) => {
             let record = record?;
@@ -104,11 +104,11 @@ pub(crate) fn from_capnp_value(
 
                 members.push(RecordMemberValue {
                     name,
-                    value: CallParamSpec::Value(value),
+                    value: Value::RawValue(value),
                 });
             }
 
-            Ok(Value::Record(RecordValue(members)))
+            Ok(RawValue::Record(RecordValue(members)))
         },
         | (_, Which::ConstPointer(_)) => todo!(),
         | (_, Which::Pointer(_)) => todo!(),
@@ -139,7 +139,7 @@ pub(crate) fn from_capnp_value(
                         | Which::Value(rdr) => rdr?,
                     };
 
-                    Some(Box::new(CallParamSpec::Value(from_capnp_value(
+                    Some(Box::new(Value::RawValue(from_capnp_value(
                         tref.type_().as_ref(),
                         &reader,
                     )?)))
@@ -147,7 +147,7 @@ pub(crate) fn from_capnp_value(
                 | (_, _) => None,
             };
 
-            Ok(Value::Variant(VariantValue { name, payload }))
+            Ok(RawValue::Variant(VariantValue { name, payload }))
         },
         | _ => unreachable!(),
     }

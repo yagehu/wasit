@@ -672,6 +672,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "wazzi-compile-time"
+version = "0.1.0"
+
+[[package]]
 name = "wazzi-executor"
 version = "0.1.0"
 dependencies = [
@@ -737,11 +741,13 @@ dependencies = [
  "arbitrary",
  "capnp",
  "color-eyre",
+ "protobuf",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror",
  "tracing",
+ "wazzi-compile-time",
  "wazzi-executor",
  "wazzi-executor-capnp",
  "wazzi-executor-pb",

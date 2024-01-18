@@ -61,7 +61,7 @@ fn main() {
     let pb_file_h = target_dir.join("wazzi-executor.pb-c.h");
 
     fs::copy(out_dir.join("wazzi-executor.pb-c.c"), &pb_file_c).unwrap();
-    fs::copy(out_dir.join("wazzi-executor.pb-c.h"), &pb_file_h).unwrap();
+    fs::copy(out_dir.join("wazzi-executor.pb-c.h"), pb_file_h).unwrap();
 
     assert!(process::Command::new(clang_path)
         .arg("--sysroot")

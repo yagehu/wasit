@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::call::{CallParamSpec, Value};
+use crate::call::{RawValue, Value};
 
 pub mod store;
 
@@ -8,7 +8,7 @@ pub mod store;
 #[serde(deny_unknown_fields)]
 pub struct WasiSnapshot {
     pub errno:   Option<i32>,
-    pub params:  Vec<CallParamSpec>,
+    pub params:  Vec<Value>,
     pub results: Vec<CallResult>,
 
     #[serde(skip)]
@@ -19,5 +19,5 @@ pub struct WasiSnapshot {
 #[serde(deny_unknown_fields)]
 pub struct CallResult {
     pub memory_offset: u32,
-    pub value:         Value,
+    pub value:         RawValue,
 }

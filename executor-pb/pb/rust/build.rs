@@ -11,7 +11,7 @@ fn main() {
 
     protobuf_codegen::Codegen::new()
         .protoc()
-        .includes(&[&schema_dir])
+        .includes([&schema_dir])
         .input(&schema_file)
         .cargo_out_dir("pb-gen")
         .run_from_script();

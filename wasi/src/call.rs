@@ -10,7 +10,7 @@ pub struct Call {
     pub func: String,
 
     #[serde(default)]
-    pub params: Vec<CallParamSpec>,
+    pub params: Vec<Value>,
 
     #[serde(default)]
     pub results: Vec<CallResultSpec>,
@@ -53,14 +53,14 @@ pub enum CallResultSpec {
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Debug)]
 #[serde(rename_all = "snake_case")]
-pub enum CallParamSpec {
+pub enum Value {
     Resource(u64),
-    Value(Value),
+    RawValue(RawValue),
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Debug)]
 #[serde(rename_all = "snake_case")]
-pub enum Value {
+pub enum RawValue {
     Builtin(BuiltinValue),
     String(StringValue),
     Bitflags(BitflagsValue),
@@ -111,7 +111,7 @@ pub enum BitflagsRepr {
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Debug)]
-pub struct ArrayValue(pub Vec<CallParamSpec>);
+pub struct ArrayValue(pub Vec<Value>);
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Debug)]
 pub struct RecordValue(pub Vec<RecordMemberValue>);
@@ -120,11 +120,11 @@ pub struct RecordValue(pub Vec<RecordMemberValue>);
 #[serde(deny_unknown_fields)]
 pub struct RecordMemberValue {
     pub name:  String,
-    pub value: CallParamSpec,
+    pub value: Value,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Debug)]
-pub struct ConstPointerValue(pub Vec<Value>);
+pub struct ConstPointerValue(pub Vec<RawValue>);
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Debug)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
@@ -143,5 +143,5 @@ pub enum PointerAlloc {
 #[serde(deny_unknown_fields)]
 pub struct VariantValue {
     pub name:    String,
-    pub payload: Option<Box<CallParamSpec>>,
+    pub payload: Option<Box<Value>>,
 }
