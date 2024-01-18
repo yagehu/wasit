@@ -6,7 +6,7 @@
             "params": [
                 { "resource": 0 },
                 {
-                    "value": {
+                    "raw_value": {
                         "bitflags": {
                             "repr": "u32",
                             "members": [
@@ -16,14 +16,14 @@
                     }
                 },
                 {
-                    "value": {
+                    "raw_value": {
                         "string": {
                             "utf8": "a"
                         }
                     }
                 },
                 {
-                    "value": {
+                    "raw_value": {
                         "bitflags": {
                             "repr": "u16",
                             "members": [
@@ -36,7 +36,7 @@
                     }
                 },
                 {
-                    "value": {
+                    "raw_value": {
                         "bitflags": {
                             "repr": "u64",
                             "members": [
@@ -75,7 +75,7 @@
                     }
                 },
                 {
-                    "value": {
+                    "raw_value": {
                         "bitflags": {
                             "repr": "u64",
                             "members": [
@@ -114,7 +114,7 @@
                     }
                 },
                 {
-                    "value": {
+                    "raw_value": {
                         "bitflags": {
                             "repr": "u8",
                             "members": [
@@ -137,25 +137,25 @@
             "params": [
                 { "resource": 1 },
                 {
-                    "value": {
+                    "raw_value": {
                         "array": [
                             {
-                                "value": {
+                                "raw_value": {
                                     "record": [
                                         {
                                             "name": "buf",
                                             "value": {
-                                                "value": {
+                                                "raw_value": {
                                                     "const_pointer": [
-                                                        { "builtin": { "u8": 97 } },
-                                                        { "builtin": { "u8": 98 } }
+                                                        { "raw_value": { "builtin": { "u8": 97 } } },
+                                                        { "raw_value": { "builtin": { "u8": 98 } } }
                                                     ]
                                                 }
                                             }
                                         },
                                         {
                                             "name": "buf_len",
-                                            "value": { "value": { "builtin": { "u32": 2 } } }
+                                            "value": { "raw_value": { "builtin": { "u32": 2 } } }
                                         }
                                     ]
                                 }

@@ -1,3 +1,5 @@
+use witx::Layout;
+
 fn to_int_repr(x: &witx::IntRepr) -> executor_pb::IntRepr {
     match x {
         | witx::IntRepr::U8 => executor_pb::IntRepr::INT_REPR_U8,
@@ -24,7 +26,23 @@ pub fn to_type(ty: &witx::Type) -> executor_pb::Type {
                 special_fields: protobuf::SpecialFields::new(),
             })
         },
-        | witx::Type::Record(_) => todo!(),
+        | witx::Type::Record(record) => Which::Record(executor_pb::type_::Record {
+            members:        record
+                .members
+                .iter()
+                .zip(record.member_layout().iter())
+                .map(
+                    |(member, member_layout)| executor_pb::type_::record::Member {
+                        name:           member.name.as_str().to_owned().into_bytes(),
+                        type_:          Some(to_type(member.tref.type_().as_ref())).into(),
+                        offset:         member_layout.offset as u32,
+                        special_fields: protobuf::SpecialFields::new(),
+                    },
+                )
+                .collect(),
+            size:           record.mem_size() as u32,
+            special_fields: protobuf::SpecialFields::new(),
+        }),
         | witx::Type::Variant(_) => todo!(),
         | witx::Type::Handle(_) => Which::Handle(Default::default()),
         | witx::Type::List(element)
@@ -35,9 +53,15 @@ pub fn to_type(ty: &witx::Type) -> executor_pb::Type {
         {
             Which::String(Default::default())
         },
-        | witx::Type::List(_) => todo!(),
+        | witx::Type::List(element_tref) => Which::Array(executor_pb::type_::Array {
+            type_:          Some(to_type(element_tref.type_().as_ref())).into(),
+            item_size:      element_tref.mem_size() as u32,
+            special_fields: protobuf::SpecialFields::new(),
+        }),
         | witx::Type::Pointer(_) => todo!(),
-        | witx::Type::ConstPointer(_) => todo!(),
+        | witx::Type::ConstPointer(pointer) => {
+            Which::ConstPointer(Box::new(to_type(pointer.type_().as_ref())))
+        },
         | witx::Type::Builtin(builtin) => {
             let which = Some(match builtin {
                 | witx::BuiltinType::Char => todo!(),

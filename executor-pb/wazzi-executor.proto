@@ -71,11 +71,30 @@ message Type {
         repeated string members = 2;
     }
 
+    message Array {
+        Type type = 1;
+        uint32 item_size = 2;
+    }
+
+    message Record {
+        message Member {
+            bytes name = 1;
+            Type type = 2;
+            uint32 offset = 3;
+        }
+
+        repeated Member members = 1;
+        uint32 size = 2;
+    }
+
     oneof which {
         Builtin builtin = 1;
         Empty string = 2;
         Bitflags bitflags = 3;
         Empty handle = 4;
+        Array array = 5;
+        Record record = 6;
+        Type const_pointer = 7;
     }
 }
 
@@ -110,6 +129,23 @@ message RawValue {
         uint32 value = 1;
     }
 
+    message Array {
+        repeated ValueSpec items = 1;
+    }
+
+    message Record {
+        message Member {
+            bytes name = 1;
+            ValueSpec value = 2;
+        }
+
+        repeated Member members = 1;
+    }
+
+    message ConstPointer {
+        repeated ValueSpec items = 1;
+    }
+
     message Pointer {
         ValueSpec alloc = 1;
     }
@@ -119,7 +155,10 @@ message RawValue {
         bytes string = 2;
         Bitflags bitflags = 3;
         Handle  handle = 4;
-        Pointer pointer = 7;
+        Array array = 5;
+        Record record = 6;
+        ConstPointer const_pointer = 7;
+        Pointer pointer = 8;
     }
 }
 
@@ -133,5 +172,6 @@ enum WasiFunc {
     WASI_FUNC_CLOCK_TIME_GET    = 6;
     WASI_FUNC_FD_ADVISE         = 7;
     WASI_FUNC_FD_ALLOCATE       = 8;
+    WASI_FUNC_FD_WRITE          = 27;
     WASI_FUNC_PATH_OPEN         = 32;
 }

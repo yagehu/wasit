@@ -124,7 +124,7 @@ pub struct RecordMemberValue {
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Debug)]
-pub struct ConstPointerValue(pub Vec<RawValue>);
+pub struct ConstPointerValue(pub Vec<Value>);
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Debug)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]

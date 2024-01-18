@@ -16,6 +16,7 @@ use executor_pb::WasiFunc::{
     WASI_FUNC_CLOCK_TIME_GET,
     WASI_FUNC_ENVIRON_GET,
     WASI_FUNC_ENVIRON_SIZES_GET,
+    WASI_FUNC_FD_WRITE,
     WASI_FUNC_PATH_OPEN,
 };
 use serde::{Deserialize, Serialize};
@@ -47,82 +48,127 @@ pub struct ProgSeed {
     calls:          Vec<Call>,
 }
 
-fn handle_params(
+fn handle_param(
     resource_ctx: &ResourceContext,
-    param_specs: &[witx::InterfaceFuncParam],
-    value_specs: &[Value],
-) -> Result<Vec<executor_pb::ValueSpec>, eyre::Error> {
-    let mut params = Vec::with_capacity(param_specs.len());
+    param_tref: &witx::TypeRef,
+    param_value: &Value,
+) -> Result<executor_pb::ValueSpec, eyre::Error> {
+    Ok(match param_value {
+        | &Value::Resource(resource_id) => {
+            let resource = resource_ctx
+                .get(resource_id)
+                .wrap_err(format!("resource {resource_id} not in context"))?;
 
-    for (param_spec, param_value) in param_specs.iter().zip(value_specs.iter()) {
-        let param = match param_value {
-            | &Value::Resource(resource_id) => {
-                let resource = resource_ctx
-                    .get(resource_id)
-                    .wrap_err(format!("resource {resource_id} not in context"))?;
+            executor_pb::ValueSpec {
+                special_fields: protobuf::SpecialFields::new(),
+                type_:          Some(pb::to_type(param_tref.type_().as_ref())).into(),
+                which:          Some(executor_pb::value_spec::Which::Resource(
+                    executor_pb::Resource {
+                        id:             resource.id,
+                        special_fields: protobuf::SpecialFields::new(),
+                    },
+                )),
+            }
+        },
+        | Value::RawValue(value) => {
+            let raw_value = match (param_tref.type_().as_ref(), value) {
+                | (witx::Type::Builtin(_), RawValue::Builtin(builtin)) => {
+                    executor_pb::raw_value::Which::Builtin(executor_pb::raw_value::Builtin {
+                        special_fields: protobuf::SpecialFields::new(),
+                        which:          Some(match builtin {
+                            | &BuiltinValue::U8(i) => {
+                                executor_pb::raw_value::builtin::Which::U8(i as u32)
+                            },
+                            | &BuiltinValue::U32(i) => {
+                                executor_pb::raw_value::builtin::Which::U32(i)
+                            },
+                            | &BuiltinValue::U64(i) => {
+                                executor_pb::raw_value::builtin::Which::U64(i)
+                            },
+                            | &BuiltinValue::S64(i) => {
+                                executor_pb::raw_value::builtin::Which::S64(i)
+                            },
+                        }),
+                    })
+                },
+                | (witx::Type::Pointer(_), RawValue::String(_)) => todo!(),
+                | (witx::Type::Record(record), RawValue::Bitflags(bitflags))
+                    if record.bitflags_repr().is_some() =>
+                {
+                    let mut members = Vec::with_capacity(record.members.len());
 
-                executor_pb::ValueSpec {
-                    special_fields: protobuf::SpecialFields::new(),
-                    type_:          Some(pb::to_type(param_spec.tref.type_().as_ref())).into(),
-                    which:          Some(executor_pb::value_spec::Which::Resource(
-                        executor_pb::Resource {
-                            id:             resource.id,
+                    for member in &bitflags.members {
+                        members.push(member.value);
+                    }
+
+                    executor_pb::raw_value::Which::Bitflags(executor_pb::raw_value::Bitflags {
+                        members,
+                        special_fields: protobuf::SpecialFields::new(),
+                    })
+                },
+                | (witx::Type::Handle(_), RawValue::Handle(_)) => todo!(),
+                | (witx::Type::List(element_tref), RawValue::Array(array)) => {
+                    let mut items = Vec::with_capacity(array.0.len());
+
+                    for value in &array.0 {
+                        items.push(handle_param(resource_ctx, element_tref, value)?);
+                    }
+
+                    executor_pb::raw_value::Which::Array(executor_pb::raw_value::Array {
+                        items,
+                        special_fields: protobuf::SpecialFields::new(),
+                    })
+                },
+                | (witx::Type::List(_), RawValue::String(string)) => {
+                    let bytes = match string {
+                        | StringValue::Utf8(s) => s.as_bytes(),
+                    };
+
+                    executor_pb::raw_value::Which::String(bytes.to_vec())
+                },
+                | (witx::Type::Record(record_type), RawValue::Record(record_value)) => {
+                    let mut members = Vec::with_capacity(record_type.members.len());
+
+                    for (member_type, record_value) in
+                        record_type.members.iter().zip(record_value.0.iter())
+                    {
+                        members.push(executor_pb::raw_value::record::Member {
+                            name:           member_type.name.as_str().to_owned().into_bytes(),
+                            value:          Some(handle_param(
+                                resource_ctx,
+                                &member_type.tref,
+                                &record_value.value,
+                            )?)
+                            .into(),
+                            special_fields: protobuf::SpecialFields::new(),
+                        });
+                    }
+
+                    executor_pb::raw_value::Which::Record(executor_pb::raw_value::Record {
+                        members,
+                        special_fields: protobuf::SpecialFields::new(),
+                    })
+                },
+                | (witx::Type::ConstPointer(tref), RawValue::ConstPointer(const_pointer)) => {
+                    let mut items = Vec::with_capacity(const_pointer.0.len());
+
+                    for item_value in &const_pointer.0 {
+                        items.push(handle_param(resource_ctx, tref, item_value)?);
+                    }
+
+                    eprintln!("[wazzi] {}", items.len());
+
+                    executor_pb::raw_value::Which::ConstPointer(
+                        executor_pb::raw_value::ConstPointer {
+                            items,
                             special_fields: protobuf::SpecialFields::new(),
                         },
-                    )),
-                }
-            },
-            | Value::RawValue(value) => {
-                let raw_value = match (param_spec.tref.type_().as_ref(), value) {
-                    | (witx::Type::Builtin(_), RawValue::Builtin(builtin)) => {
-                        executor_pb::raw_value::Which::Builtin(executor_pb::raw_value::Builtin {
-                            special_fields: protobuf::SpecialFields::new(),
-                            which:          Some(match builtin {
-                                | &BuiltinValue::U8(i) => {
-                                    executor_pb::raw_value::builtin::Which::U8(i as u32)
-                                },
-                                | &BuiltinValue::U32(i) => {
-                                    executor_pb::raw_value::builtin::Which::U32(i)
-                                },
-                                | &BuiltinValue::U64(i) => {
-                                    executor_pb::raw_value::builtin::Which::U64(i)
-                                },
-                                | &BuiltinValue::S64(i) => {
-                                    executor_pb::raw_value::builtin::Which::S64(i)
-                                },
-                            }),
-                        })
-                    },
-                    | (witx::Type::Pointer(_), RawValue::String(_)) => todo!(),
-                    | (witx::Type::Record(record), RawValue::Bitflags(bitflags))
-                        if record.bitflags_repr().is_some() =>
-                    {
-                        let mut members = Vec::with_capacity(record.members.len());
-
-                        for member in &bitflags.members {
-                            members.push(member.value);
-                        }
-
-                        executor_pb::raw_value::Which::Bitflags(executor_pb::raw_value::Bitflags {
-                            members,
-                            special_fields: protobuf::SpecialFields::new(),
-                        })
-                    },
-                    | (witx::Type::Handle(_), RawValue::Handle(_)) => todo!(),
-                    | (witx::Type::List(_), RawValue::Array(_)) => todo!(),
-                    | (witx::Type::List(_), RawValue::String(string)) => {
-                        let bytes = match string {
-                            | StringValue::Utf8(s) => s.as_bytes(),
-                        };
-
-                        executor_pb::raw_value::Which::String(bytes.to_vec())
-                    },
-                    | (witx::Type::Record(_), RawValue::Record(_)) => todo!(),
-                    | (witx::Type::ConstPointer(_), RawValue::ConstPointer(_)) => todo!(),
-                    | (witx::Type::Pointer(tref), RawValue::Pointer(pointer)) => {
-                        let alloc = match pointer {
-                            | PointerValue::Alloc(alloc) => {
-                                let value_spec = match alloc {
+                    )
+                },
+                | (witx::Type::Pointer(tref), RawValue::Pointer(pointer)) => {
+                    let alloc = match pointer {
+                        | PointerValue::Alloc(alloc) => {
+                            let value_spec = match alloc {
                                     | &PointerAlloc::Resource(resource_id) => {
                                         executor_pb::value_spec::Which::Resource(
                                             executor_pb::Resource {
@@ -148,37 +194,46 @@ fn handle_params(
                                     },
                                 };
 
-                                executor_pb::ValueSpec {
-                                    type_:          Some(pb::to_type(tref.type_().as_ref())).into(),
-                                    which:          Some(value_spec),
-                                    special_fields: protobuf::SpecialFields::new(),
-                                }
-                            },
-                        };
-
-                        executor_pb::raw_value::Which::Pointer(executor_pb::raw_value::Pointer {
-                            alloc:          Some(alloc).into(),
-                            special_fields: protobuf::SpecialFields::new(),
-                        })
-                    },
-                    | (witx::Type::Variant(_), RawValue::Variant(_)) => todo!(),
-                    | x => unreachable!("{:?}", x),
-                };
-
-                executor_pb::ValueSpec {
-                    special_fields: protobuf::SpecialFields::new(),
-                    type_:          Some(pb::to_type(param_spec.tref.type_().as_ref())).into(),
-                    which:          Some(executor_pb::value_spec::Which::RawValue(
-                        executor_pb::RawValue {
-                            special_fields: protobuf::SpecialFields::new(),
-                            which:          Some(raw_value),
+                            executor_pb::ValueSpec {
+                                type_:          Some(pb::to_type(tref.type_().as_ref())).into(),
+                                which:          Some(value_spec),
+                                special_fields: protobuf::SpecialFields::new(),
+                            }
                         },
-                    )),
-                }
-            },
-        };
+                    };
 
-        params.push(param);
+                    executor_pb::raw_value::Which::Pointer(executor_pb::raw_value::Pointer {
+                        alloc:          Some(alloc).into(),
+                        special_fields: protobuf::SpecialFields::new(),
+                    })
+                },
+                | (witx::Type::Variant(_), RawValue::Variant(_)) => todo!(),
+                | x => unreachable!("{:?}", x),
+            };
+
+            executor_pb::ValueSpec {
+                special_fields: protobuf::SpecialFields::new(),
+                type_:          Some(pb::to_type(param_tref.type_().as_ref())).into(),
+                which:          Some(executor_pb::value_spec::Which::RawValue(
+                    executor_pb::RawValue {
+                        special_fields: protobuf::SpecialFields::new(),
+                        which:          Some(raw_value),
+                    },
+                )),
+            }
+        },
+    })
+}
+
+fn handle_params(
+    resource_ctx: &ResourceContext,
+    param_specs: &[witx::InterfaceFuncParam],
+    value_specs: &[Value],
+) -> Result<Vec<executor_pb::ValueSpec>, eyre::Error> {
+    let mut params = Vec::with_capacity(param_specs.len());
+
+    for (param_spec, param_value) in param_specs.iter().zip(value_specs.iter()) {
+        params.push(handle_param(resource_ctx, &param_spec.tref, param_value)?);
     }
 
     Ok(params)
@@ -256,6 +311,7 @@ impl ProgSeed {
                 | "clock_res_get" => WASI_FUNC_CLOCK_RES_GET,
                 | "clock_time_get" => WASI_FUNC_CLOCK_TIME_GET,
                 | "path_open" => WASI_FUNC_PATH_OPEN,
+                | "fd_write" => WASI_FUNC_FD_WRITE,
                 | _ => panic!("{}", call.func.as_str()),
             };
             let func_spec = module_spec
@@ -630,7 +686,7 @@ fn build_value(
             for (i, element_value) in pointer_value.0.iter().enumerate() {
                 let mut element_builder = const_pointer_builder.reborrow().get(i as u32);
 
-                build_value(&mut element_builder, tref.type_().as_ref(), element_value);
+                build_value(&mut element_builder, tref.type_().as_ref(), todo!());
             }
         },
         | (witx::Type::Pointer(_tref), RawValue::Pointer(pointer_value)) => {
