@@ -268,27 +268,53 @@ fn environ() {
 
 #[test]
 fn clock() {
-    let spec = spec();
-    let path = [env!("CARGO_MANIFEST_DIR"), "..", "seeds", "04-clock.json"]
-        .into_iter()
-        .collect::<PathBuf>();
+    let path = wazzi_compile_time::root()
+        .join("seeds")
+        .join("04-clock.json");
     let f = fs::OpenOptions::new().read(true).open(&path).unwrap();
     let seed: ProgSeed = serde_json::from_reader(f).unwrap();
+    let base_dir = tempdir().unwrap();
     let wasmtime = wazzi_runners::Wasmtime::new("wasmtime");
     let stderr = Arc::new(Mutex::new(Vec::new()));
-    let mut executor = wazzi_executor::ExecutorRunner::new(wasmtime, executor_bin_capn(), None)
-        .run(stderr.clone())
-        .expect("failed to run executor");
-    let mut snapshot_store = InMemorySnapshotStore::default();
-
-    assert!(
-        seed.execute(&mut executor, &spec, &mut snapshot_store)
-            .is_ok(),
-        "Executor stderr:\n{}",
-        String::from_utf8(stderr.lock().unwrap().deref().clone()).unwrap(),
+    let executor = Arc::new(
+        ExecutorRunner::new(wasmtime, executor_bin(), Some(base_dir.path().to_owned()))
+            .run(stderr.clone())
+            .expect("failed to run executor"),
     );
+    let store = Arc::new(Mutex::new(InMemorySnapshotStore::default()));
+    let (tx, rx) = mpsc::channel();
+    let store_ = store.clone();
+    let mut executor_ = executor.clone();
+
+    thread::spawn(move || {
+        let spec = spec();
+        let mut store = store_.lock().unwrap();
+        let result = seed.execute(&mut executor_, &spec, store.deref_mut());
+
+        tx.send(result).unwrap();
+    });
+
+    let result = rx.recv_timeout(time::Duration::from_millis(250));
 
     executor.kill();
+
+    let stderr = String::from_utf8(stderr.lock().unwrap().deref().clone()).unwrap();
+    let result = match result {
+        | Ok(result) => result,
+        | Err(err) => {
+            panic!("Execution timeout or error. stderr:\n{stderr}err:\n{err}")
+        },
+    };
+
+    assert!(result.is_ok(), "{:#?}\n{stderr}", result);
+
+    let store = store.lock().unwrap();
+    let snapshot: WasiSnapshot = store
+        .get_snapshot(store.snapshot_count() - 1)
+        .unwrap()
+        .unwrap();
+
+    assert!(matches!(snapshot.errno, Some(0)));
 }
 
 #[test]

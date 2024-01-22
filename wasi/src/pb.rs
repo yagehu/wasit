@@ -43,7 +43,25 @@ pub fn to_type(ty: &witx::Type) -> executor_pb::Type {
             size:           record.mem_size() as u32,
             special_fields: protobuf::SpecialFields::new(),
         }),
-        | witx::Type::Variant(_) => todo!(),
+        | witx::Type::Variant(variant) => Which::Variant(executor_pb::type_::Variant {
+            tag_repr:       protobuf::EnumOrUnknown::new(to_int_repr(&variant.tag_repr)),
+            cases:          variant
+                .cases
+                .iter()
+                .map(|case| executor_pb::type_::variant::Case {
+                    name:           case.name.as_str().to_owned().into_bytes(),
+                    optional_type:  case.tref.as_ref().map(|tref| {
+                        executor_pb::type_::variant::case::Optional_type::Type(to_type(
+                            tref.type_().as_ref(),
+                        ))
+                    }),
+                    special_fields: protobuf::SpecialFields::new(),
+                })
+                .collect(),
+            payload_offset: variant.payload_offset() as u32,
+            size:           variant.mem_size() as u32,
+            special_fields: protobuf::SpecialFields::new(),
+        }),
         | witx::Type::Handle(_) => Which::Handle(Default::default()),
         | witx::Type::List(element)
             if matches!(

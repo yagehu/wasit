@@ -87,6 +87,21 @@ message Type {
         uint32 size = 2;
     }
 
+    message Variant {
+        message Case {
+            bytes name = 1;
+            
+            oneof optional_type {
+                Type type = 2;
+            }
+        }
+
+        IntRepr tag_repr = 1;
+        repeated Case cases = 2;
+        uint32 payload_offset = 3;
+        uint32 size = 4;
+    }
+
     oneof which {
         Builtin builtin = 1;
         Empty string = 2;
@@ -96,6 +111,7 @@ message Type {
         Record record = 6;
         Type const_pointer = 7;
         Type pointer = 8;
+        Variant variant = 9;
     }
 }
 
@@ -151,6 +167,15 @@ message RawValue {
         ValueSpec alloc = 1;
     }
 
+    message Variant {
+        uint32 case_idx = 1;
+        bytes case_name = 2;
+
+        oneof optional_payload {
+            ValueSpec payload = 3;
+        }
+    }
+
     oneof which {
         Builtin builtin = 1;
         bytes string = 2;
@@ -160,6 +185,7 @@ message RawValue {
         Record record = 6;
         ConstPointer const_pointer = 7;
         Pointer pointer = 8;
+        Variant variant = 9;
     }
 }
 

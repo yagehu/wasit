@@ -109,160 +109,156 @@ static size_t type_size(Type * type) {
         case TYPE__WHICH_RECORD: return type->record->size;
         case TYPE__WHICH_CONST_POINTER: return sizeof(void *);
         case TYPE__WHICH_POINTER: return sizeof(void *);
+        case TYPE__WHICH_VARIANT: return type->variant->size;
         case TYPE__WHICH__NOT_SET:
         case _TYPE__WHICH__CASE_IS_INT_SIZE: fail("invalid type");
     }
 }
 
-void set_ptr_value(const Type * type, const RawValue * raw_value, void * ptr) {
-    switch (raw_value->which_case) {
-        case RAW_VALUE__WHICH_BUILTIN: {
-            switch (raw_value->builtin->which_case) {
-                case RAW_VALUE__BUILTIN__WHICH_U8:  * (uint8_t *) ptr = raw_value->builtin->u8; break;
-                case RAW_VALUE__BUILTIN__WHICH_U32: * (uint32_t *) ptr = raw_value->builtin->u32; break;
-                case RAW_VALUE__BUILTIN__WHICH_U64: * (uint64_t *) ptr = raw_value->builtin->u64; break;
-                case RAW_VALUE__BUILTIN__WHICH_S64: * (int64_t *) ptr = raw_value->builtin->s64; break;
-                case RAW_VALUE__BUILTIN__WHICH__NOT_SET:
-                case _RAW_VALUE__BUILTIN__WHICH__CASE_IS_INT_SIZE: fail("invalid builtin value");
-            }
+void set_ptr_value(const ValueSpec * value, void * ptr) {
+    switch (value->which_case) {
+        case VALUE_SPEC__WHICH_RESOURCE: {
+            struct resource_map_entry * resource_entry =
+                hmgetp_null(resource_map, value->resource->id);
+
+            memcpy(ptr, resource_entry->value.ptr, resource_entry->value.size);
 
             break;
         }
-        case RAW_VALUE__WHICH_STRING: memcpy(ptr, raw_value->string.data, raw_value->string.len); break;
-        case RAW_VALUE__WHICH_BITFLAGS: {
-            uint64_t repr = 0;
+        case VALUE_SPEC__WHICH_RAW_VALUE: {
+            const RawValue * raw_value = value->raw_value;
 
-            for (int i = 0; i < raw_value->bitflags->n_members; i++) {
-                if (raw_value->bitflags->members[i]) {
-                    repr |= 0x1 << i;
+            switch (raw_value->which_case) {
+                case RAW_VALUE__WHICH_BUILTIN: {
+                    switch (raw_value->builtin->which_case) {
+                        case RAW_VALUE__BUILTIN__WHICH_U8:  * (uint8_t *) ptr = raw_value->builtin->u8; break;
+                        case RAW_VALUE__BUILTIN__WHICH_U32: * (uint32_t *) ptr = raw_value->builtin->u32; break;
+                        case RAW_VALUE__BUILTIN__WHICH_U64: * (uint64_t *) ptr = raw_value->builtin->u64; break;
+                        case RAW_VALUE__BUILTIN__WHICH_S64: * (int64_t *) ptr = raw_value->builtin->s64; break;
+                        case RAW_VALUE__BUILTIN__WHICH__NOT_SET:
+                        case _RAW_VALUE__BUILTIN__WHICH__CASE_IS_INT_SIZE: fail("invalid builtin value");
+                    }
+
+                    break;
                 }
-            }
+                case RAW_VALUE__WHICH_STRING: memcpy(ptr, raw_value->string.data, raw_value->string.len); break;
+                case RAW_VALUE__WHICH_BITFLAGS: {
+                    uint64_t repr = 0;
 
-            switch (type->bitflags->repr) {
-                case INT_REPR__INT_REPR_U8:  * (uint8_t *)  ptr = (uint8_t)  repr; break;
-                case INT_REPR__INT_REPR_U16: * (uint16_t *) ptr = (uint16_t) repr; break;
-                case INT_REPR__INT_REPR_U32: * (uint32_t *) ptr = (uint32_t) repr; break;
-                case INT_REPR__INT_REPR_U64: * (uint64_t *) ptr = (uint64_t) repr; break;
-                case INT_REPR__INT_REPR_UNKNOWN:
-                case _INT_REPR_IS_INT_SIZE: fail("invalid bitflags repr");
-            }
-
-            break;
-        }
-        case RAW_VALUE__WHICH_HANDLE: fail("unimplemented handle");
-        case RAW_VALUE__WHICH_ARRAY: {
-            for (int i = 0; i < raw_value->array->n_items; i++) {
-                void * element_ptr = ((uint8_t *) ptr) + (type->array->item_size * i);
-
-                switch (raw_value->array->items[i]->which_case) {
-                    case VALUE_SPEC__WHICH_RESOURCE: {
-                        struct resource_map_entry * resource_entry =
-                            hmgetp_null(resource_map, raw_value->array->items[i]->resource->id);
-
-                        memcpy(element_ptr, resource_entry->value.ptr, resource_entry->value.size);
-
-                        break;
+                    for (int i = 0; i < raw_value->bitflags->n_members; i++) {
+                        if (raw_value->bitflags->members[i]) {
+                            repr |= 0x1 << i;
+                        }
                     }
-                    case VALUE_SPEC__WHICH_RAW_VALUE: {
-                        set_ptr_value(type->array->type, raw_value->array->items[i]->raw_value, element_ptr);
 
-                        break;
+                    switch (value->type->bitflags->repr) {
+                        case INT_REPR__INT_REPR_U8:  * (uint8_t *)  ptr = (uint8_t)  repr; break;
+                        case INT_REPR__INT_REPR_U16: * (uint16_t *) ptr = (uint16_t) repr; break;
+                        case INT_REPR__INT_REPR_U32: * (uint32_t *) ptr = (uint32_t) repr; break;
+                        case INT_REPR__INT_REPR_U64: * (uint64_t *) ptr = (uint64_t) repr; break;
+                        case INT_REPR__INT_REPR_UNKNOWN:
+                        case _INT_REPR_IS_INT_SIZE: fail("invalid bitflags repr");
                     }
-                    case VALUE_SPEC__WHICH__NOT_SET:
-                    case _VALUE_SPEC__WHICH__CASE_IS_INT_SIZE: fail("invalid array item value spec");
+
+                    break;
                 }
-            }
-
-            break;
-        }
-        case RAW_VALUE__WHICH_RECORD: {
-            for (int i = 0; i < raw_value->record->n_members; i++) {
-                void * member_ptr = ((uint8_t *) ptr) + type->record->members[i]->offset;
-
-                switch (raw_value->record->members[i]->value->which_case) {
-                    case VALUE_SPEC__WHICH_RESOURCE: {
-                        struct resource_map_entry * resource_entry =
-                            hmgetp_null(resource_map, raw_value->record->members[i]->value->resource->id);
-
-                        memcpy(member_ptr, resource_entry->value.ptr, resource_entry->value.size);
-
-                        break;
-                    }
-                    case VALUE_SPEC__WHICH_RAW_VALUE: {
+                case RAW_VALUE__WHICH_HANDLE: fail("unimplemented handle");
+                case RAW_VALUE__WHICH_ARRAY: {
+                    for (int i = 0; i < raw_value->array->n_items; i++) {
                         set_ptr_value(
-                            type->record->members[i]->type,
-                            raw_value->record->members[i]->value->raw_value,
-                            member_ptr
+                            raw_value->array->items[i],
+                            ((uint8_t *) ptr) + (value->type->array->item_size * i)
                         );
-
-                        break;
                     }
-                    case VALUE_SPEC__WHICH__NOT_SET:
-                    case _VALUE_SPEC__WHICH__CASE_IS_INT_SIZE: fail("invalid record member value");
-                }
-            }
-
-            break;
-        }
-        case RAW_VALUE__WHICH_CONST_POINTER: {
-            const size_t item_size = type_size(type->const_pointer);
-            void *       items     = malloc(raw_value->const_pointer->n_items * item_size);
-
-            for (int i = 0; i < raw_value->const_pointer->n_items; i++) {
-                void * item_ptr = ((uint8_t *) items) + i * item_size;
-
-                switch (raw_value->const_pointer->items[i]->which_case) {
-                    case VALUE_SPEC__WHICH_RESOURCE: {
-                        struct resource_map_entry * resource_entry =
-                            hmgetp_null(resource_map, raw_value->const_pointer->items[i]->resource->id);
-
-                        memcpy(item_ptr, resource_entry->value.ptr, resource_entry->value.size);
-
-                        break;
-                    }
-                    case VALUE_SPEC__WHICH_RAW_VALUE: {
-                        set_ptr_value(type->const_pointer, raw_value->const_pointer->items[i]->raw_value, item_ptr);
-
-                        break;
-                    }
-                    case VALUE_SPEC__WHICH__NOT_SET:
-                    case _VALUE_SPEC__WHICH__CASE_IS_INT_SIZE: fail("invalid const pointer value spec");
-                }
-            }
-
-            * (int32_t *) ptr = (int32_t) items;
-
-            break;
-        }
-        case RAW_VALUE__WHICH_POINTER: {
-            switch (raw_value->pointer->alloc->which_case) {
-                case VALUE_SPEC__WHICH_RESOURCE: {
-                    struct resource_map_entry * resource_entry =
-                        hmgetp_null(resource_map, raw_value->pointer->alloc->resource->id);
-                    if (resource_entry == NULL) fail("pointer alloc resource not found");
-
-                    * (void **) ptr = malloc(* (uint32_t *) resource_entry->value.ptr);
 
                     break;
                 }
-                case VALUE_SPEC__WHICH_RAW_VALUE: {
-                    if (
-                        raw_value->pointer->alloc->raw_value->which_case != RAW_VALUE__WHICH_BUILTIN
-                        || raw_value->pointer->alloc->raw_value->builtin->which_case != RAW_VALUE__BUILTIN__WHICH_U32
-                    ) fail("only an u32 can alloc pointer");
-
-                    * (void **) ptr = malloc(raw_value->pointer->alloc->raw_value->builtin->u32);
+                case RAW_VALUE__WHICH_RECORD: {
+                    for (int i = 0; i < raw_value->record->n_members; i++) {
+                        set_ptr_value(
+                            raw_value->record->members[i]->value,
+                            ((uint8_t *) ptr) + value->type->record->members[i]->offset
+                        );
+                    }
 
                     break;
                 }
-                case VALUE_SPEC__WHICH__NOT_SET:
-                case _VALUE_SPEC__WHICH__CASE_IS_INT_SIZE: fail("invalid pointer alloc");
+                case RAW_VALUE__WHICH_CONST_POINTER: {
+                    const size_t item_size = type_size(value->type->const_pointer);
+                    void *       items     = malloc(raw_value->const_pointer->n_items * item_size);
+
+                    for (int i = 0; i < raw_value->const_pointer->n_items; i++) {
+                        set_ptr_value(
+                            raw_value->const_pointer->items[i],
+                            ((uint8_t *) items) + i * item_size
+                        );
+                    }
+
+                    * (int32_t *) ptr = (int32_t) items;
+
+                    break;
+                }
+                case RAW_VALUE__WHICH_POINTER: {
+                    switch (raw_value->pointer->alloc->which_case) {
+                        case VALUE_SPEC__WHICH_RESOURCE: {
+                            struct resource_map_entry * resource_entry =
+                                hmgetp_null(resource_map, raw_value->pointer->alloc->resource->id);
+                            if (resource_entry == NULL) fail("pointer alloc resource not found");
+
+                            * (void **) ptr = malloc(* (uint32_t *) resource_entry->value.ptr);
+
+                            break;
+                        }
+                        case VALUE_SPEC__WHICH_RAW_VALUE: {
+                            if (
+                                raw_value->pointer->alloc->raw_value->which_case != RAW_VALUE__WHICH_BUILTIN
+                                || raw_value->pointer->alloc->raw_value->builtin->which_case != RAW_VALUE__BUILTIN__WHICH_U32
+                            ) fail("only an u32 can alloc pointer");
+
+                            * (void **) ptr = malloc(raw_value->pointer->alloc->raw_value->builtin->u32);
+
+                            break;
+                        }
+                        case VALUE_SPEC__WHICH__NOT_SET:
+                        case _VALUE_SPEC__WHICH__CASE_IS_INT_SIZE: fail("invalid pointer alloc");
+                    }
+
+                    break;
+                }
+                case RAW_VALUE__WHICH_VARIANT: {
+                    switch (value->type->variant->tag_repr) {
+                        case INT_REPR__INT_REPR_U8:  * (uint8_t *)  ptr = raw_value->variant->case_idx; break;
+                        case INT_REPR__INT_REPR_U16: * (uint16_t *) ptr = raw_value->variant->case_idx; break;
+                        case INT_REPR__INT_REPR_U32: * (uint32_t *) ptr = raw_value->variant->case_idx; break;
+                        case INT_REPR__INT_REPR_U64: * (uint64_t *) ptr = raw_value->variant->case_idx; break;
+                        case INT_REPR__INT_REPR_UNKNOWN:
+                        case _INT_REPR_IS_INT_SIZE: fail("invalid variant tag int repr");
+                    }
+
+                    switch (raw_value->variant->optional_payload_case) {
+                        case RAW_VALUE__VARIANT__OPTIONAL_PAYLOAD__NOT_SET: break;
+                        case RAW_VALUE__VARIANT__OPTIONAL_PAYLOAD_PAYLOAD: {
+                            fprintf(stderr, "[exec] set payload\n");
+                            set_ptr_value(
+                                raw_value->variant->payload,
+                                ((uint8_t *) ptr) + value->type->variant->payload_offset
+                            );
+
+                            break;
+                        }
+                        case _RAW_VALUE__VARIANT__OPTIONAL_PAYLOAD__CASE_IS_INT_SIZE: fail("invalid variant payload");
+                    }
+
+                    break;
+                }
+                case RAW_VALUE__WHICH__NOT_SET:
+                case _RAW_VALUE__WHICH__CASE_IS_INT_SIZE: fail("invalid raw value");
             }
 
             break;
         }
-        case RAW_VALUE__WHICH__NOT_SET:
-        case _RAW_VALUE__WHICH__CASE_IS_INT_SIZE: fail("invalid raw value");
+        case VALUE_SPEC__WHICH__NOT_SET:
+        case _VALUE_SPEC__WHICH__CASE_IS_INT_SIZE: fail("invalid value spec");
     }
 }
 
@@ -319,12 +315,13 @@ static void * handle_param_pre(ValueSpec * spec, int32_t * len) {
                 case RAW_VALUE__WHICH_RECORD: ptr = malloc(spec->type->record->size); break;
                 case RAW_VALUE__WHICH_CONST_POINTER: ptr = malloc(sizeof(void *)); break;
                 case RAW_VALUE__WHICH_POINTER: ptr = malloc(sizeof(void *)); break;
+                case RAW_VALUE__WHICH_VARIANT: ptr = malloc(spec->type->variant->size); break;
                 case RAW_VALUE__WHICH__NOT_SET:
                 case _RAW_VALUE__WHICH__CASE_IS_INT_SIZE: fail("invalid raw value type");
             }
             if (ptr == NULL) fail("failed to allocate param ptr");
 
-            set_ptr_value(spec->type, spec->raw_value, ptr);
+            set_ptr_value(spec, ptr);
 
             return ptr;
         }
@@ -385,6 +382,7 @@ static void handle_decl(Request__Decl * decl) {
         case RAW_VALUE__WHICH_RECORD: fail("cannot decl record");
         case RAW_VALUE__WHICH_CONST_POINTER: fail("cannot decl const pointer");
         case RAW_VALUE__WHICH_POINTER: fail("cannot decl pointer");
+        case RAW_VALUE__WHICH_VARIANT: fail("cannot decl variant");
         case RAW_VALUE__WHICH__NOT_SET:
         case _RAW_VALUE__WHICH__CASE_IS_INT_SIZE: fail("invalid decl valid");
     }
@@ -488,8 +486,48 @@ static void handle_call(Request__Call * call) {
 
             break;
         }
-        case WASI_FUNC__WASI_FUNC_CLOCK_RES_GET: fail("unimplemented: clock_res_get");
-        case WASI_FUNC__WASI_FUNC_CLOCK_TIME_GET: fail("unimplemented: clock_time_get");
+        case WASI_FUNC__WASI_FUNC_CLOCK_RES_GET: {
+            void *  p0_clockid_ptr   = handle_param_pre(call->params[0], NULL);
+            void *  r0_clock_res_ptr = handle_result_pre(call->results[0]);
+            int32_t p0_clockid       = * (int32_t *) p0_clockid_ptr;
+            int32_t r0_clock_res     = (int32_t) r0_clock_res_ptr;
+
+            int32_t errno = __imported_wasi_snapshot_preview1_clock_res_get(
+                p0_clockid,
+                r0_clock_res
+            );
+
+            handle_result_post(call->results[0], r0_clock_res_ptr);
+            handle_param_post(call->params[0], p0_clockid_ptr);
+
+            return_.which_case = RETURN_VALUE__WHICH_ERRNO;
+            return_.errno      = errno;
+
+            break;
+        }
+        case WASI_FUNC__WASI_FUNC_CLOCK_TIME_GET: {
+            void *  p0_clockid_ptr   = handle_param_pre(call->params[0], NULL);
+            void *  p1_precision_ptr = handle_param_pre(call->params[1], NULL);
+            void *  r0_time_ptr      = handle_result_pre(call->results[0]);
+            int32_t p0_clockid       = * (int32_t *) p0_clockid_ptr;
+            int64_t p1_precision     = * (int64_t *) p1_precision_ptr;
+            int32_t r0_time          = (int32_t) r0_time_ptr;
+
+            int32_t errno = __imported_wasi_snapshot_preview1_clock_time_get(
+                p0_clockid,
+                p1_precision,
+                r0_time
+            );
+
+            handle_result_post(call->results[0], r0_time_ptr);
+            handle_param_post(call->params[1], p1_precision_ptr);
+            handle_param_post(call->params[0], p0_clockid_ptr);
+
+            return_.which_case = RETURN_VALUE__WHICH_ERRNO;
+            return_.errno      = errno;
+
+            break;
+        }
         case WASI_FUNC__WASI_FUNC_FD_ADVISE: fail("unimplemented: fd_advise");
         case WASI_FUNC__WASI_FUNC_FD_ALLOCATE: fail("unimplemented: fd_allocate");
         case WASI_FUNC__WASI_FUNC_FD_WRITE: {

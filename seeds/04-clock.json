@@ -3,13 +3,13 @@
     "calls": [
         {
             "func": "clock_res_get",
-            "params": [ { "value": { "variant": { "name": "realtime" } } } ],
+            "params": [ { "raw_value": { "variant": { "name": "realtime" } } } ],
             "results": [ { "resource": 0 } ]
         },
         {
             "func": "clock_time_get",
             "params": [
-                { "value": { "variant": { "name": "realtime" } } },
+                { "raw_value": { "variant": { "name": "realtime" } } },
                 { "resource": 0 }
             ],
             "results": [ { "resource": 1 } ]

@@ -156,8 +156,6 @@ fn handle_param(
                         items.push(handle_param(resource_ctx, tref, item_value)?);
                     }
 
-                    eprintln!("[wazzi] {}", items.len());
-
                     executor_pb::raw_value::Which::ConstPointer(
                         executor_pb::raw_value::ConstPointer {
                             items,
@@ -179,7 +177,7 @@ fn handle_param(
                                     },
                                     | &PointerAlloc::Value(i) => {
                                         executor_pb::value_spec::Which::RawValue(
-                                            executor_pb::RawValue {
+                                            Box::new(executor_pb::RawValue {
                                                 which:          Some(
                                                     executor_pb::raw_value::Which::Builtin(
                                                         executor_pb::raw_value::Builtin {
@@ -189,7 +187,7 @@ fn handle_param(
                                                     ),
                                                 ),
                                                 special_fields: protobuf::SpecialFields::new(),
-                                            },
+                                            }),
                                         )
                                     },
                                 };
@@ -207,19 +205,53 @@ fn handle_param(
                         special_fields: protobuf::SpecialFields::new(),
                     })
                 },
-                | (witx::Type::Variant(_), RawValue::Variant(_)) => todo!(),
+                | (witx::Type::Variant(variant_type), RawValue::Variant(variant_value)) => {
+                    let case_idx = variant_type
+                        .cases
+                        .iter()
+                        .enumerate()
+                        .find_map(|(i, case)| {
+                            if case.name.as_str() == variant_value.name {
+                                Some(i)
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap();
+                    let payload = match &variant_value.payload {
+                        | None => None,
+                        | Some(payload) => {
+                            Some(executor_pb::raw_value::variant::Optional_payload::Payload(
+                                Box::new(handle_param(
+                                    resource_ctx,
+                                    &variant_type.cases[case_idx].tref.as_ref().unwrap(),
+                                    &payload,
+                                )?),
+                            ))
+                        },
+                    };
+
+                    executor_pb::raw_value::Which::Variant(Box::new(
+                        executor_pb::raw_value::Variant {
+                            case_idx:         case_idx as u32,
+                            case_name:        variant_value.name.clone().into_bytes(),
+                            optional_payload: payload,
+                            special_fields:   protobuf::SpecialFields::new(),
+                        },
+                    ))
+                },
                 | x => unreachable!("{:?}", x),
             };
 
             executor_pb::ValueSpec {
                 special_fields: protobuf::SpecialFields::new(),
                 type_:          Some(pb::to_type(param_tref.type_().as_ref())).into(),
-                which:          Some(executor_pb::value_spec::Which::RawValue(
+                which:          Some(executor_pb::value_spec::Which::RawValue(Box::new(
                     executor_pb::RawValue {
                         special_fields: protobuf::SpecialFields::new(),
                         which:          Some(raw_value),
                     },
-                )),
+                ))),
             }
         },
     })
