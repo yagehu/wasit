@@ -84,6 +84,7 @@ mod tests {
         let snapshot = WasiSnapshot {
             errno:         Some(21),
             params:        vec![],
+            param_views:   vec![],
             results:       vec![],
             linear_memory: vec![42],
         };

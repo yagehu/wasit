@@ -319,50 +319,91 @@ fn clock() {
 
 #[test]
 fn read_after_write() {
-    let spec = spec();
-    let path = [
-        env!("CARGO_MANIFEST_DIR"),
-        "..",
-        "seeds",
-        "05-read_after_write.json",
-    ]
-    .into_iter()
-    .collect::<PathBuf>();
+    let path = wazzi_compile_time::root()
+        .join("seeds")
+        .join("05-read_after_write.json");
     let f = fs::OpenOptions::new().read(true).open(&path).unwrap();
     let seed: ProgSeed = serde_json::from_reader(f).unwrap();
     let base_dir = tempdir().unwrap();
     let wasmtime = wazzi_runners::Wasmtime::new("wasmtime");
     let stderr = Arc::new(Mutex::new(Vec::new()));
-    let mut executor = wazzi_executor::ExecutorRunner::new(
-        wasmtime,
-        executor_bin_capn(),
-        Some(base_dir.path().to_owned()),
-    )
-    .run(stderr.clone())
-    .expect("failed to run executor");
-    let mut snapshot_store = InMemorySnapshotStore::default();
-
-    assert!(
-        seed.execute(&mut executor, &spec, &mut snapshot_store)
-            .is_ok(),
-        "Executor stderr:\n{}",
-        String::from_utf8(stderr.lock().unwrap().deref().clone()).unwrap(),
+    let executor = Arc::new(
+        ExecutorRunner::new(wasmtime, executor_bin(), Some(base_dir.path().to_owned()))
+            .run(stderr.clone())
+            .expect("failed to run executor"),
     );
+    let store = Arc::new(Mutex::new(InMemorySnapshotStore::default()));
+    let (tx, rx) = mpsc::channel();
+    let store_ = store.clone();
+    let mut executor_ = executor.clone();
+
+    thread::spawn(move || {
+        let spec = spec();
+        let mut store = store_.lock().unwrap();
+        let result = seed.execute(&mut executor_, &spec, store.deref_mut());
+
+        tx.send(result).unwrap();
+    });
+
+    let result = rx.recv_timeout(time::Duration::from_millis(250));
 
     executor.kill();
 
-    let fd_read_snapshot = snapshot_store.get_snapshot(3).unwrap().unwrap();
+    let stderr = String::from_utf8(stderr.lock().unwrap().deref().clone()).unwrap();
+    let result = match result {
+        | Ok(result) => result,
+        | Err(err) => {
+            panic!("Execution timeout or error. stderr:\n{stderr}err:\n{err}")
+        },
+    };
 
-    assert!(matches!(fd_read_snapshot.errno, Some(0)));
-    // assert!(
-    //     matches!(
-    //         fd_read_snapshot.results[0].value,
-    //         wazzi_wasi::Value::Builtin(wazzi_wasi::BuiltinValue::U32(2)),
-    //     ),
-    //     "{:#?}\nstderr:\n{}",
-    //     fd_read_snapshot.results[0].value,
-    //     stderr_str,
-    // );
+    assert!(result.is_ok(), "{:#?}\n{stderr}", result);
+
+    let store = store.lock().unwrap();
+    let fd_read_snapshot = store
+        .get_snapshot(store.snapshot_count() - 1)
+        .unwrap()
+        .unwrap();
+
+    assert!(
+        matches!(fd_read_snapshot.errno, Some(0)),
+        "{:#?}\nstderr:\n{stderr}\n",
+        fd_read_snapshot
+    );
+
+    // let iovs = &fd_read_snapshot.param_views[1];
+    // let values = match &iovs.value {
+    //     | PureValue::List(values) => values,
+    //     | _ => panic!(),
+    // };
+
+    // assert_eq!(values.len(), 1);
+
+    // let iovec = values.first().unwrap();
+    // let members = match &iovec.value {
+    //     | PureValue::Record(members) => members,
+    //     | _ => panic!(),
+    // };
+
+    // assert_eq!(members.len(), 2);
+
+    // let buf = members.first().unwrap();
+    // let buf_len = &members[1];
+
+    // match &buf_len.value {
+    //     | &PureValue::Builtin(BuiltinValue::U32(len)) => assert_eq!(len, 2),
+    //     | _ => panic!(),
+    // }
+
+    // let buf_values = match &buf.value {
+    //     | PureValue::Pointer(values) => values,
+    //     | _ => panic!(),
+    // };
+
+    // assert!(matches!(
+    //     buf_values[0].value,
+    //     PureValue::Builtin(BuiltinValue::U8(97))
+    // ));
 }
 
 #[test]

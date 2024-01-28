@@ -96,7 +96,9 @@ pub fn to_type(ty: &witx::Type) -> executor_pb::Type {
                 | witx::BuiltinType::S8 => todo!(),
                 | witx::BuiltinType::S16 => todo!(),
                 | witx::BuiltinType::S32 => todo!(),
-                | witx::BuiltinType::S64 => todo!(),
+                | witx::BuiltinType::S64 => {
+                    executor_pb::type_::builtin::Which::S64(Default::default())
+                },
                 | witx::BuiltinType::F32 => todo!(),
                 | witx::BuiltinType::F64 => todo!(),
             });

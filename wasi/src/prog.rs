@@ -16,6 +16,8 @@ use executor_pb::WasiFunc::{
     WASI_FUNC_CLOCK_TIME_GET,
     WASI_FUNC_ENVIRON_GET,
     WASI_FUNC_ENVIRON_SIZES_GET,
+    WASI_FUNC_FD_READ,
+    WASI_FUNC_FD_SEEK,
     WASI_FUNC_FD_WRITE,
     WASI_FUNC_PATH_OPEN,
 };
@@ -38,7 +40,7 @@ use crate::{
     },
     capnp_mappers,
     pb,
-    snapshot::{store::SnapshotStore, WasiSnapshot},
+    snapshot::{store::SnapshotStore, ValueView, WasiSnapshot},
 };
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
@@ -224,8 +226,8 @@ fn handle_param(
                             Some(executor_pb::raw_value::variant::Optional_payload::Payload(
                                 Box::new(handle_param(
                                     resource_ctx,
-                                    &variant_type.cases[case_idx].tref.as_ref().unwrap(),
-                                    &payload,
+                                    variant_type.cases[case_idx].tref.as_ref().unwrap(),
+                                    payload,
                                 )?),
                             ))
                         },
@@ -289,6 +291,49 @@ fn call_results_ok(
     }
 }
 
+fn handle_call_param_views(
+    _param_specs: &[witx::InterfaceFuncParam],
+    call_response: &executor_pb::response::Call,
+) -> Vec<ValueView> {
+    let views = Vec::with_capacity(call_response.params.len());
+
+    // for (param_spec, param_view) in param_specs.iter().zip(call_response.params.iter()) {
+    //     fn handle_one(spec: &witx::Type, param_view: &executor_pb::ValueView) -> ValueView {
+    //         let value = match (spec, param_view.content.which.as_ref().unwrap()) {
+    //             | (witx::Type::List(item_tref), executor_pb::pure_value::Which::List(list)) => {
+    //                 let mut items = Vec::with_capacity(list.items.len());
+
+    //                 for item in &list.items {
+    //                     items.push(handle_one(item_tref.type_().as_ref(), item));
+    //                 }
+
+    //                 PureValue::List(items)
+    //             },
+    //             | (witx::Type::Handle(_), &executor_pb::pure_value::Which::Handle(handle)) => {
+    //                 PureValue::Handle(handle)
+    //             },
+    //             | (
+    //                 witx::Type::Record(record_type),
+    //                 executor_pb::pure_value::Which::Record(record_value),
+    //             ) => PureValue::Record(todo!("{:#?}", record_value)),
+    //             | _ => unreachable!("{:#?}", param_view),
+    //         };
+
+    //         ValueView {
+    //             memory_offset: param_view.memory_offset as usize,
+    //             memory_len: spec.mem_size(),
+    //             value,
+    //         }
+    //     }
+
+    //     views.push(handle_one(param_spec.tref.type_().as_ref(), param_view));
+    // }
+
+    eprintln!("whoa {} {:#?}", views.len(), call_response.params);
+
+    views
+}
+
 impl ProgSeed {
     #[tracing::instrument(skip(snapshot_store))]
     pub fn execute<S>(
@@ -342,8 +387,10 @@ impl ProgSeed {
                 | "environ_sizes_get" => WASI_FUNC_ENVIRON_SIZES_GET,
                 | "clock_res_get" => WASI_FUNC_CLOCK_RES_GET,
                 | "clock_time_get" => WASI_FUNC_CLOCK_TIME_GET,
-                | "path_open" => WASI_FUNC_PATH_OPEN,
+                | "fd_read" => WASI_FUNC_FD_READ,
+                | "fd_seek" => WASI_FUNC_FD_SEEK,
                 | "fd_write" => WASI_FUNC_FD_WRITE,
+                | "path_open" => WASI_FUNC_PATH_OPEN,
                 | _ => panic!("{}", call.func.as_str()),
             };
             let func_spec = module_spec
@@ -381,13 +428,20 @@ impl ProgSeed {
                 special_fields: protobuf::SpecialFields::new(),
             };
             let call_response = executor.call(call_request)?;
-            let errno = match call_response.return_.unwrap().which.unwrap() {
+            let errno = match call_response
+                .return_
+                .as_ref()
+                .unwrap()
+                .which
+                .as_ref()
+                .unwrap()
+            {
                 | executor_pb::return_value::Which::None(_) => {
                     call_results_ok(spec, &mut resource_ctx, &result_trefs, &call.results);
 
                     None
                 },
-                | executor_pb::return_value::Which::Errno(errno) => {
+                | &executor_pb::return_value::Which::Errno(errno) => {
                     if errno == 0 {
                         call_results_ok(spec, &mut resource_ctx, &result_trefs, &call.results);
                     }
@@ -396,11 +450,13 @@ impl ProgSeed {
                 },
                 | _ => unreachable!(),
             };
+            let param_views = handle_call_param_views(&func_spec.params, &call_response);
 
             snapshot_store
                 .push_snapshot(WasiSnapshot {
                     errno,
                     params: call.params.clone(),
+                    param_views,
                     results: Vec::new(),
                     linear_memory: Vec::new(),
                 })
@@ -592,6 +648,7 @@ impl ProgSeed {
             snapshot_store
                 .push_snapshot(WasiSnapshot {
                     errno,
+                    param_views: Vec::new(),
                     params: call.params.clone(),
                     results: call_results,
                     linear_memory: Vec::new(),
@@ -710,15 +767,15 @@ fn build_value(
                 }
             }
         },
-        | (witx::Type::ConstPointer(tref), RawValue::ConstPointer(pointer_value)) => {
+        | (witx::Type::ConstPointer(_tref), RawValue::ConstPointer(pointer_value)) => {
             let mut const_pointer_builder = builder
                 .reborrow()
                 .init_const_pointer(pointer_value.0.len() as u32);
 
-            for (i, element_value) in pointer_value.0.iter().enumerate() {
-                let mut element_builder = const_pointer_builder.reborrow().get(i as u32);
+            for (i, _element_value) in pointer_value.0.iter().enumerate() {
+                let _element_builder = const_pointer_builder.reborrow().get(i as u32);
 
-                build_value(&mut element_builder, tref.type_().as_ref(), todo!());
+                // build_value(&mut element_builder, tref.type_().as_ref(), todo!());
             }
         },
         | (witx::Type::Pointer(_tref), RawValue::Pointer(pointer_value)) => {

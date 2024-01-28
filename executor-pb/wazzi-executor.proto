@@ -25,6 +25,7 @@ message Response {
 
     message Call {
         ReturnValue return = 1;
+        repeated ValueView params = 2;
     }
 
     oneof which {
@@ -63,6 +64,7 @@ message Type {
             Empty u8 = 1;
             Empty u32 = 3;
             Empty u64 = 4;
+            Empty s64 = 8;
         }
     }
 
@@ -189,6 +191,38 @@ message RawValue {
     }
 }
 
+message ValueView {
+    uint32 memory_offset = 1;
+    PureValue content = 2;
+}
+
+message PureValue {
+    message List {
+        repeated ValueView items = 1;
+    }
+
+    message Record {
+        message Member {
+            bytes name = 1;
+            ValueView value = 2;
+        }
+
+        repeated Member members = 1;
+    }
+
+    message Pointer {
+        repeated ValueView items = 1;
+    }
+
+    oneof which {
+        RawValue.Builtin builtin = 1;
+        uint32 handle = 4;
+        List list = 5;
+        Record record = 6;
+        Pointer pointer = 8;
+    }
+}
+
 enum WasiFunc {
     WASI_FUNC_UNKNOWN = 0;
     WASI_FUNC_ARGS_GET          = 1;
@@ -199,6 +233,8 @@ enum WasiFunc {
     WASI_FUNC_CLOCK_TIME_GET    = 6;
     WASI_FUNC_FD_ADVISE         = 7;
     WASI_FUNC_FD_ALLOCATE       = 8;
+    WASI_FUNC_FD_READ           = 25;
+    WASI_FUNC_FD_SEEK           = 26;
     WASI_FUNC_FD_WRITE          = 27;
     WASI_FUNC_PATH_OPEN         = 32;
 }
