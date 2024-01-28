@@ -16,6 +16,7 @@ use executor_pb::WasiFunc::{
     WASI_FUNC_CLOCK_TIME_GET,
     WASI_FUNC_ENVIRON_GET,
     WASI_FUNC_ENVIRON_SIZES_GET,
+    WASI_FUNC_FD_ADVISE,
     WASI_FUNC_FD_READ,
     WASI_FUNC_FD_SEEK,
     WASI_FUNC_FD_WRITE,
@@ -295,7 +296,7 @@ fn handle_call_param_views(
     _param_specs: &[witx::InterfaceFuncParam],
     call_response: &executor_pb::response::Call,
 ) -> Vec<ValueView> {
-    let views = Vec::with_capacity(call_response.params.len());
+    Vec::with_capacity(call_response.params.len())
 
     // for (param_spec, param_view) in param_specs.iter().zip(call_response.params.iter()) {
     //     fn handle_one(spec: &witx::Type, param_view: &executor_pb::ValueView) -> ValueView {
@@ -328,10 +329,6 @@ fn handle_call_param_views(
 
     //     views.push(handle_one(param_spec.tref.type_().as_ref(), param_view));
     // }
-
-    eprintln!("whoa {} {:#?}", views.len(), call_response.params);
-
-    views
 }
 
 impl ProgSeed {
@@ -387,6 +384,7 @@ impl ProgSeed {
                 | "environ_sizes_get" => WASI_FUNC_ENVIRON_SIZES_GET,
                 | "clock_res_get" => WASI_FUNC_CLOCK_RES_GET,
                 | "clock_time_get" => WASI_FUNC_CLOCK_TIME_GET,
+                | "fd_advise" => WASI_FUNC_FD_ADVISE,
                 | "fd_read" => WASI_FUNC_FD_READ,
                 | "fd_seek" => WASI_FUNC_FD_SEEK,
                 | "fd_write" => WASI_FUNC_FD_WRITE,
