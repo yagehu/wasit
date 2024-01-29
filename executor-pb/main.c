@@ -776,6 +776,22 @@ static void handle_call(Request__Call * call) {
 
             break;
         }
+        case WASI_FUNC__WASI_FUNC_FD_FDSTAT_GET: {
+            void *  p0_fd_ptr     = handle_param_pre(call->params[0], NULL);
+            void *  r0_fdstat_ptr = handle_result_pre(call->results[0]);
+            int32_t p0_fd         = * (int32_t *) p0_fd_ptr;
+            int32_t r0_fdstat     = (int32_t) r0_fdstat_ptr;
+
+            int32_t errno = __imported_wasi_snapshot_preview1_fd_fdstat_get(p0_fd, r0_fdstat);
+
+            handle_result_post(call->results[0], r0_fdstat_ptr);
+            handle_param_post(call->params[0], p0_fd_ptr);
+
+            return_.which_case = RETURN_VALUE__WHICH_ERRNO;
+            return_.errno      = errno;
+
+            break;
+        }
         case WASI_FUNC__WASI_FUNC_FD_READ: {
             int32_t p1_iovs_len = 0;
             void *  p0_fd_ptr   = handle_param_pre(call->params[0], NULL);
