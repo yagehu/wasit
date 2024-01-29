@@ -233,6 +233,8 @@ enum WasiFunc {
     WASI_FUNC_CLOCK_TIME_GET    = 6;
     WASI_FUNC_FD_ADVISE         = 7;
     WASI_FUNC_FD_ALLOCATE       = 8;
+    WASI_FUNC_FD_CLOSE          = 9;
+    WASI_FUNC_FD_DATASYNC       = 10;
     WASI_FUNC_FD_READ           = 25;
     WASI_FUNC_FD_SEEK           = 26;
     WASI_FUNC_FD_WRITE          = 27;
