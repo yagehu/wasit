@@ -7,3 +7,6 @@
 [submodule "executor-pb/protobuf-c/upstream"]
 	path = executor-pb/protobuf-c/upstream
 	url = https://github.com/protobuf-c/protobuf-c.git
+[submodule "wasi-sdk/upstream"]
+	path = wasi-sdk/upstream
+	url = https://github.com/yagehu/wasi-sdk

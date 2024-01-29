@@ -5,3 +5,7 @@ edition.workspace = true
 publish = false
 
 [dependencies]
+
+[build-dependencies]
+wasi-sdk.workspace = true
+wazzi-compile-time.workspace = true

@@ -16,11 +16,13 @@ members = [
     "executor/capnpc-c",
     "runners",
     "wasi",
+    "wasi-sdk/build",
     "witx",
 ]
 
 [workspace.dependencies]
 capnpc-c.path = "executor/capnpc-c"
+wasi-sdk.path = "wasi-sdk/build"
 wazzi-compile-time.path = "compile-time"
 wazzi-executor.path = "executor"
 wazzi-executor-capnp.path = "executor/capnp"
