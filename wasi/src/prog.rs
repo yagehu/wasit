@@ -18,6 +18,7 @@ use executor_pb::WasiFunc::{
     WASI_FUNC_ENVIRON_SIZES_GET,
     WASI_FUNC_FD_ADVISE,
     WASI_FUNC_FD_ALLOCATE,
+    WASI_FUNC_FD_CLOSE,
     WASI_FUNC_FD_DATASYNC,
     WASI_FUNC_FD_FDSTAT_GET,
     WASI_FUNC_FD_READ,
@@ -389,6 +390,7 @@ impl ProgSeed {
                 | "clock_time_get" => WASI_FUNC_CLOCK_TIME_GET,
                 | "fd_advise" => WASI_FUNC_FD_ADVISE,
                 | "fd_allocate" => WASI_FUNC_FD_ALLOCATE,
+                | "fd_close" => WASI_FUNC_FD_CLOSE,
                 | "fd_datasync" => WASI_FUNC_FD_DATASYNC,
                 | "fd_fdstat_get" => WASI_FUNC_FD_FDSTAT_GET,
                 | "fd_read" => WASI_FUNC_FD_READ,
@@ -448,6 +450,16 @@ impl ProgSeed {
                 | &executor_pb::return_value::Which::Errno(errno) => {
                     if errno == 0 {
                         call_results_ok(spec, &mut resource_ctx, &result_trefs, &call.results);
+
+                        // This only applies to fd_close dropping fd.
+                        for (i, param_spec) in func_spec.params.iter().enumerate() {
+                            if param_spec.drop {
+                                match call.params[i] {
+                                    | Value::Resource(resource) => resource_ctx.drop(resource),
+                                    | Value::RawValue(_) => todo!(),
+                                }
+                            }
+                        }
                     }
 
                     Some(errno)

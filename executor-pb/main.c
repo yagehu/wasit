@@ -762,7 +762,19 @@ static void handle_call(Request__Call * call) {
 
             break;
         }
-        case WASI_FUNC__WASI_FUNC_FD_CLOSE: fail("unimplemented: fd_close");
+        case WASI_FUNC__WASI_FUNC_FD_CLOSE: {
+            void *  p0_fd_ptr = handle_param_pre(call->params[0], NULL);
+            int32_t p0_fd     = * (int32_t *) p0_fd_ptr;
+
+            int32_t errno = __imported_wasi_snapshot_preview1_fd_close(p0_fd);
+
+            handle_param_post(call->params[0], p0_fd_ptr);
+
+            return_.which_case = RETURN_VALUE__WHICH_ERRNO;
+            return_.errno      = errno;
+
+            break;
+        }
         case WASI_FUNC__WASI_FUNC_FD_DATASYNC: {
             void *  p0_fd_ptr = handle_param_pre(call->params[0], NULL);
             int32_t p0_fd     = * (int32_t *) p0_fd_ptr;
