@@ -823,6 +823,29 @@ static void handle_call(Request__Call * call) {
 
             break;
         }
+        case WASI_FUNC__WASI_FUNC_FD_FDSTAT_SET_RIGHTS: {
+            void *  p0_fd_ptr                   = handle_param_pre(call->params[0], NULL);
+            void *  p1_fs_rights_base_ptr       = handle_param_pre(call->params[1], NULL);
+            void *  p2_fs_rights_inheriting_ptr = handle_param_pre(call->params[2], NULL);
+            int32_t p0_fd                       = * (int32_t *) p0_fd_ptr;
+            int64_t p1_fs_rights_base           = * (int64_t *) p1_fs_rights_base_ptr;
+            int64_t p2_fs_rights_inheriting     = * (int64_t *) p2_fs_rights_inheriting_ptr;
+
+            int32_t errno = __imported_wasi_snapshot_preview1_fd_fdstat_set_rights(
+                p0_fd,
+                p1_fs_rights_base,
+                p2_fs_rights_inheriting
+            );
+
+            handle_param_post(call->params[2], p2_fs_rights_inheriting_ptr);
+            handle_param_post(call->params[1], p1_fs_rights_base_ptr);
+            handle_param_post(call->params[0], p0_fd_ptr);
+
+            return_.which_case = RETURN_VALUE__WHICH_ERRNO;
+            return_.errno      = errno;
+
+            break;
+        }
         case WASI_FUNC__WASI_FUNC_FD_READ: {
             int32_t p1_iovs_len = 0;
             void *  p0_fd_ptr   = handle_param_pre(call->params[0], NULL);
