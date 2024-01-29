@@ -6,7 +6,7 @@
             "params": [
                 { "resource": 0 },
                 {
-                    "value": {
+                    "raw_value": {
                         "bitflags": {
                             "repr": "u32",
                             "members": [
@@ -16,14 +16,14 @@
                     }
                 },
                 {
-                    "value": {
+                    "raw_value": {
                         "string": {
                             "utf8": "a"
                         }
                     }
                 },
                 {
-                    "value": {
+                    "raw_value": {
                         "bitflags": {
                             "repr": "u16",
                             "members": [
@@ -36,7 +36,7 @@
                     }
                 },
                 {
-                    "value": {
+                    "raw_value": {
                         "bitflags": {
                             "repr": "u64",
                             "members": [
@@ -75,7 +75,7 @@
                     }
                 },
                 {
-                    "value": {
+                    "raw_value": {
                         "bitflags": {
                             "repr": "u64",
                             "members": [
@@ -114,7 +114,7 @@
                     }
                 },
                 {
-                    "value": {
+                    "raw_value": {
                         "bitflags": {
                             "repr": "u8",
                             "members": [
@@ -136,8 +136,8 @@
             "func": "fd_allocate",
             "params": [
                 { "resource": 1 },
-                { "value": { "builtin": { "u64": 0 } } },
-                { "value": { "builtin": { "u64": 1 } } }
+                { "raw_value": { "builtin": { "u64": 0 } } },
+                { "raw_value": { "builtin": { "u64": 1 } } }
             ]
         }
     ]

@@ -722,8 +722,6 @@ static void handle_call(Request__Call * call) {
             int64_t p2_len        = * (int64_t *) p2_len_ptr;
             int32_t p3_advice     = * (int8_t *)  p3_advice_ptr;
 
-            fprintf(stderr, "[exec] advice %d\n", p3_advice);
-
             int32_t errno = __imported_wasi_snapshot_preview1_fd_advise(
                 p0_fd,
                 p1_offset,
@@ -741,7 +739,29 @@ static void handle_call(Request__Call * call) {
 
             break;
         }
-        case WASI_FUNC__WASI_FUNC_FD_ALLOCATE: fail("unimplemented: fd_allocate");
+        case WASI_FUNC__WASI_FUNC_FD_ALLOCATE: {
+            void *  p0_fd_ptr     = handle_param_pre(call->params[0], NULL);
+            void *  p1_offset_ptr = handle_param_pre(call->params[1], NULL);
+            void *  p2_len_ptr    = handle_param_pre(call->params[2], NULL);
+            int32_t p0_fd         = * (int32_t *) p0_fd_ptr;
+            int64_t p1_offset     = * (int64_t *) p1_offset_ptr;
+            int64_t p2_len        = * (int64_t *) p2_len_ptr;
+
+            int32_t errno = __imported_wasi_snapshot_preview1_fd_allocate(
+                p0_fd,
+                p1_offset,
+                p2_len
+            );
+
+            handle_param_post(call->params[2], p2_len_ptr);
+            handle_param_post(call->params[1], p1_offset_ptr);
+            handle_param_post(call->params[0], p0_fd_ptr);
+
+            return_.which_case = RETURN_VALUE__WHICH_ERRNO;
+            return_.errno      = errno;
+
+            break;
+        }
         case WASI_FUNC__WASI_FUNC_FD_READ: {
             int32_t p1_iovs_len = 0;
             void *  p0_fd_ptr   = handle_param_pre(call->params[0], NULL);
