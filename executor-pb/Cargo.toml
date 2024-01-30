@@ -5,7 +5,7 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
-wazzi-executor-protobuf-c-wasm.workspace = true
 
 [build-dependencies]
 wazzi-executor-pb-c.workspace = true
+wazzi-executor-protobuf-c-wasm.workspace = true

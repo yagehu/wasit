@@ -23,7 +23,7 @@ fn main() {
         .join("upstream")
         .canonicalize()
         .unwrap();
-    let wasi_sdk_build_dir = root_dir.join("wasi-sdk").join("build");
+    let wasi_sdk_build_dir = root_dir.join("wasi-sdk").join("upstream").join("build");
     let clang_path = wasi_sdk_build_dir
         .join("install")
         .join("opt")
@@ -36,9 +36,7 @@ fn main() {
     assert!(process::Command::new(clang_path)
         .arg("--sysroot")
         .arg(
-            root_dir
-                .join("wasi-sdk")
-                .join("build")
+            wasi_sdk_build_dir
                 .join("install")
                 .join("opt")
                 .join("wasi-sdk")
@@ -51,8 +49,7 @@ fn main() {
         .arg(&target_dir)
         .arg("-I")
         .arg(&protobuf_c_dir)
-        .arg("-lwazzi-executor-pb")
-        .arg("-lprotobuf-c")
+        .args(["-lwazzi-executor-pb", "-lprotobuf-c"])
         .arg("-L")
         .arg(&target_dir)
         .arg("-o")

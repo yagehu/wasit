@@ -1,4 +1,4 @@
-use std::{env, path::PathBuf, process};
+use std::{env, fs, path::PathBuf, process};
 
 use wazzi_compile_time::root;
 
@@ -39,13 +39,28 @@ fn main() {
         .join("bin")
         .canonicalize()
         .unwrap();
-    let clang = wasi_sdk_bin_dir.join("clang").canonicalize().unwrap();
 
     env::set_current_dir(&out_dir).unwrap();
 
     let status = process::Command::new(&configure_script)
-        .args(["--host", "wasm32-wasi"])
-        .env("CC", &clang)
+        .args(["--host=wasm32-wasi", "--disable-strip"])
+        .env("CC", &wasi_sdk_bin_dir.join("clang"))
+        .env("AR", &wasi_sdk_bin_dir.join("ar"))
+        .env("NM", &wasi_sdk_bin_dir.join("nm"))
+        .env("RANLIB", &wasi_sdk_bin_dir.join("ranlib"))
+        .env(
+            "CFLAGS",
+            format!(
+                "--sysroot={}",
+                wasi_sdk_build_dir
+                    .join("install")
+                    .join("opt")
+                    .join("wasi-sdk")
+                    .join("share")
+                    .join("wasi-sysroot")
+                    .display()
+            ),
+        )
         .spawn()
         .unwrap()
         .wait()
@@ -53,11 +68,37 @@ fn main() {
 
     assert!(status.success());
 
+    let archive_file_relpath = PathBuf::from("protobuf-c").join("libprotobuf-c.la");
     let status = process::Command::new("make")
+        .arg(&archive_file_relpath)
+        .arg("-j4")
         .spawn()
         .unwrap()
         .wait()
         .unwrap();
 
     assert!(status.success());
+
+    let target_dir = root
+        .join("target")
+        .join(env::var("PROFILE").unwrap())
+        .canonicalize()
+        .unwrap();
+
+    fs::copy(
+        out_dir
+            .join("protobuf-c")
+            .join(".libs")
+            .join("libprotobuf-c.a"),
+        target_dir.join("libprotobuf-c.a"),
+    )
+    .unwrap();
+    // fs::copy(
+    //     out_dir
+    //         .join("protobuf-c")
+    //         .join(".libs")
+    //         .join("libprotobuf-c.la"),
+    //     target_dir.join("libprotobuf-c.la"),
+    // )
+    // .unwrap();
 }
