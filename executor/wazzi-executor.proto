@@ -241,6 +241,8 @@ enum WasiFunc {
     WASI_FUNC_FD_FILESTAT_GET       = 14;
     WASI_FUNC_FD_FILESTAT_SET_SIZE  = 15;
     WASI_FUNC_FD_FILESTAT_SET_TIMES = 16;
+    WASI_FUNC_FD_PREAD              = 17;
+    WASI_FUNC_FD_PRESTAT_GET        = 18;
     WASI_FUNC_FD_READ               = 25;
     WASI_FUNC_FD_SEEK               = 26;
     WASI_FUNC_FD_WRITE              = 27;
