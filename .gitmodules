@@ -1,8 +1,8 @@
 [submodule "runtimes/wasmtime"]
 	path = runtimes/wasmtime
 	url = git@github.com:yagehu/wasmtime.git
-[submodule "executor-pb/protobuf-c/upstream"]
-	path = executor-pb/protobuf-c/upstream
+[submodule "executor/protobuf-c/upstream"]
+	path = executor/protobuf-c/upstream
 	url = https://github.com/protobuf-c/protobuf-c.git
 [submodule "wasi-sdk/upstream"]
 	path = wasi-sdk/upstream

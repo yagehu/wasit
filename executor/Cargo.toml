@@ -3,15 +3,13 @@ name = "wazzi-executor"
 version = "0.1.0"
 edition.workspace = true
 publish.workspace = true
-build = "build.rs"
-
-[build-dependencies]
-wazzi-executor-capnp-c.workspace = true
 
 [dependencies]
-wazzi-executor-capnp.workspace = true
 wazzi-executor-pb-rust.workspace = true
 wazzi-runners.workspace = true
 
-capnp.workspace = true
 protobuf.workspace = true
+
+[build-dependencies]
+wazzi-executor-pb-c.workspace = true
+wazzi-executor-protobuf-c-wasm.workspace = true

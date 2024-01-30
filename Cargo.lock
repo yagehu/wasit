@@ -72,28 +72,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "327762f6e5a765692301e5bb513e0d9fef63be86bbc14528052b1cd3e6f03e07"
 
 [[package]]
-name = "capnp"
-version = "0.18.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "384b671a5b39eadb909b0c2b81d22a400d446526e651e64be9eb6674b33644a4"
-dependencies = [
- "embedded-io",
-]
-
-[[package]]
-name = "capnpc"
-version = "0.18.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a642faaaa78187e70bdcc0014c593c213553cfeda3b15054426d0d596048b131"
-dependencies = [
- "capnp",
-]
-
-[[package]]
-name = "capnpc-c"
-version = "0.1.0"
-
-[[package]]
 name = "cc"
 version = "1.0.83"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -165,12 +143,6 @@ name = "either"
 version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a26ae43d7bcc3b814de94796a5e736d4029efb0ee900c12e2d54c993ad1a1e07"
-
-[[package]]
-name = "embedded-io"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "658bbadc628dc286b9ae02f0cb0f5411c056eb7487b72f0083203f115de94060"
 
 [[package]]
 name = "equivalent"
@@ -683,36 +655,11 @@ version = "0.1.0"
 name = "wazzi-executor"
 version = "0.1.0"
 dependencies = [
- "capnp",
  "protobuf",
- "wazzi-executor-capnp",
- "wazzi-executor-capnp-c",
- "wazzi-executor-pb-rust",
- "wazzi-runners",
-]
-
-[[package]]
-name = "wazzi-executor-capnp"
-version = "0.1.0"
-dependencies = [
- "capnp",
- "capnpc",
-]
-
-[[package]]
-name = "wazzi-executor-capnp-c"
-version = "0.1.0"
-dependencies = [
- "capnpc-c",
- "cc",
-]
-
-[[package]]
-name = "wazzi-executor-pb"
-version = "0.1.0"
-dependencies = [
  "wazzi-executor-pb-c",
+ "wazzi-executor-pb-rust",
  "wazzi-executor-protobuf-c-wasm",
+ "wazzi-runners",
 ]
 
 [[package]]
@@ -747,7 +694,6 @@ name = "wazzi-wasi"
 version = "0.1.0"
 dependencies = [
  "arbitrary",
- "capnp",
  "color-eyre",
  "protobuf",
  "serde",
@@ -757,8 +703,6 @@ dependencies = [
  "tracing",
  "wazzi-compile-time",
  "wazzi-executor",
- "wazzi-executor-capnp",
- "wazzi-executor-pb",
  "wazzi-executor-pb-rust",
  "wazzi-runners",
  "wazzi-witx",

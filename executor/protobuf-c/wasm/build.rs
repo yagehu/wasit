@@ -5,7 +5,7 @@ use wazzi_compile_time::root;
 fn main() {
     let root = root();
     let upstream_dir = root
-        .join("executor-pb")
+        .join("executor")
         .join("protobuf-c")
         .join("upstream")
         .canonicalize()

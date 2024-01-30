@@ -2,7 +2,7 @@ extern crate wazzi_executor_pb_rust as pb;
 
 use std::{
     io,
-    ops::{Deref, DerefMut},
+    ops::DerefMut,
     path::PathBuf,
     process,
     sync::{Arc, Mutex},
@@ -15,8 +15,8 @@ use wazzi_runners::WasiRunner;
 #[derive(Debug)]
 pub struct ExecutorRunner<WR> {
     wasi_runner: WR,
-    executor:    PathBuf,
-    base_dir:    Option<PathBuf>,
+    executor: PathBuf,
+    base_dir: Option<PathBuf>,
 }
 
 impl<WR> ExecutorRunner<WR>
@@ -53,11 +53,11 @@ where
 
 #[derive(Debug)]
 pub struct RunningExecutor {
-    child:              Arc<Mutex<process::Child>>,
-    stdin:              Arc<Mutex<process::ChildStdin>>,
-    stdout:             Arc<Mutex<process::ChildStdout>>,
+    child: Arc<Mutex<process::Child>>,
+    stdin: Arc<Mutex<process::ChildStdin>>,
+    stdout: Arc<Mutex<process::ChildStdout>>,
     stderr_copy_handle: Arc<Mutex<Option<thread::JoinHandle<u64>>>>,
-    base_dir_fd:        u32,
+    base_dir_fd: u32,
 }
 
 impl RunningExecutor {
@@ -130,48 +130,6 @@ impl RunningExecutor {
         let raw_bytes = is.read_raw_bytes(msg_size as u32)?;
 
         Ok(pb::Response::parse_from_bytes(&raw_bytes)?.take_call())
-    }
-
-    pub fn call_capn(
-        &self,
-        call: wazzi_executor_capnp::call_request::Reader,
-    ) -> Result<
-        capnp::message::TypedReader<
-            capnp::serialize::OwnedSegments,
-            wazzi_executor_capnp::call_response::Owned,
-        >,
-        capnp::Error,
-    > {
-        let mut message = capnp::message::Builder::new_default();
-        let mut request_builder = message.init_root::<wazzi_executor_capnp::request::Builder>();
-
-        request_builder.reborrow().set_call(call)?;
-        capnp::serialize::write_message(self.stdin.lock().unwrap().deref(), &message)?;
-
-        let message = capnp::serialize::read_message(
-            self.stdout.lock().unwrap().deref_mut(),
-            capnp::message::DEFAULT_READER_OPTIONS,
-        )?;
-
-        Ok(message.into_typed())
-    }
-
-    pub fn decl_capn(
-        &self,
-        request: wazzi_executor_capnp::decl_request::Reader,
-    ) -> Result<(), capnp::Error> {
-        let mut message = capnp::message::Builder::new_default();
-        let mut request_builder = message.init_root::<wazzi_executor_capnp::request::Builder>();
-
-        request_builder.reborrow().set_decl(request)?;
-        capnp::serialize::write_message(self.stdin.lock().unwrap().deref(), &message)?;
-
-        let _message = capnp::serialize::read_message(
-            self.stdout.lock().unwrap().deref_mut(),
-            capnp::message::DEFAULT_READER_OPTIONS,
-        )?;
-
-        Ok(())
     }
 
     pub fn base_dir_fd(&self) -> u32 {

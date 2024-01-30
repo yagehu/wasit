@@ -1,9 +1,0 @@
-[package]
-name = "wazzi-executor-capnp-c"
-version = "0.1.0"
-edition.workspace = true
-publish = false
-
-[build-dependencies]
-capnpc-c.workspace = true
-cc.workspace = true
