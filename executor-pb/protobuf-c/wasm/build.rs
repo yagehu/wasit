@@ -25,7 +25,6 @@ fn main() {
 
     assert!(status.success());
 
-    let configure_script = upstream_dir.join("configure").canonicalize().unwrap();
     let wasi_sdk_build_dir = root
         .join("wasi-sdk")
         .join("upstream")
@@ -42,7 +41,7 @@ fn main() {
 
     env::set_current_dir(&out_dir).unwrap();
 
-    let status = process::Command::new(&configure_script)
+    let status = process::Command::new(upstream_dir.join("configure").canonicalize().unwrap())
         .args(["--host=wasm32-wasi", "--disable-strip"])
         .env("CC", &wasi_sdk_bin_dir.join("clang"))
         .env("AR", &wasi_sdk_bin_dir.join("ar"))
