@@ -773,3 +773,4 @@
     $prestat_dir
   )
 )
+(resource $prestat (type $prestat))
