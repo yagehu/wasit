@@ -1,16 +1,19 @@
 extern crate wazzi_witx as witx;
 
 use std::{
-    env, fs,
+    env,
+    fs,
     ops::{Deref, DerefMut},
     path::PathBuf,
     sync::{mpsc, Arc, Mutex},
-    thread, time,
+    thread,
+    time,
 };
 
 use arbitrary::Unstructured;
 use tempfile::tempdir;
 
+use wazzi_compile_time::root;
 use wazzi_executor::ExecutorRunner;
 use wazzi_wasi::{
     prog::{self, ProgSeed},
@@ -20,12 +23,8 @@ use wazzi_wasi::{
     },
 };
 
-fn repo_root() -> PathBuf {
-    [env!("CARGO_MANIFEST_DIR"), ".."].into_iter().collect()
-}
-
 fn spec() -> witx::Document {
-    let dir = repo_root().join("spec").join("preview1").join("witx");
+    let dir = root().join("spec").join("preview1").join("witx");
 
     witx::load(&[
         dir.join("typenames.witx"),
@@ -41,7 +40,7 @@ fn executor_bin() -> PathBuf {
         .unwrap_or_else(|| "unknown")
         .to_string();
 
-    repo_root()
+    root()
         .join("target")
         .join(&profile)
         .join("wazzi-executor-pb.wasm")
@@ -800,6 +799,61 @@ fn filestat_get() {
     let path = wazzi_compile_time::root()
         .join("seeds")
         .join("13-filestat_get.json");
+    let f = fs::OpenOptions::new().read(true).open(&path).unwrap();
+    let seed: ProgSeed = serde_json::from_reader(f).unwrap();
+    let base_dir = tempdir().unwrap();
+    let wasmtime = wazzi_runners::Wasmtime::new("wasmtime");
+    let stderr = Arc::new(Mutex::new(Vec::new()));
+    let executor = Arc::new(
+        ExecutorRunner::new(wasmtime, executor_bin(), Some(base_dir.path().to_owned()))
+            .run(stderr.clone())
+            .expect("failed to run executor"),
+    );
+    let store = Arc::new(Mutex::new(InMemorySnapshotStore::default()));
+    let (tx, rx) = mpsc::channel();
+    let store_ = store.clone();
+    let mut executor_ = executor.clone();
+
+    thread::spawn(move || {
+        let spec = spec();
+        let mut store = store_.lock().unwrap();
+        let result = seed.execute(&mut executor_, &spec, store.deref_mut());
+
+        tx.send(result).unwrap();
+    });
+
+    let result = rx.recv_timeout(time::Duration::from_millis(250));
+
+    executor.kill();
+
+    let stderr = String::from_utf8(stderr.lock().unwrap().deref().clone()).unwrap();
+    let result = match result {
+        | Ok(result) => result,
+        | Err(err) => {
+            panic!("Execution timeout or error. stderr:\n{stderr}err:\n{err}")
+        },
+    };
+
+    assert!(result.is_ok(), "{:#?}\n{stderr}", result);
+
+    let store = store.lock().unwrap();
+    let snapshot = store
+        .get_snapshot(store.snapshot_count() - 1)
+        .unwrap()
+        .unwrap();
+
+    assert!(
+        matches!(snapshot.errno, Some(0)),
+        "{:#?}\nstderr:\n{stderr}\n",
+        snapshot
+    );
+}
+
+#[test]
+fn filestat_set_size() {
+    let path = wazzi_compile_time::root()
+        .join("seeds")
+        .join("14-filestat_set_size.json");
     let f = fs::OpenOptions::new().read(true).open(&path).unwrap();
     let seed: ProgSeed = serde_json::from_reader(f).unwrap();
     let base_dir = tempdir().unwrap();
