@@ -884,6 +884,33 @@ static void handle_call(Request__Call * call) {
 
             break;
         }
+        case WASI_FUNC__WASI_FUNC_FD_FILESTAT_SET_TIMES: {
+            void *  p0_fd_ptr        = handle_param_pre(call->params[0], NULL);
+            void *  p1_atim_ptr      = handle_param_pre(call->params[1], NULL);
+            void *  p2_mtim_ptr      = handle_param_pre(call->params[2], NULL);
+            void *  p3_fst_flags_ptr = handle_param_pre(call->params[3], NULL);
+            int32_t p0_fd            = * (int32_t *) p0_fd_ptr;
+            int64_t p1_atim          = * (int64_t *) p1_atim_ptr;
+            int64_t p2_mtim          = * (int64_t *) p2_mtim_ptr;
+            int32_t p3_fst_flags     = * (int16_t *) p3_fst_flags_ptr;
+
+            int32_t errno = __imported_wasi_snapshot_preview1_fd_filestat_set_times(
+                p0_fd,
+                p1_atim,
+                p2_mtim,
+                p3_fst_flags
+            );
+
+            handle_param_post(call->params[3], p3_fst_flags_ptr);
+            handle_param_post(call->params[2], p2_mtim_ptr);
+            handle_param_post(call->params[1], p1_atim_ptr);
+            handle_param_post(call->params[0], p0_fd_ptr);
+
+            return_.which_case = RETURN_VALUE__WHICH_ERRNO;
+            return_.errno      = errno;
+
+            break;
+        }
         case WASI_FUNC__WASI_FUNC_FD_READ: {
             int32_t p1_iovs_len = 0;
             void *  p0_fd_ptr   = handle_param_pre(call->params[0], NULL);
