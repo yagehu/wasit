@@ -92,7 +92,7 @@ message Type {
     message Variant {
         message Case {
             bytes name = 1;
-            
+
             oneof optional_type {
                 Type type = 2;
             }
@@ -238,6 +238,7 @@ enum WasiFunc {
     WASI_FUNC_FD_FDSTAT_GET        = 11;
     WASI_FUNC_FD_FDSTAT_SET_FLAGS  = 12;
     WASI_FUNC_FD_FDSTAT_SET_RIGHTS = 13;
+    WASI_FUNC_FD_FILESTAT_GET      = 14;
     WASI_FUNC_FD_READ              = 25;
     WASI_FUNC_FD_SEEK              = 26;
     WASI_FUNC_FD_WRITE             = 27;

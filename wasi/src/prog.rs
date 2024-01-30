@@ -7,19 +7,41 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use arbitrary::Unstructured;
 use color_eyre::eyre::{self, Context, ContextCompat};
 use executor_pb::WasiFunc::{
-    WASI_FUNC_ARGS_GET, WASI_FUNC_ARGS_SIZES_GET, WASI_FUNC_CLOCK_RES_GET,
-    WASI_FUNC_CLOCK_TIME_GET, WASI_FUNC_ENVIRON_GET, WASI_FUNC_ENVIRON_SIZES_GET,
-    WASI_FUNC_FD_ADVISE, WASI_FUNC_FD_ALLOCATE, WASI_FUNC_FD_CLOSE, WASI_FUNC_FD_DATASYNC,
-    WASI_FUNC_FD_FDSTAT_GET, WASI_FUNC_FD_FDSTAT_SET_FLAGS, WASI_FUNC_FD_FDSTAT_SET_RIGHTS,
-    WASI_FUNC_FD_READ, WASI_FUNC_FD_SEEK, WASI_FUNC_FD_WRITE, WASI_FUNC_PATH_OPEN,
+    WASI_FUNC_ARGS_GET,
+    WASI_FUNC_ARGS_SIZES_GET,
+    WASI_FUNC_CLOCK_RES_GET,
+    WASI_FUNC_CLOCK_TIME_GET,
+    WASI_FUNC_ENVIRON_GET,
+    WASI_FUNC_ENVIRON_SIZES_GET,
+    WASI_FUNC_FD_ADVISE,
+    WASI_FUNC_FD_ALLOCATE,
+    WASI_FUNC_FD_CLOSE,
+    WASI_FUNC_FD_DATASYNC,
+    WASI_FUNC_FD_FDSTAT_GET,
+    WASI_FUNC_FD_FDSTAT_SET_FLAGS,
+    WASI_FUNC_FD_FDSTAT_SET_RIGHTS,
+    WASI_FUNC_FD_FILESTAT_GET,
+    WASI_FUNC_FD_READ,
+    WASI_FUNC_FD_SEEK,
+    WASI_FUNC_FD_WRITE,
+    WASI_FUNC_PATH_OPEN,
 };
 use serde::{Deserialize, Serialize};
 use wazzi_executor::RunningExecutor;
 
 use crate::{
     call::{
-        ArrayValue, BuiltinValue, Call, CallResultSpec, PointerAlloc, PointerValue, RawValue,
-        RecordMemberValue, RecordValue, StringValue, Value,
+        ArrayValue,
+        BuiltinValue,
+        Call,
+        CallResultSpec,
+        PointerAlloc,
+        PointerValue,
+        RawValue,
+        RecordMemberValue,
+        RecordValue,
+        StringValue,
+        Value,
     },
     pb,
     snapshot::{store::SnapshotStore, ValueView, WasiSnapshot},
@@ -29,7 +51,7 @@ use crate::{
 #[serde(deny_unknown_fields)]
 pub struct ProgSeed {
     mount_base_dir: bool,
-    calls: Vec<Call>,
+    calls:          Vec<Call>,
 }
 
 fn handle_param(
@@ -45,10 +67,10 @@ fn handle_param(
 
             executor_pb::ValueSpec {
                 special_fields: protobuf::SpecialFields::new(),
-                type_: Some(pb::to_type(param_tref.type_().as_ref())).into(),
-                which: Some(executor_pb::value_spec::Which::Resource(
+                type_:          Some(pb::to_type(param_tref.type_().as_ref())).into(),
+                which:          Some(executor_pb::value_spec::Which::Resource(
                     executor_pb::Resource {
-                        id: resource.id,
+                        id:             resource.id,
                         special_fields: protobuf::SpecialFields::new(),
                     },
                 )),
@@ -59,7 +81,7 @@ fn handle_param(
                 | (witx::Type::Builtin(_), RawValue::Builtin(builtin)) => {
                     executor_pb::raw_value::Which::Builtin(executor_pb::raw_value::Builtin {
                         special_fields: protobuf::SpecialFields::new(),
-                        which: Some(match builtin {
+                        which:          Some(match builtin {
                             | &BuiltinValue::U8(i) => {
                                 executor_pb::raw_value::builtin::Which::U8(i as u32)
                             },
@@ -117,8 +139,8 @@ fn handle_param(
                         record_type.members.iter().zip(record_value.0.iter())
                     {
                         members.push(executor_pb::raw_value::record::Member {
-                            name: member_type.name.as_str().to_owned().into_bytes(),
-                            value: Some(handle_param(
+                            name:           member_type.name.as_str().to_owned().into_bytes(),
+                            value:          Some(handle_param(
                                 resource_ctx,
                                 &member_type.tref,
                                 &record_value.value,
@@ -179,15 +201,15 @@ fn handle_param(
                             };
 
                             executor_pb::ValueSpec {
-                                type_: Some(pb::to_type(tref.type_().as_ref())).into(),
-                                which: Some(value_spec),
+                                type_:          Some(pb::to_type(tref.type_().as_ref())).into(),
+                                which:          Some(value_spec),
                                 special_fields: protobuf::SpecialFields::new(),
                             }
                         },
                     };
 
                     executor_pb::raw_value::Which::Pointer(executor_pb::raw_value::Pointer {
-                        alloc: Some(alloc).into(),
+                        alloc:          Some(alloc).into(),
                         special_fields: protobuf::SpecialFields::new(),
                     })
                 },
@@ -219,10 +241,10 @@ fn handle_param(
 
                     executor_pb::raw_value::Which::Variant(Box::new(
                         executor_pb::raw_value::Variant {
-                            case_idx: case_idx as u32,
-                            case_name: variant_value.name.clone().into_bytes(),
+                            case_idx:         case_idx as u32,
+                            case_name:        variant_value.name.clone().into_bytes(),
                             optional_payload: payload,
-                            special_fields: protobuf::SpecialFields::new(),
+                            special_fields:   protobuf::SpecialFields::new(),
                         },
                     ))
                 },
@@ -231,11 +253,11 @@ fn handle_param(
 
             executor_pb::ValueSpec {
                 special_fields: protobuf::SpecialFields::new(),
-                type_: Some(pb::to_type(param_tref.type_().as_ref())).into(),
-                which: Some(executor_pb::value_spec::Which::RawValue(Box::new(
+                type_:          Some(pb::to_type(param_tref.type_().as_ref())).into(),
+                which:          Some(executor_pb::value_spec::Which::RawValue(Box::new(
                     executor_pb::RawValue {
                         special_fields: protobuf::SpecialFields::new(),
-                        which: Some(raw_value),
+                        which:          Some(raw_value),
                     },
                 ))),
             }
@@ -336,11 +358,11 @@ impl ProgSeed {
 
             executor
                 .decl(executor_pb::request::Decl {
-                    resource_id: BASE_DIR_RESOURCE_ID,
-                    value: Some(executor_pb::RawValue {
-                        which: Some(executor_pb::raw_value::Which::Handle(
+                    resource_id:    BASE_DIR_RESOURCE_ID,
+                    value:          Some(executor_pb::RawValue {
+                        which:          Some(executor_pb::raw_value::Which::Handle(
                             executor_pb::raw_value::Handle {
-                                value: executor.base_dir_fd(),
+                                value:          executor.base_dir_fd(),
                                 special_fields: protobuf::SpecialFields::new(),
                             },
                         )),
@@ -374,6 +396,7 @@ impl ProgSeed {
                 | "fd_fdstat_get" => WASI_FUNC_FD_FDSTAT_GET,
                 | "fd_fdstat_set_flags" => WASI_FUNC_FD_FDSTAT_SET_FLAGS,
                 | "fd_fdstat_set_rights" => WASI_FUNC_FD_FDSTAT_SET_RIGHTS,
+                | "fd_filestat_get" => WASI_FUNC_FD_FILESTAT_GET,
                 | "fd_read" => WASI_FUNC_FD_READ,
                 | "fd_seek" => WASI_FUNC_FD_SEEK,
                 | "fd_write" => WASI_FUNC_FD_WRITE,
@@ -395,15 +418,15 @@ impl ProgSeed {
                     },
                     | &CallResultSpec::Resource(resource_id) => {
                         executor_pb::result_spec::Which::Resource(executor_pb::Resource {
-                            id: resource_id,
+                            id:             resource_id,
                             special_fields: protobuf::SpecialFields::new(),
                         })
                     },
                 };
 
                 results.push(executor_pb::ResultSpec {
-                    type_: pb_type.into(),
-                    which: Some(which),
+                    type_:          pb_type.into(),
+                    which:          Some(which),
                     special_fields: protobuf::SpecialFields::new(),
                 });
             }
@@ -470,7 +493,7 @@ impl ProgSeed {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct Prog {
-    calls: Vec<Call>,
+    calls:        Vec<Call>,
     resource_ctx: ResourceContext,
 }
 
@@ -546,11 +569,11 @@ impl Prog {
 
                                 return Ok(Value::RawValue(RawValue::Record(RecordValue(vec![
                                     RecordMemberValue {
-                                        name: record.members[0].name.as_str().to_owned(),
+                                        name:  record.members[0].name.as_str().to_owned(),
                                         value: member_0,
                                     },
                                     RecordMemberValue {
-                                        name: record.members[1].name.as_str().to_owned(),
+                                        name:  record.members[1].name.as_str().to_owned(),
                                         value: member_1,
                                     },
                                 ]))));
@@ -563,7 +586,7 @@ impl Prog {
                         let member = self.pick_or_generate_param(u, spec, &member_spec.tref)?;
 
                         members.push(RecordMemberValue {
-                            name: member_spec.name.as_str().to_owned(),
+                            name:  member_spec.name.as_str().to_owned(),
                             value: member,
                         });
                     }
@@ -637,14 +660,14 @@ struct Resource {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 struct ResourceContext {
-    map: HashMap<u64, Resource>,
+    map:   HashMap<u64, Resource>,
     types: BTreeMap<String, BTreeSet<u64>>,
 }
 
 impl ResourceContext {
     fn new() -> Self {
         Self {
-            map: Default::default(),
+            map:   Default::default(),
             types: Default::default(),
         }
     }

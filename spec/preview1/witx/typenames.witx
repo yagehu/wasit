@@ -503,6 +503,7 @@
     (field $ctim $timestamp)
   )
 )
+(resource $filestat (type $filestat))
 
 ;;; User-provided value that may be attached to objects that is retained when
 ;;; extracted from the implementation.

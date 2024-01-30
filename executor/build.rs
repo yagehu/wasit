@@ -24,7 +24,7 @@ fn main() {
         .canonicalize()
         .unwrap();
     let wasi_sdk_build_dir = root_dir.join("wasi-sdk").join("upstream").join("build");
-    let clang_path = wasi_sdk_build_dir
+    let clang = wasi_sdk_build_dir
         .join("install")
         .join("opt")
         .join("wasi-sdk")
@@ -32,8 +32,7 @@ fn main() {
         .join("clang")
         .canonicalize()
         .unwrap();
-
-    assert!(process::Command::new(clang_path)
+    let mut child = process::Command::new(clang)
         .arg("--sysroot")
         .arg(
             wasi_sdk_build_dir
@@ -55,10 +54,10 @@ fn main() {
         .arg("-o")
         .arg(out_dir.join("wazzi-executor-pb.wasm"))
         .spawn()
-        .unwrap()
-        .wait()
-        .unwrap()
-        .success());
+        .unwrap();
+
+    assert!(child.wait().unwrap().success());
+
     fs::copy(
         out_dir.join("wazzi-executor-pb.wasm"),
         target_dir.join("wazzi-executor-pb.wasm"),
