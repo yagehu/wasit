@@ -11,8 +11,6 @@ fn main() {
         .canonicalize()
         .unwrap();
 
-    println!("cargo:rerun-if-changed={}", upstream_dir.display());
-
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
 
     env::set_current_dir(&upstream_dir).unwrap();

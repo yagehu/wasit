@@ -6,6 +6,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use arbitrary::Unstructured;
 use color_eyre::eyre::{self, Context, ContextCompat};
+use serde::{Deserialize, Serialize};
+
 use executor_pb::WasiFunc::{
     WASI_FUNC_ARGS_GET,
     WASI_FUNC_ARGS_SIZES_GET,
@@ -24,21 +26,23 @@ use executor_pb::WasiFunc::{
     WASI_FUNC_FD_FILESTAT_SET_SIZE,
     WASI_FUNC_FD_FILESTAT_SET_TIMES,
     WASI_FUNC_FD_PREAD,
+    WASI_FUNC_FD_PRESTAT_DIR_NAME,
     WASI_FUNC_FD_PRESTAT_GET,
     WASI_FUNC_FD_READ,
     WASI_FUNC_FD_SEEK,
     WASI_FUNC_FD_WRITE,
     WASI_FUNC_PATH_OPEN,
 };
-use serde::{Deserialize, Serialize};
 use wazzi_executor::RunningExecutor;
 
 use crate::{
-    call::{
+    action::{
+        Action,
         ArrayValue,
         BuiltinValue,
         Call,
         CallResultSpec,
+        Decl,
         PointerAlloc,
         PointerValue,
         RawValue,
@@ -48,14 +52,18 @@ use crate::{
         Value,
     },
     pb,
-    snapshot::{store::SnapshotStore, ValueView, WasiSnapshot},
+    snapshot::{store::SnapshotStore, PureValue, ValueView, WasiSnapshot},
 };
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct ProgSeed {
     mount_base_dir: bool,
-    calls:          Vec<Call>,
+
+    #[serde(default)]
+    auto_decl: bool,
+
+    actions: Vec<Action>,
 }
 
 fn handle_param(
@@ -340,10 +348,99 @@ fn handle_call_param_views(
     // }
 }
 
+// Recursively declare structural subresources.
+fn decl_subresources(
+    resource_ctx: &mut ResourceContext,
+    spec: &witx::Document,
+    ty: &witx::Type,
+    value_view: &ValueView,
+) -> Vec<Decl> {
+    let mut decls: Vec<Decl> = Vec::new();
+
+    match (ty, &value_view.value) {
+        | (witx::Type::Builtin(_), PureValue::Builtin(_)) => (),
+        | (witx::Type::Handle(_), PureValue::Handle(_)) => (),
+        | (witx::Type::List(_), PureValue::List(_)) => todo!(),
+        | (witx::Type::Record(record_type), PureValue::Record(members)) => {
+            for (member_type, member) in record_type.members.iter().zip(members.iter()) {
+                if let witx::TypeRef::Name(named_type) = &member_type.tref {
+                    let resource = spec.typename_resource(&named_type.name);
+
+                    if let Some(resource) = resource {
+                        decls.push(Decl {
+                            resource: resource_ctx.decl(resource.name.as_str()),
+                            r#type:   resource.name.as_str().to_owned(),
+                            value:    RawValue::from_pure_value(&member.view.value),
+                        });
+                    }
+
+                    decls.append(&mut decl_subresources(
+                        resource_ctx,
+                        spec,
+                        member_type.tref.type_().as_ref(),
+                        &member.view,
+                    ));
+                }
+            }
+        },
+        | (witx::Type::Pointer(_), PureValue::Pointer(_)) => todo!(),
+        | (witx::Type::Variant(variant_type), PureValue::Variant(variant)) => {
+            let case_type = &variant_type.cases[variant.case_idx as usize];
+
+            if let (Some(witx::TypeRef::Name(ty)), Some(payload)) =
+                (&case_type.tref, variant.payload.as_ref())
+            {
+                if let Some(resource) = spec.typename_resource(&ty.name) {
+                    decls.push(Decl {
+                        resource: resource_ctx.decl(resource.name.as_str()),
+                        r#type:   resource.name.as_str().to_owned(),
+                        value:    RawValue::from_pure_value(&payload.value),
+                    })
+                }
+
+                decls.append(&mut decl_subresources(
+                    resource_ctx,
+                    spec,
+                    ty.type_().as_ref(),
+                    payload.as_ref(),
+                ));
+            }
+        },
+        | _ => unimplemented!(),
+    }
+
+    decls
+}
+
+fn execute_decl(
+    decl: &Decl,
+    spec: &witx::Document,
+    executor: &RunningExecutor,
+    resource_ctx: &mut ResourceContext,
+) -> Result<(), eyre::Error> {
+    let resource = spec
+        .resource(&witx::Id::new(&decl.r#type))
+        .wrap_err(format!("resource type {} not found", decl.r#type))?;
+    let ty = pb::to_type(resource.tref.type_().as_ref());
+
+    eprintln!("[wazzi] resource id {}", decl.resource);
+
+    executor.decl(executor_pb::request::Decl {
+        resource_id:    decl.resource,
+        value:          Some(decl.value.to_pb(resource.tref.type_().as_ref())).into(),
+        type_:          Some(ty).into(),
+        special_fields: protobuf::SpecialFields::new(),
+    })?;
+
+    resource_ctx.insert(decl.resource, Resource { id: decl.resource }, &decl.r#type);
+
+    Ok(())
+}
+
 impl ProgSeed {
     #[tracing::instrument(skip(snapshot_store))]
     pub fn execute<S>(
-        &self,
+        self,
         executor: &RunningExecutor,
         spec: &witx::Document,
         snapshot_store: &mut S,
@@ -359,6 +456,7 @@ impl ProgSeed {
 
         if self.mount_base_dir {
             const BASE_DIR_RESOURCE_ID: u64 = 0;
+            const BASE_DIR_RESOURCE_TYPE: &str = "fd";
 
             executor
                 .decl(executor_pb::request::Decl {
@@ -373,6 +471,14 @@ impl ProgSeed {
                         special_fields: protobuf::SpecialFields::new(),
                     })
                     .into(),
+                    type_:          Some(pb::to_type(
+                        spec.resource(&witx::Id::new(BASE_DIR_RESOURCE_TYPE))
+                            .unwrap()
+                            .tref
+                            .type_()
+                            .as_ref(),
+                    ))
+                    .into(),
                     special_fields: protobuf::SpecialFields::new(),
                 })
                 .wrap_err("failed to declare base dir resource")?;
@@ -385,114 +491,152 @@ impl ProgSeed {
             );
         }
 
-        for call in self.calls.iter() {
-            let func = match call.func.as_str() {
-                | "args_get" => WASI_FUNC_ARGS_GET,
-                | "args_sizes_get" => WASI_FUNC_ARGS_SIZES_GET,
-                | "environ_get" => WASI_FUNC_ENVIRON_GET,
-                | "environ_sizes_get" => WASI_FUNC_ENVIRON_SIZES_GET,
-                | "clock_res_get" => WASI_FUNC_CLOCK_RES_GET,
-                | "clock_time_get" => WASI_FUNC_CLOCK_TIME_GET,
-                | "fd_advise" => WASI_FUNC_FD_ADVISE,
-                | "fd_allocate" => WASI_FUNC_FD_ALLOCATE,
-                | "fd_close" => WASI_FUNC_FD_CLOSE,
-                | "fd_datasync" => WASI_FUNC_FD_DATASYNC,
-                | "fd_fdstat_get" => WASI_FUNC_FD_FDSTAT_GET,
-                | "fd_fdstat_set_flags" => WASI_FUNC_FD_FDSTAT_SET_FLAGS,
-                | "fd_fdstat_set_rights" => WASI_FUNC_FD_FDSTAT_SET_RIGHTS,
-                | "fd_filestat_get" => WASI_FUNC_FD_FILESTAT_GET,
-                | "fd_filestat_set_size" => WASI_FUNC_FD_FILESTAT_SET_SIZE,
-                | "fd_filestat_set_times" => WASI_FUNC_FD_FILESTAT_SET_TIMES,
-                | "fd_pread" => WASI_FUNC_FD_PREAD,
-                | "fd_prestat_get" => WASI_FUNC_FD_PRESTAT_GET,
-                | "fd_read" => WASI_FUNC_FD_READ,
-                | "fd_seek" => WASI_FUNC_FD_SEEK,
-                | "fd_write" => WASI_FUNC_FD_WRITE,
-                | "path_open" => WASI_FUNC_PATH_OPEN,
-                | _ => panic!("{}", call.func.as_str()),
-            };
-            let func_spec = module_spec
-                .func(&witx::Id::new(call.func.as_str()))
-                .unwrap();
-            let params = handle_params(&resource_ctx, &func_spec.params, &call.params)?;
-            let mut results = Vec::with_capacity(call.results.len());
-            let result_trefs = func_spec.unpack_expected_result();
+        let mut actions = Vec::new();
 
-            for (result_tref, result_spec) in result_trefs.iter().zip(call.results.iter()) {
-                let pb_type = Some(pb::to_type(result_tref.type_().as_ref()));
-                let which = match result_spec {
-                    | CallResultSpec::Ignore => {
-                        executor_pb::result_spec::Which::Ignore(Default::default())
-                    },
-                    | &CallResultSpec::Resource(resource_id) => {
-                        executor_pb::result_spec::Which::Resource(executor_pb::Resource {
-                            id:             resource_id,
+        for action in self.actions {
+            actions.push(action.clone());
+
+            match &action {
+                | Action::Decl(decl) => execute_decl(decl, spec, executor, &mut resource_ctx)?,
+                | Action::Call(call) => {
+                    let func = match call.func.as_str() {
+                        | "args_get" => WASI_FUNC_ARGS_GET,
+                        | "args_sizes_get" => WASI_FUNC_ARGS_SIZES_GET,
+                        | "environ_get" => WASI_FUNC_ENVIRON_GET,
+                        | "environ_sizes_get" => WASI_FUNC_ENVIRON_SIZES_GET,
+                        | "clock_res_get" => WASI_FUNC_CLOCK_RES_GET,
+                        | "clock_time_get" => WASI_FUNC_CLOCK_TIME_GET,
+                        | "fd_advise" => WASI_FUNC_FD_ADVISE,
+                        | "fd_allocate" => WASI_FUNC_FD_ALLOCATE,
+                        | "fd_close" => WASI_FUNC_FD_CLOSE,
+                        | "fd_datasync" => WASI_FUNC_FD_DATASYNC,
+                        | "fd_fdstat_get" => WASI_FUNC_FD_FDSTAT_GET,
+                        | "fd_fdstat_set_flags" => WASI_FUNC_FD_FDSTAT_SET_FLAGS,
+                        | "fd_fdstat_set_rights" => WASI_FUNC_FD_FDSTAT_SET_RIGHTS,
+                        | "fd_filestat_get" => WASI_FUNC_FD_FILESTAT_GET,
+                        | "fd_filestat_set_size" => WASI_FUNC_FD_FILESTAT_SET_SIZE,
+                        | "fd_filestat_set_times" => WASI_FUNC_FD_FILESTAT_SET_TIMES,
+                        | "fd_pread" => WASI_FUNC_FD_PREAD,
+                        | "fd_prestat_get" => WASI_FUNC_FD_PRESTAT_GET,
+                        | "fd_prestat_dir_name" => WASI_FUNC_FD_PRESTAT_DIR_NAME,
+                        | "fd_read" => WASI_FUNC_FD_READ,
+                        | "fd_seek" => WASI_FUNC_FD_SEEK,
+                        | "fd_write" => WASI_FUNC_FD_WRITE,
+                        | "path_open" => WASI_FUNC_PATH_OPEN,
+                        | _ => panic!("{}", call.func.as_str()),
+                    };
+                    let func_spec = module_spec
+                        .func(&witx::Id::new(call.func.as_str()))
+                        .unwrap();
+                    let params = handle_params(&resource_ctx, &func_spec.params, &call.params)?;
+                    let mut results = Vec::with_capacity(call.results.len());
+                    let result_trefs = func_spec.unpack_expected_result();
+
+                    for (result_tref, result_spec) in result_trefs.iter().zip(call.results.iter()) {
+                        let pb_type = Some(pb::to_type(result_tref.type_().as_ref()));
+                        let which = match result_spec {
+                            | CallResultSpec::Ignore => {
+                                executor_pb::result_spec::Which::Ignore(Default::default())
+                            },
+                            | &CallResultSpec::Resource(resource_id) => {
+                                executor_pb::result_spec::Which::Resource(executor_pb::Resource {
+                                    id:             resource_id,
+                                    special_fields: protobuf::SpecialFields::new(),
+                                })
+                            },
+                        };
+
+                        results.push(executor_pb::ResultSpec {
+                            type_:          pb_type.into(),
+                            which:          Some(which),
                             special_fields: protobuf::SpecialFields::new(),
-                        })
-                    },
-                };
-
-                results.push(executor_pb::ResultSpec {
-                    type_:          pb_type.into(),
-                    which:          Some(which),
-                    special_fields: protobuf::SpecialFields::new(),
-                });
-            }
-
-            let call_request = executor_pb::request::Call {
-                func: protobuf::EnumOrUnknown::new(func),
-                params,
-                results,
-                special_fields: protobuf::SpecialFields::new(),
-            };
-            let call_response = executor.call(call_request)?;
-            let errno = match call_response
-                .return_
-                .as_ref()
-                .unwrap()
-                .which
-                .as_ref()
-                .unwrap()
-            {
-                | executor_pb::return_value::Which::None(_) => {
-                    call_results_ok(spec, &mut resource_ctx, &result_trefs, &call.results);
-
-                    None
-                },
-                | &executor_pb::return_value::Which::Errno(errno) => {
-                    if errno == 0 {
-                        call_results_ok(spec, &mut resource_ctx, &result_trefs, &call.results);
-
-                        // This only applies to fd_close dropping fd.
-                        for (i, param_spec) in func_spec.params.iter().enumerate() {
-                            if param_spec.drop {
-                                match call.params[i] {
-                                    | Value::Resource(resource) => resource_ctx.drop(resource),
-                                    | Value::RawValue(_) => todo!(),
-                                }
-                            }
-                        }
+                        });
                     }
 
-                    Some(errno)
-                },
-                | _ => unreachable!(),
-            };
-            let param_views = handle_call_param_views(&func_spec.params, &call_response);
+                    let call_request = executor_pb::request::Call {
+                        func: protobuf::EnumOrUnknown::new(func),
+                        params,
+                        results,
+                        special_fields: protobuf::SpecialFields::new(),
+                    };
+                    let call_response = executor.call(call_request)?;
+                    let mut results = Vec::new();
+                    let errno = match call_response
+                        .return_
+                        .as_ref()
+                        .unwrap()
+                        .which
+                        .as_ref()
+                        .unwrap()
+                    {
+                        | executor_pb::return_value::Which::None(_) => {
+                            call_results_ok(spec, &mut resource_ctx, &result_trefs, &call.results);
 
-            snapshot_store
-                .push_snapshot(WasiSnapshot {
-                    errno,
-                    params: call.params.clone(),
-                    param_views,
-                    results: Vec::new(),
-                    linear_memory: Vec::new(),
-                })
-                .wrap_err("failed to record snapshot")?;
+                            None
+                        },
+                        | &executor_pb::return_value::Which::Errno(errno) => {
+                            if errno == 0 {
+                                call_results_ok(
+                                    spec,
+                                    &mut resource_ctx,
+                                    &result_trefs,
+                                    &call.results,
+                                );
+
+                                // This only applies to fd_close dropping fd.
+                                for (i, param_spec) in func_spec.params.iter().enumerate() {
+                                    if param_spec.drop {
+                                        match call.params[i] {
+                                            | Value::Resource(resource) => {
+                                                resource_ctx.drop(resource)
+                                            },
+                                            | Value::RawValue(_) => todo!(),
+                                        }
+                                    }
+                                }
+
+                                // If errno is 0. We should register subresources.
+                                for (tref, value_view) in
+                                    result_trefs.iter().zip(call_response.results.iter())
+                                {
+                                    let view = pb::from_value_view(value_view);
+                                    let decls = decl_subresources(
+                                        &mut resource_ctx,
+                                        spec,
+                                        tref.type_().as_ref(),
+                                        &view,
+                                    );
+
+                                    for decl in &decls {
+                                        execute_decl(decl, spec, executor, &mut resource_ctx)?;
+                                    }
+
+                                    actions.extend(decls.into_iter().map(Action::Decl));
+                                    results.push(view);
+                                }
+                            }
+
+                            Some(errno)
+                        },
+                        | _ => unreachable!(),
+                    };
+                    let param_views = handle_call_param_views(&func_spec.params, &call_response);
+
+                    snapshot_store
+                        .push_snapshot(WasiSnapshot {
+                            errno,
+                            params: call.params.clone(),
+                            param_views,
+                            results,
+                            linear_memory: Vec::new(),
+                        })
+                        .wrap_err("failed to record snapshot")?;
+                },
+            }
         }
 
         Ok(Prog {
-            calls: self.calls.clone(),
+            actions,
             resource_ctx,
         })
     }
@@ -501,7 +645,7 @@ impl ProgSeed {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct Prog {
-    calls:        Vec<Call>,
+    actions:      Vec<Action>,
     resource_ctx: ResourceContext,
 }
 
@@ -521,11 +665,11 @@ impl Prog {
             params.push(self.pick_or_generate_param(u, spec, &param_spec.tref)?);
         }
 
-        self.calls.push(Call {
+        self.actions.push(Action::Call(Call {
             func: func_spec.name.as_str().to_owned(),
             params,
             results,
-        });
+        }));
 
         Ok(())
     }
@@ -668,21 +812,33 @@ struct Resource {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 struct ResourceContext {
-    map:   HashMap<u64, Resource>,
-    types: BTreeMap<String, BTreeSet<u64>>,
+    map:     HashMap<u64, Resource>,
+    types:   BTreeMap<String, BTreeSet<u64>>,
+    next_id: u64,
 }
 
 impl ResourceContext {
     fn new() -> Self {
         Self {
-            map:   Default::default(),
-            types: Default::default(),
+            map:     Default::default(),
+            types:   Default::default(),
+            next_id: 0,
         }
+    }
+
+    fn decl(&mut self, r#type: &str) -> u64 {
+        let id = self.next_id;
+
+        self.insert(id, Resource { id }, r#type);
+        self.next_id += 1;
+
+        id
     }
 
     fn insert(&mut self, id: u64, resource: Resource, r#type: &str) {
         self.map.insert(id, resource);
         self.types.entry(r#type.to_owned()).or_default().insert(id);
+        self.next_id = self.next_id.max(id + 1);
     }
 
     fn drop(&mut self, id: u64) {

@@ -13,7 +13,6 @@ fn main() {
         .unwrap();
 
     println!("cargo:rerun-if-changed={}", schema_path.display());
-    println!("cargo:rerun-if-changed={}", pb_c_dir.display());
 
     let root_dir = schema_dir.join("..").canonicalize().unwrap();
     let target_dir = root_dir

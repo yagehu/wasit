@@ -1,0 +1,27 @@
+{
+    "mount_base_dir": true,
+    "auto_decl": true,
+    "actions": [
+        {
+            "call": {
+                "func": "fd_prestat_get",
+                "params": [ { "resource": 0 } ],
+                "results": [ { "resource": 1 } ]
+            }
+        },
+        {
+            "call": {
+                "func": "fd_prestat_dir_name",
+                "params": [
+                    { "resource": 0 },
+                    {
+                        "raw_value": {
+                            "pointer": { "alloc": { "resource": 2 } }
+                        }
+                    },
+                    { "resource": 2 }
+                ]
+            }
+        }
+    ]
+}

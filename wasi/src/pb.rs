@@ -1,5 +1,10 @@
 use witx::Layout;
 
+use crate::{
+    action::BuiltinValue,
+    snapshot::{PureRecordMemeber, PureValue, PureVariant, ValueView},
+};
+
 fn to_int_repr(x: &witx::IntRepr) -> executor_pb::IntRepr {
     match x {
         | witx::IntRepr::U8 => executor_pb::IntRepr::INT_REPR_U8,
@@ -113,5 +118,53 @@ pub fn to_type(ty: &witx::Type) -> executor_pb::Type {
     executor_pb::Type {
         which,
         special_fields: protobuf::SpecialFields::new(),
+    }
+}
+
+pub fn from_value_view(x: &executor_pb::ValueView) -> ValueView {
+    let value = match x.content.as_ref().unwrap().which.as_ref().unwrap() {
+        | executor_pb::pure_value::Which::Builtin(builtin) => {
+            PureValue::Builtin(match builtin.which.as_ref().unwrap() {
+                | &executor_pb::raw_value::builtin::Which::U8(i) => BuiltinValue::U8(i as u8),
+                | &executor_pb::raw_value::builtin::Which::U32(i) => BuiltinValue::U32(i),
+                | &executor_pb::raw_value::builtin::Which::U64(i) => BuiltinValue::U64(i),
+                | &executor_pb::raw_value::builtin::Which::S64(i) => BuiltinValue::S64(i),
+                | _ => todo!(),
+            })
+        },
+        | &executor_pb::pure_value::Which::Handle(handle) => PureValue::Handle(handle),
+        | executor_pb::pure_value::Which::List(_) => todo!(),
+        | executor_pb::pure_value::Which::Record(record) => {
+            let mut members = Vec::with_capacity(record.members.len());
+
+            for member in &record.members {
+                members.push(PureRecordMemeber {
+                    name: String::from_utf8_lossy(&member.name).to_string(),
+                    view: from_value_view(member.value.as_ref().unwrap()),
+                });
+            }
+
+            PureValue::Record(members)
+        },
+        | executor_pb::pure_value::Which::Pointer(_) => todo!(),
+        | executor_pb::pure_value::Which::Variant(variant) => PureValue::Variant(PureVariant {
+            case_idx:  variant.case_idx,
+            case_name: String::from_utf8_lossy(&variant.case_name).to_string(),
+            payload:   variant
+                .optional_payload
+                .as_ref()
+                .map(|payload| match payload {
+                    | executor_pb::pure_value::variant::Optional_payload::Payload(payload) => {
+                        Box::new(from_value_view(payload))
+                    },
+                    | _ => unreachable!(),
+                }),
+        }),
+        | _ => todo!(),
+    };
+
+    ValueView {
+        memory_offset: x.memory_offset,
+        value,
     }
 }

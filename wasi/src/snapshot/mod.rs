@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::call::{BuiltinValue, RawValue, Value};
+use crate::action::{BuiltinValue, Value};
 
 pub mod store;
 
@@ -10,7 +10,7 @@ pub struct WasiSnapshot {
     pub errno:       Option<i32>,
     pub param_views: Vec<ValueView>,
     pub params:      Vec<Value>,
-    pub results:     Vec<CallResult>,
+    pub results:     Vec<ValueView>,
 
     #[serde(skip)]
     pub linear_memory: Vec<u8>,
@@ -19,8 +19,7 @@ pub struct WasiSnapshot {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct ValueView {
-    pub memory_offset: usize,
-    pub memory_len:    usize,
+    pub memory_offset: u32,
     pub value:         PureValue,
 }
 
@@ -30,20 +29,22 @@ pub enum PureValue {
     Builtin(BuiltinValue),
     Handle(u32),
     List(Vec<ValueView>),
-    Record(Vec<PureRecordMemeberValue>),
+    Record(Vec<PureRecordMemeber>),
     Pointer(Vec<ValueView>),
+    Variant(PureVariant),
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Debug)]
 #[serde(deny_unknown_fields)]
-pub struct PureRecordMemeberValue {
-    pub name:  String,
-    pub value: PureValue,
+pub struct PureRecordMemeber {
+    pub name: String,
+    pub view: ValueView,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Debug)]
 #[serde(deny_unknown_fields)]
-pub struct CallResult {
-    pub memory_offset: u32,
-    pub value:         RawValue,
+pub struct PureVariant {
+    pub case_idx:  u32,
+    pub case_name: String,
+    pub payload:   Option<Box<ValueView>>,
 }

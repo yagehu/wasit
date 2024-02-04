@@ -6,6 +6,7 @@ message Request {
     message Decl {
         uint64 resource_id = 1;
         RawValue value = 2;
+        Type type = 3;
     }
 
     message Call {
@@ -26,6 +27,7 @@ message Response {
     message Call {
         ReturnValue return = 1;
         repeated ValueView params = 2;
+        repeated ValueView results = 3;
     }
 
     oneof which {
@@ -214,12 +216,22 @@ message PureValue {
         repeated ValueView items = 1;
     }
 
+    message Variant {
+        uint32 case_idx = 1;
+        bytes case_name = 2;
+
+        oneof optional_payload {
+            ValueView payload = 3;
+        }
+    }
+
     oneof which {
         RawValue.Builtin builtin = 1;
         uint32 handle = 4;
         List list = 5;
         Record record = 6;
         Pointer pointer = 8;
+        Variant variant = 9;
     }
 }
 
@@ -243,6 +255,7 @@ enum WasiFunc {
     WASI_FUNC_FD_FILESTAT_SET_TIMES = 16;
     WASI_FUNC_FD_PREAD              = 17;
     WASI_FUNC_FD_PRESTAT_GET        = 18;
+    WASI_FUNC_FD_PRESTAT_DIR_NAME   = 19;
     WASI_FUNC_FD_READ               = 25;
     WASI_FUNC_FD_SEEK               = 26;
     WASI_FUNC_FD_WRITE              = 27;

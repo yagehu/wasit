@@ -759,13 +759,17 @@
   )
 )
 
+(typename $pr_name_len $size)
+(resource $pr_name_len (type $pr_name_len))
+
 ;;; The contents of a `prestat` when type is `preopentype::dir`.
 (typename $prestat_dir
   (record
     ;;; The length of the directory name for use with `fd_prestat_dir_name`.
-    (field $pr_name_len $size)
+    (field $pr_name_len $pr_name_len)
   )
 )
+(resource $prestat_dir (type $prestat_dir))
 
 ;;; Information about a pre-opened capability.
 (typename $prestat

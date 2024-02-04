@@ -1,4 +1,3 @@
-#include <inttypes.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,8 +14,10 @@
 #define MAX_MSG_SIZE 2048
 
 struct resource {
-    void * ptr;
-    size_t size;
+    void *   ptr;
+    size_t   size;
+    bool     has_len;
+    uint32_t len;
 };
 
 struct resource_map_entry {
@@ -262,6 +263,279 @@ void set_ptr_value(const ValueSpec * value, void * ptr) {
     }
 }
 
+static struct resource alloc_raw_value(Type * type, RawValue * raw_value) {
+    void *   ptr     = NULL;
+    size_t   size    = 0;
+    bool     has_len = false;
+    uint32_t len     = 0;
+
+    switch (raw_value->which_case) {
+        case RAW_VALUE__WHICH_BUILTIN: {
+            switch (raw_value->builtin->which_case) {
+                case RAW_VALUE__BUILTIN__WHICH_U8: {
+                    ptr  = calloc(1, sizeof(uint8_t));
+                    size = sizeof(uint8_t);
+
+                    break;
+                }
+                case RAW_VALUE__BUILTIN__WHICH_U32: {
+                    ptr  = calloc(1, sizeof(uint32_t));
+                    size = sizeof(uint32_t);
+
+                    break;
+                }
+                case RAW_VALUE__BUILTIN__WHICH_U64: {
+                    ptr  = calloc(1, sizeof(uint64_t));
+                    size = sizeof(uint64_t);
+
+                    break;
+                }
+                case RAW_VALUE__BUILTIN__WHICH_S64: {
+                    ptr  = calloc(1, sizeof(int64_t));
+                    size = sizeof(int64_t);
+
+                    break;
+                }
+                case RAW_VALUE__BUILTIN__WHICH__NOT_SET:
+                case _RAW_VALUE__BUILTIN__WHICH__CASE_IS_INT_SIZE: fail("invalid builtin type");
+            }
+
+            break;
+        }
+        case RAW_VALUE__WHICH_STRING: {
+            ptr = malloc(raw_value->string.len);
+            len = raw_value->string.len;
+
+            break;
+        }
+        case RAW_VALUE__WHICH_BITFLAGS: {
+            switch (type->bitflags->repr) {
+                case _INT_REPR_IS_INT_SIZE:
+                case INT_REPR__INT_REPR_UNKNOWN: fail("unknown int repr");
+                case INT_REPR__INT_REPR_U8:  ptr = calloc(1, sizeof(uint8_t)); break;
+                case INT_REPR__INT_REPR_U16: ptr = calloc(1, sizeof(uint16_t)); break;
+                case INT_REPR__INT_REPR_U32: ptr = calloc(1, sizeof(uint32_t)); break;
+                case INT_REPR__INT_REPR_U64: ptr = calloc(1, sizeof(uint64_t)); break;
+            }
+
+            break;
+        }
+        case RAW_VALUE__WHICH_HANDLE: ptr = malloc(sizeof(int32_t)); break;
+        case RAW_VALUE__WHICH_ARRAY: {
+            ptr = malloc(raw_value->array->n_items * type->array->item_size);
+            len = raw_value->array->n_items;
+
+            break;
+        }
+        case RAW_VALUE__WHICH_RECORD: ptr = malloc(type->record->size); break;
+        case RAW_VALUE__WHICH_CONST_POINTER: ptr = malloc(sizeof(void *)); break;
+        case RAW_VALUE__WHICH_POINTER: ptr = malloc(sizeof(void *)); break;
+        case RAW_VALUE__WHICH_VARIANT: ptr = calloc(type->variant->size, 0); break;
+        case RAW_VALUE__WHICH__NOT_SET:
+        case _RAW_VALUE__WHICH__CASE_IS_INT_SIZE: fail("invalid raw value type");
+    }
+    if (ptr == NULL) fail("failed to allocate param ptr");
+
+    return (struct resource) {
+        .ptr     = ptr,
+        .size    = size,
+        .has_len = has_len,
+        .len     = len,
+    };
+}
+
+ValueView * value_view_new(Type * type, void * ptr, int n) {
+    ValueView * view = malloc(sizeof(ValueView));
+    PureValue * pure = malloc(sizeof(PureValue));
+
+    value_view__init(view);
+    pure_value__init(pure);
+
+    switch (type->which_case) {
+        case TYPE__WHICH_BUILTIN: {
+            RawValue__Builtin * builtin = malloc(sizeof(RawValue__Builtin));
+
+            raw_value__builtin__init(builtin);
+
+            switch (type->builtin->which_case) {
+                case TYPE__BUILTIN__WHICH_U8: {
+                    builtin->which_case = RAW_VALUE__BUILTIN__WHICH_U8;
+                    builtin->u8 = * (uint8_t *) ptr;
+
+                    break;
+                }
+                case TYPE__BUILTIN__WHICH_U32: {
+                    builtin->which_case = RAW_VALUE__BUILTIN__WHICH_U32;
+                    builtin->u32 = * (uint32_t *) ptr;
+
+                    break;
+                }
+                case TYPE__BUILTIN__WHICH_U64: {
+                    builtin->which_case = RAW_VALUE__BUILTIN__WHICH_U64;
+                    builtin->u64 = * (uint64_t *) ptr;
+
+                    break;
+                }
+                case TYPE__BUILTIN__WHICH_S64: {
+                    builtin->which_case = RAW_VALUE__BUILTIN__WHICH_S64;
+                    builtin->s64 = * (int64_t *) ptr;
+
+                    break;
+                }
+                case TYPE__BUILTIN__WHICH__NOT_SET:
+                case _TYPE__BUILTIN__WHICH__CASE_IS_INT_SIZE: fail("unreachable");
+            }
+
+            pure->which_case = PURE_VALUE__WHICH_BUILTIN;
+            pure->builtin = builtin;
+
+            break;
+        }
+        case TYPE__WHICH_STRING: fail("unimplemented: value_view_new string");
+        case TYPE__WHICH_BITFLAGS: fail("unimplemented: value_view_new bitflags");
+        case TYPE__WHICH_HANDLE: {
+            pure->which_case = PURE_VALUE__WHICH_HANDLE;
+            pure->handle     = * (uint32_t *) ptr;
+
+            break;
+        }
+        case TYPE__WHICH_ARRAY: {
+            PureValue__List * list = malloc(sizeof(PureValue__List));
+
+            pure_value__list__init(list);
+
+            list->n_items = n;
+            list->items = malloc(n * sizeof(ValueView *));
+
+            for (int i = 0; i < n; i++) {
+                void * item_ptr = ((uint8_t *) ptr) + i * type->array->item_size;
+
+                list->items[i] = value_view_new(type->array->type, item_ptr, 0);
+            }
+
+            pure->which_case = PURE_VALUE__WHICH_LIST;
+            pure->list = list;
+
+            break;
+        }
+        case TYPE__WHICH_RECORD: {
+            PureValue__Record * record = malloc(sizeof(PureValue__Record));
+
+            pure_value__record__init(record);
+
+            record->n_members = type->record->n_members;
+            record->members = malloc(type->record->n_members * sizeof(PureValue__Record__Member *));
+
+            for (int i = 0; i < type->record->n_members; i++) {
+                record->members[i] = malloc(sizeof(PureValue__Record__Member));
+
+                pure_value__record__member__init(record->members[i]);
+
+                record->members[i]->name.len = type->record->members[i]->name.len;
+                record->members[i]->name.data = malloc(type->record->members[i]->name.len);
+
+                memcpy(
+                    record->members[i]->name.data,
+                    type->record->members[i]->name.data,
+                    type->record->members[i]->name.len
+                );
+
+                record->members[i]->value = value_view_new(
+                    type->record->members[i]->type,
+                    ((uint8_t *) ptr) + type->record->members[i]->offset,
+                    0
+                );
+            }
+
+            pure->which_case = PURE_VALUE__WHICH_RECORD;
+            pure->record = record;
+
+            break;
+        }
+        case TYPE__WHICH_CONST_POINTER: fail("unimplemented: value_view_new const_pointer");
+        case TYPE__WHICH_POINTER: {
+            PureValue__Pointer * pointer = malloc(sizeof(PureValue__Pointer));
+
+            pure_value__pointer__init(pointer);
+
+            pointer->n_items = n;
+            pointer->items = malloc(n * sizeof(ValueView *));
+
+            for (int i = 0; i < n; i++) {
+                pointer->items[i] = value_view_new(type->pointer, ((uint8_t *) ptr) + n * type_size(type->pointer), 0);
+            }
+
+            pure->which_case = PURE_VALUE__WHICH_POINTER;
+            pure->pointer = pointer;
+
+            break;
+        }
+        case TYPE__WHICH_VARIANT: {
+            PureValue__Variant * variant = malloc(sizeof(PureValue__Variant));
+
+            pure_value__variant__init(variant);
+
+            uint32_t case_idx = 0;
+
+            switch (type->variant->tag_repr) {
+                case INT_REPR__INT_REPR_U8: case_idx = * (uint8_t *) ptr; break;
+                case INT_REPR__INT_REPR_U16: case_idx = * (uint16_t *) ptr; break;
+                case INT_REPR__INT_REPR_U32: case_idx = * (uint32_t *) ptr; break;
+                case INT_REPR__INT_REPR_U64: fail("unimplemented: int repr u64");
+                case INT_REPR__INT_REPR_UNKNOWN:
+                case _INT_REPR_IS_INT_SIZE: fail("invalid variant tag repr");
+            }
+
+            uint8_t * case_name_data = malloc(type->variant->cases[case_idx]->name.len);
+            memcpy(
+                case_name_data,
+                type->variant->cases[case_idx]->name.data,
+                type->variant->cases[case_idx]->name.len
+            );
+
+            PureValue__Variant__OptionalPayloadCase optional_payload_case;
+            ValueView * payload = NULL;
+
+            switch (type->variant->cases[case_idx]->optional_type_case) {
+                case TYPE__VARIANT__CASE__OPTIONAL_TYPE__NOT_SET: {
+                    optional_payload_case = PURE_VALUE__VARIANT__OPTIONAL_PAYLOAD__NOT_SET;
+                    break;
+                }
+                case TYPE__VARIANT__CASE__OPTIONAL_TYPE_TYPE: {
+                    optional_payload_case = PURE_VALUE__VARIANT__OPTIONAL_PAYLOAD_PAYLOAD;
+                    payload = value_view_new(
+                        type->variant->cases[case_idx]->type,
+                        (uint8_t *) ptr + type->variant->payload_offset,
+                        0
+                    );
+                    break;
+                }
+                case _TYPE__VARIANT__CASE__OPTIONAL_TYPE__CASE_IS_INT_SIZE: fail("unreachable");
+            }
+
+            variant->case_idx  = case_idx;
+            variant->case_name = (ProtobufCBinaryData){
+                .len  = type->variant->cases[case_idx]->name.len,
+                .data = case_name_data,
+            };
+            variant->optional_payload_case = optional_payload_case;
+            variant->payload = payload;
+            
+            pure->which_case = PURE_VALUE__WHICH_VARIANT;
+            pure->variant    = variant;
+
+            break;
+        }
+        case TYPE__WHICH__NOT_SET:
+        case _TYPE__WHICH__CASE_IS_INT_SIZE: fail("invalid type");
+    }
+
+    view->memory_offset = (uint32_t) ptr;
+    view->content = pure;
+
+    return view;
+}
+
 static void * handle_param_pre(ValueSpec * spec, int32_t * len) {
     switch (spec->which_case) {
         case VALUE_SPEC__WHICH_RESOURCE: {
@@ -277,7 +551,7 @@ static void * handle_param_pre(ValueSpec * spec, int32_t * len) {
             switch (spec->raw_value->which_case) {
                 case RAW_VALUE__WHICH_BUILTIN: {
                     switch (spec->raw_value->builtin->which_case) {
-                        case RAW_VALUE__BUILTIN__WHICH_U8:  ptr = calloc(sizeof(uint32_t), 0); break;
+                        case RAW_VALUE__BUILTIN__WHICH_U8:  ptr = calloc(sizeof(uint8_t), 0); break;
                         case RAW_VALUE__BUILTIN__WHICH_U32: ptr = calloc(sizeof(uint32_t), 0); break;
                         case RAW_VALUE__BUILTIN__WHICH_U64: ptr = calloc(sizeof(uint64_t), 0); break;
                         case RAW_VALUE__BUILTIN__WHICH_S64: ptr = calloc(sizeof(int64_t), 0);  break;
@@ -343,13 +617,17 @@ static void * handle_result_pre(ResultSpec * spec) {
     return malloc(type_size(spec->type));
 }
 
-static void handle_result_post(ResultSpec * spec, void * ptr) {
+static ValueView * handle_result_post(ResultSpec * spec, void * ptr) {
+    ValueView * view = value_view_new(spec->type, ptr, 0);
+
     switch (spec->which_case) {
         case RESULT_SPEC__WHICH_RESOURCE: {
             const size_t size = type_size(spec->type);
             const struct resource resource = {
-                .ptr  = ptr,
-                .size = size,
+                .ptr     = ptr,
+                .size    = size,
+                .has_len = false,
+                .len     = 0,
             };
 
             hmput(resource_map, spec->resource->id, resource);
@@ -360,26 +638,40 @@ static void handle_result_post(ResultSpec * spec, void * ptr) {
         case RESULT_SPEC__WHICH__NOT_SET:
         case _RESULT_SPEC__WHICH__CASE_IS_INT_SIZE: fail("unknown result spec");
     }
+
+    return view;
 }
 
 static void handle_decl(Request__Decl * decl) {
-    struct resource resource;
+    struct resource resource = alloc_raw_value(decl->type, decl->value);
 
     switch (decl->value->which_case) {
-        case RAW_VALUE__WHICH_BUILTIN:  fail("cannot decl builtin");
-        case RAW_VALUE__WHICH_STRING:   fail("cannot decl string");
-        case RAW_VALUE__WHICH_BITFLAGS: fail("cannot decl bitflags");
-        case RAW_VALUE__WHICH_HANDLE: {
-            uint32_t * ptr = malloc(sizeof(uint32_t));
-
-            * ptr         = decl->value->handle->value;
-            resource.ptr  = ptr;
-            resource.size = sizeof(uint32_t);
+        case RAW_VALUE__WHICH_BUILTIN: {
+            switch (decl->value->builtin->which_case) {
+                case RAW_VALUE__BUILTIN__WHICH_U8:  * (uint8_t  *) resource.ptr = decl->value->builtin->u8; break;
+                case RAW_VALUE__BUILTIN__WHICH_U32: * (uint32_t *) resource.ptr = decl->value->builtin->u32; break;
+                case RAW_VALUE__BUILTIN__WHICH_U64: * (uint64_t *) resource.ptr = decl->value->builtin->u64; break;
+                case RAW_VALUE__BUILTIN__WHICH_S64: * (int64_t  *) resource.ptr = decl->value->builtin->s64; break;
+                case RAW_VALUE__BUILTIN__WHICH__NOT_SET:
+                case _RAW_VALUE__BUILTIN__WHICH__CASE_IS_INT_SIZE: fail("invalid decl builtin type");
+            }
 
             break;
         }
+        case RAW_VALUE__WHICH_STRING:   fail("cannot decl string");
+        case RAW_VALUE__WHICH_BITFLAGS: fail("cannot decl bitflags");
+        case RAW_VALUE__WHICH_HANDLE: * (uint32_t *) resource.ptr = decl->value->handle->value; break;
         case RAW_VALUE__WHICH_ARRAY: fail("cannot decl array");
-        case RAW_VALUE__WHICH_RECORD: fail("cannot decl record");
+        case RAW_VALUE__WHICH_RECORD: {
+                for (int i = 0; i < decl->value->record->n_members; i++) {
+                    Type__Record__Member * member = decl->type->record->members[i];
+                    void * member_ptr = ((uint8_t *) resource.ptr) + member->offset;
+
+                    set_ptr_value(decl->value->record->members[i]->value, member_ptr);
+                }
+
+            break;
+        }
         case RAW_VALUE__WHICH_CONST_POINTER: fail("cannot decl const pointer");
         case RAW_VALUE__WHICH_POINTER: fail("cannot decl pointer");
         case RAW_VALUE__WHICH_VARIANT: fail("cannot decl variant");
@@ -413,150 +705,13 @@ static void handle_decl(Request__Decl * decl) {
     free(buf);
 }
 
-ValueView * param_view_new(Type * type, void * ptr, int n) {
-    ValueView * view = malloc(sizeof(ValueView));
-    PureValue * pure = malloc(sizeof(PureValue));
-
-    value_view__init(view);
-    pure_value__init(pure);
-
-    switch (type->which_case) {
-        case TYPE__WHICH_BUILTIN: {
-            RawValue__Builtin * builtin = malloc(sizeof(RawValue__Builtin));
-
-            raw_value__builtin__init(builtin);
-
-            switch (type->builtin->which_case) {
-                case TYPE__BUILTIN__WHICH_U8: {
-                    builtin->which_case = RAW_VALUE__BUILTIN__WHICH_U8;
-                    builtin->u8 = * (uint8_t *) ptr;
-
-                    break;
-                }
-                case TYPE__BUILTIN__WHICH_U32: {
-                    builtin->which_case = RAW_VALUE__BUILTIN__WHICH_U32;
-                    builtin->u32 = * (uint32_t *) ptr;
-
-                    break;
-                }
-                case TYPE__BUILTIN__WHICH_U64: {
-                    builtin->which_case = RAW_VALUE__BUILTIN__WHICH_U64;
-                    builtin->u64 = * (uint64_t *) ptr;
-
-                    break;
-                }
-                case TYPE__BUILTIN__WHICH_S64: {
-                    builtin->which_case = RAW_VALUE__BUILTIN__WHICH_S64;
-                    builtin->s64 = * (int64_t *) ptr;
-
-                    break;
-                }
-                case TYPE__BUILTIN__WHICH__NOT_SET:
-                case _TYPE__BUILTIN__WHICH__CASE_IS_INT_SIZE: fail("unreachable");
-            }
-
-            pure->which_case = PURE_VALUE__WHICH_BUILTIN;
-            pure->builtin = builtin;
-
-            break;
-        }
-        case TYPE__WHICH_STRING: fail("unimplemented: param_view_new string");
-        case TYPE__WHICH_BITFLAGS: fail("unimplemented: param_view_new bitflags");
-        case TYPE__WHICH_HANDLE: {
-            pure->which_case = PURE_VALUE__WHICH_HANDLE;
-            pure->handle     = * (uint32_t *) ptr;
-
-            break;
-        }
-        case TYPE__WHICH_ARRAY: {
-            PureValue__List * list = malloc(sizeof(PureValue__List));
-
-            pure_value__list__init(list);
-
-            list->n_items = n;
-            list->items = malloc(n * sizeof(ValueView *));
-
-            for (int i = 0; i < n; i++) {
-                void * item_ptr = ((uint8_t *) ptr) + i * type->array->item_size;
-
-                list->items[i] = param_view_new(type->array->type, item_ptr, 0);
-            }
-
-            pure->which_case = PURE_VALUE__WHICH_LIST;
-            pure->list = list;
-
-            break;
-        }
-        case TYPE__WHICH_RECORD: {
-            PureValue__Record * record = malloc(sizeof(PureValue__Record));
-
-            pure_value__record__init(record);
-
-            record->n_members = type->record->n_members;
-            record->members = malloc(type->record->n_members * sizeof(PureValue__Record__Member *));
-
-            for (int i = 0; i < type->record->n_members; i++) {
-                record->members[i] = malloc(sizeof(PureValue__Record__Member));
-
-                pure_value__record__member__init(record->members[i]);
-
-                record->members[i]->name.len = type->record->members[i]->name.len;
-                record->members[i]->name.data = malloc(type->record->members[i]->name.len);
-
-                memcpy(
-                    record->members[i]->name.data,
-                    type->record->members[i]->name.data,
-                    type->record->members[i]->name.len
-                );
-
-                record->members[i]->value = param_view_new(
-                    type->record->members[i]->type,
-                    ((uint8_t *) ptr) + type->record->members[i]->offset,
-                    0
-                );
-            }
-
-            pure->which_case = PURE_VALUE__WHICH_RECORD;
-            pure->record = record;
-
-            break;
-        }
-        case TYPE__WHICH_CONST_POINTER: fail("unimplemented: param_view_new const_pointer");
-        case TYPE__WHICH_POINTER: {
-            PureValue__Pointer * pointer = malloc(sizeof(PureValue__Pointer));
-
-            pure_value__pointer__init(pointer);
-
-            pointer->n_items = n;
-            pointer->items = malloc(n * sizeof(ValueView *));
-
-            for (int i = 0; i < n; i++) {
-                pointer->items[i] = param_view_new(type->pointer, ((uint8_t *) ptr) + n * type_size(type->pointer), 0);
-            }
-
-            pure->which_case = PURE_VALUE__WHICH_POINTER;
-            pure->pointer = pointer;
-
-            break;
-        }
-        case TYPE__WHICH_VARIANT: fail("unimplemented: param_view_new variant");
-        case TYPE__WHICH__NOT_SET:
-        case _TYPE__WHICH__CASE_IS_INT_SIZE: fail("invalid type");
-    }
-
-    view->memory_offset = (uint32_t) ptr;
-    view->content = pure;
-
-    return view;
-}
-
-void param_view_free(ValueView * ptr) {
+void value_view_free(ValueView * ptr) {
     switch (ptr->content->which_case) {
         case PURE_VALUE__WHICH_BUILTIN: free(ptr->content->builtin); break;
         case PURE_VALUE__WHICH_HANDLE: break;
         case PURE_VALUE__WHICH_LIST: {
             for (int i = 0; i < ptr->content->list->n_items; i++) {
-                param_view_free(ptr->content->list->items[i]);
+                value_view_free(ptr->content->list->items[i]);
             }
 
             free(ptr->content->list->items);
@@ -566,7 +721,7 @@ void param_view_free(ValueView * ptr) {
         }
         case PURE_VALUE__WHICH_RECORD: {
             for (int i = 0; i < ptr->content->record->n_members; i++) {
-                param_view_free(ptr->content->record->members[i]->value);
+                value_view_free(ptr->content->record->members[i]->value);
                 free(ptr->content->record->members[i]->name.data);
                 free(ptr->content->record->members[i]);
             }
@@ -578,7 +733,7 @@ void param_view_free(ValueView * ptr) {
         }
         case PURE_VALUE__WHICH_POINTER: {
             for (int i = 0; i < ptr->content->pointer->n_items; i++) {
-                param_view_free(ptr->content->pointer->items[i]);
+                value_view_free(ptr->content->pointer->items[i]);
             }
 
             free(ptr->content->pointer->items);
@@ -586,8 +741,18 @@ void param_view_free(ValueView * ptr) {
 
             break;
         }
+        case PURE_VALUE__WHICH_VARIANT: {
+            if (ptr->content->variant->optional_payload_case == PURE_VALUE__VARIANT__OPTIONAL_PAYLOAD_PAYLOAD) {
+                value_view_free(ptr->content->variant->payload);
+            }
+            
+            free(ptr->content->variant->case_name.data);
+            free(ptr->content->variant);
+
+            break;
+        }
         case PURE_VALUE__WHICH__NOT_SET:
-        case _PURE_VALUE__WHICH__CASE_IS_INT_SIZE: fail("param_view_free unreachable");
+        case _PURE_VALUE__WHICH__CASE_IS_INT_SIZE: fail("value_view_free unreachable");
     }
 
     free(ptr->content);
@@ -598,8 +763,10 @@ static void handle_call(Request__Call * call) {
     Response__Call response = RESPONSE__CALL__INIT;
     ReturnValue    return_  = RETURN_VALUE__INIT;
 
-    ValueView ** params   = NULL;
-    int          n_params = 0;
+    ValueView ** params    = NULL;
+    ValueView ** results   = NULL;
+    int          n_params  = 0;
+    int          n_results = 0;
 
     switch (call->func) {
         case WASI_FUNC__WASI_FUNC_UNKNOWN: fail("unknown func");
@@ -951,7 +1118,32 @@ static void handle_call(Request__Call * call) {
                 r0_prestat
             );
 
-            handle_result_post(call->results[0], r0_prestat_ptr);
+            n_results = 1;
+            results = malloc(n_results * sizeof(ValueView *));
+            results[0] = handle_result_post(call->results[0], r0_prestat_ptr);
+            handle_param_post(call->params[0], p0_fd_ptr);
+
+            return_.which_case = RETURN_VALUE__WHICH_ERRNO;
+            return_.errno      = errno;
+
+            break;
+        }
+        case WASI_FUNC__WASI_FUNC_FD_PRESTAT_DIR_NAME: {
+            void *  p0_fd_ptr       = handle_param_pre(call->params[0], NULL);
+            void *  p1_path_ptr     = handle_param_pre(call->params[1], NULL);
+            void *  p2_path_len_ptr = handle_param_pre(call->params[2], NULL);
+            int32_t p0_fd           = * (int32_t *) p0_fd_ptr;
+            int32_t p1_path         = (int32_t) p1_path_ptr;
+            int32_t p2_path_len     = * (int32_t *) p2_path_len_ptr;
+
+            int32_t errno = __imported_wasi_snapshot_preview1_fd_prestat_dir_name(
+                p0_fd,
+                p1_path,
+                p2_path_len
+            );
+
+            handle_param_post(call->params[2], p2_path_len_ptr);
+            handle_param_post(call->params[1], p1_path_ptr);
             handle_param_post(call->params[0], p0_fd_ptr);
 
             return_.which_case = RETURN_VALUE__WHICH_ERRNO;
@@ -977,8 +1169,8 @@ static void handle_call(Request__Call * call) {
 
             n_params = 2;
             params = malloc(n_params * sizeof(ValueView *));
-            params[0] = param_view_new(call->params[0]->type, p0_fd_ptr, 0);
-            params[1] = param_view_new(call->params[1]->type, p1_iovs_ptr, p1_iovs_len);
+            params[0] = value_view_new(call->params[0]->type, p0_fd_ptr, 0);
+            params[1] = value_view_new(call->params[1]->type, p1_iovs_ptr, p1_iovs_len);
 
             handle_result_post(call->results[0], r0_size_ptr);
             handle_param_post(call->params[1], p1_iovs_ptr);
@@ -1091,9 +1283,11 @@ static void handle_call(Request__Call * call) {
         case _WASI_FUNC_IS_INT_SIZE: fail("unreachable");
     }
 
-    response.return_ = &return_;
-    response.params  = params;
-    response.n_params = n_params;
+    response.return_   = &return_;
+    response.params    = params;
+    response.n_params  = n_params;
+    response.results   = results;
+    response.n_results = n_results;
 
     Response msg = RESPONSE__INIT;
 
@@ -1117,11 +1311,11 @@ static void handle_call(Request__Call * call) {
     fflush(stdout);
     free(buf);
 
-    for (int i = 0; i < n_params; i++) {
-        param_view_free(params[i]);
-    }
+    for (int i = 0; i < n_params; i++) value_view_free(params[i]);
+    for (int i = 0; i < n_results; i++) value_view_free(results[i]);
 
     free(params);
+    free(results);
 }
 
 int main(void) {
