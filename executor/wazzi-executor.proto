@@ -257,6 +257,7 @@ enum WasiFunc {
     WASI_FUNC_FD_PREAD              = 17;
     WASI_FUNC_FD_PRESTAT_GET        = 18;
     WASI_FUNC_FD_PRESTAT_DIR_NAME   = 19;
+    WASI_FUNC_FD_PWRITE             = 20;
     WASI_FUNC_FD_READ               = 25;
     WASI_FUNC_FD_SEEK               = 26;
     WASI_FUNC_FD_WRITE              = 27;

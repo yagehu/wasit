@@ -1184,6 +1184,38 @@ static void handle_call(Request__Call * call) {
 
             break;
         }
+        case WASI_FUNC__WASI_FUNC_FD_PWRITE: {
+            int32_t p1_iovs_len   = 0;
+            void *  p0_fd_ptr     = handle_param_pre(call->params[0], NULL);
+            void *  p1_iovs_ptr   = handle_param_pre(call->params[1], &p1_iovs_len);
+            void *  p2_offset_ptr = handle_param_pre(call->params[2], NULL);
+            void *  r0_size_ptr   = handle_result_pre(call->results[0]);
+            int32_t p0_fd         = * (int32_t *) p0_fd_ptr;
+            int32_t p1_iovs       = (int32_t) p1_iovs_ptr;
+            int64_t p2_offset     = * (int64_t *) p2_offset_ptr;
+            int32_t r0_size       = (int32_t) r0_size_ptr;
+
+            int32_t errno = __imported_wasi_snapshot_preview1_fd_pwrite(
+                p0_fd,
+                p1_iovs,
+                p1_iovs_len,
+                p2_offset,
+                r0_size
+            );
+
+            n_results = 1;
+            results = malloc(n_results * sizeof(ValueView *));
+            results[0] = handle_result_post(call->results[0], r0_size_ptr);
+
+            handle_param_post(call->params[2], p2_offset_ptr);
+            handle_param_post(call->params[1], p1_iovs_ptr);
+            handle_param_post(call->params[0], p0_fd_ptr);
+
+            return_.which_case = RETURN_VALUE__WHICH_ERRNO;
+            return_.errno      = errno;
+
+            break;
+        }
         case WASI_FUNC__WASI_FUNC_FD_READ: {
             int32_t p1_iovs_len = 0;
             void *  p0_fd_ptr   = handle_param_pre(call->params[0], NULL);
