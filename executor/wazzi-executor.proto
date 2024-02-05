@@ -132,6 +132,10 @@ message Resource {
     uint64 id = 1;
 }
 
+message BitflagsValue {
+    repeated bool members = 1;
+}
+
 message RawValue {
     message Builtin {
         oneof which {
@@ -140,10 +144,6 @@ message RawValue {
             uint64 u64 = 4;
             sint64 s64 = 8;
         }
-    }
-
-    message Bitflags {
-        repeated bool members = 1;
     }
 
     message Handle {
@@ -183,7 +183,7 @@ message RawValue {
     oneof which {
         Builtin builtin = 1;
         bytes string = 2;
-        Bitflags bitflags = 3;
+        BitflagsValue bitflags = 3;
         Handle  handle = 4;
         Array array = 5;
         Record record = 6;
@@ -227,6 +227,7 @@ message PureValue {
 
     oneof which {
         RawValue.Builtin builtin = 1;
+        BitflagsValue bitflags = 3;
         uint32 handle = 4;
         List list = 5;
         Record record = 6;

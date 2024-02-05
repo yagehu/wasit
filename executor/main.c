@@ -392,7 +392,34 @@ ValueView * value_view_new(Type * type, void * ptr, int n) {
             break;
         }
         case TYPE__WHICH_STRING: fail("unimplemented: value_view_new string");
-        case TYPE__WHICH_BITFLAGS: fail("unimplemented: value_view_new bitflags");
+        case TYPE__WHICH_BITFLAGS: {
+            BitflagsValue * bitflags = malloc(sizeof(BitflagsValue));
+            protobuf_c_boolean * members = malloc(type->bitflags->n_members * sizeof(protobuf_c_boolean));
+
+            for (int i = 0; i < type->bitflags->n_members; i++) {
+                bool member = false;
+
+                switch (type->bitflags->repr) {
+                    case INT_REPR__INT_REPR_U8: member = ((* (uint8_t *) ptr) >> (7 - i)) & 0x1; break;
+                    case INT_REPR__INT_REPR_U16: member = ((* (uint16_t *) ptr) >> (15 - i)) & 0x1; break;
+                    case INT_REPR__INT_REPR_U32: member = ((* (uint32_t *) ptr) >> (31 - i)) & 0x1; break;
+                    case INT_REPR__INT_REPR_U64: member = ((* (uint64_t *) ptr) >> (63 - i)) & 0x1; break;
+                    case INT_REPR__INT_REPR_UNKNOWN:
+                    case _INT_REPR_IS_INT_SIZE: fail("unknown int repr");
+                }
+
+                if (member) { members[i] = true; }
+                else { members[i] = false; }
+            }
+
+            bitflags->n_members = type->bitflags->n_members;
+            bitflags->members   = members;
+            
+            pure->which_case = PURE_VALUE__WHICH_BITFLAGS;
+            pure->bitflags   = bitflags;
+
+            break;
+        }
         case TYPE__WHICH_HANDLE: {
             pure->which_case = PURE_VALUE__WHICH_HANDLE;
             pure->handle     = * (uint32_t *) ptr;
@@ -708,6 +735,12 @@ static void handle_decl(Request__Decl * decl) {
 void value_view_free(ValueView * ptr) {
     switch (ptr->content->which_case) {
         case PURE_VALUE__WHICH_BUILTIN: free(ptr->content->builtin); break;
+        case PURE_VALUE__WHICH_BITFLAGS: {
+            free(ptr->content->bitflags->members);
+            free(ptr->content->bitflags);
+            
+            break;
+        }
         case PURE_VALUE__WHICH_HANDLE: break;
         case PURE_VALUE__WHICH_LIST: {
             for (int i = 0; i < ptr->content->list->n_items; i++) {
