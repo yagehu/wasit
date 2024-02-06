@@ -38,6 +38,12 @@
 (typename $clock_res $timestamp)
 (resource $clock_res (type $clock_res))
 
+(typename $dirent_buf (@witx pointer u8))
+(resource $dirent_buf (type $dirent_buf))
+
+(typename $dirent_buf_size $size)
+(resource $dirent_buf_size (type $dirent_buf_size) (@alloc $dirent_buf))
+
 (module $wasi_snapshot_preview1
   ;;; Linear memory to be accessed by WASI functions that need it.
   (import "memory" (memory))
@@ -269,8 +275,8 @@
   (@interface func (export "fd_readdir")
     (param $fd $fd)
     ;;; The buffer where directory entries are stored
-    (param $buf (@witx pointer u8))
-    (param $buf_len $size)
+    (param $buf $dirent_buf)
+    (param $buf_len $dirent_buf_size)
     ;;; The location within the directory to start reading
     (param $cookie $dircookie)
     ;;; The number of bytes stored in the read buffer. If less than the size of the read buffer, the end of the directory has been reached.

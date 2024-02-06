@@ -113,7 +113,7 @@ static size_t type_size(Type * type) {
         case TYPE__WHICH_POINTER: return sizeof(void *);
         case TYPE__WHICH_VARIANT: return type->variant->size;
         case TYPE__WHICH__NOT_SET:
-        case _TYPE__WHICH__CASE_IS_INT_SIZE: fail("invalid type");
+        case _TYPE__WHICH__CASE_IS_INT_SIZE: fail("type_size: invalid type");
     }
 }
 
@@ -489,7 +489,9 @@ ValueView * value_view_new(Type * type, void * ptr, int n) {
             pointer->items = malloc(n * sizeof(ValueView *));
 
             for (int i = 0; i < n; i++) {
+                fprintf(stderr, "whoa0\n");
                 pointer->items[i] = value_view_new(type->pointer, ((uint8_t *) ptr) + n * type_size(type->pointer), 0);
+                fprintf(stderr, "whoa1\n");
             }
 
             pure->which_case = PURE_VALUE__WHICH_POINTER;
@@ -554,7 +556,7 @@ ValueView * value_view_new(Type * type, void * ptr, int n) {
             break;
         }
         case TYPE__WHICH__NOT_SET:
-        case _TYPE__WHICH__CASE_IS_INT_SIZE: fail("invalid type");
+        case _TYPE__WHICH__CASE_IS_INT_SIZE: fail("value_view_new: invalid type");
     }
 
     view->memory_offset = (uint32_t) ptr;
@@ -641,6 +643,7 @@ static void handle_param_post(ValueSpec * spec, void * ptr) {
 }
 
 static void * handle_result_pre(ResultSpec * spec) {
+    fprintf(stderr, "handle_result_pre\n");
     return malloc(type_size(spec->type));
 }
 
@@ -1239,6 +1242,40 @@ static void handle_call(Request__Call * call) {
 
             handle_result_post(call->results[0], r0_size_ptr);
             handle_param_post(call->params[1], p1_iovs_ptr);
+            handle_param_post(call->params[0], p0_fd_ptr);
+
+            return_.which_case = RETURN_VALUE__WHICH_ERRNO;
+            return_.errno      = errno;
+
+            break;
+        }
+        case WASI_FUNC__WASI_FUNC_FD_READDIR: {
+            void *  p0_fd_ptr      = handle_param_pre(call->params[0], NULL);
+            void *  p1_buf_ptr     = handle_param_pre(call->params[1], NULL);
+            void *  p2_buf_len_ptr = handle_param_pre(call->params[2], NULL);
+            void *  p3_cookie_ptr  = handle_param_pre(call->params[3], NULL);
+            void *  r0_size_ptr    = handle_result_pre(call->results[0]);
+            int32_t p0_fd          = * (int32_t *) p0_fd_ptr;
+            int32_t p1_buf         = (int32_t) p1_buf_ptr;
+            int32_t p2_buf_len     = * (int32_t *) p2_buf_len_ptr;
+            int64_t p3_cookie      = * (int64_t *) p3_cookie_ptr;
+            int32_t r0_size        = (int32_t) r0_size_ptr;
+
+            int32_t errno = __imported_wasi_snapshot_preview1_fd_readdir(
+                p0_fd,
+                p1_buf,
+                p2_buf_len,
+                p3_cookie,
+                r0_size
+            );
+
+            n_results = 1;
+            results = malloc(n_results * sizeof(ValueView *));
+            results[0] = handle_result_post(call->results[0], r0_size_ptr);
+
+            handle_param_post(call->params[3], p3_cookie_ptr);
+            handle_param_post(call->params[2], p2_buf_len_ptr);
+            handle_param_post(call->params[1], p1_buf_ptr);
             handle_param_post(call->params[0], p0_fd_ptr);
 
             return_.which_case = RETURN_VALUE__WHICH_ERRNO;

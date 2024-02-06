@@ -19,9 +19,9 @@ pub enum Action {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Hash, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct Decl {
-    pub resource: u64,
-    pub r#type:   String,
-    pub value:    RawValue,
+    pub resource:  u64,
+    pub r#type:    String,
+    pub raw_value: RawValue,
 }
 
 impl Decl {
@@ -30,7 +30,7 @@ impl Decl {
 
         executor_pb::request::Decl {
             resource_id:    self.resource,
-            value:          Some(self.value.to_pb(ty.type_().as_ref())).into(),
+            value:          Some(self.raw_value.to_pb(ty.type_().as_ref())).into(),
             type_:          Some(pb::to_type(ty.type_().as_ref())).into(),
             special_fields: Default::default(),
         }

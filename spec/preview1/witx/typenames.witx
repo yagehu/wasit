@@ -338,6 +338,7 @@
 ;;;
 ;;; The value 0 signifies the start of the directory.
 (typename $dircookie u64)
+(resource $dircookie (type $dircookie))
 
 ;;; The type for the `dirent::d_namlen` field of `dirent` struct.
 (typename $dirnamlen u32)
