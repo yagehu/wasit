@@ -1,4 +1,3 @@
-use std::hint::unreachable_unchecked;
 use witx::IntRepr;
 
 use crate::{prog::r#final, BitflagsValue, BuiltinValue, FinalProg};
@@ -28,13 +27,14 @@ impl Prog {
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub(crate) enum Value {
     Builtin(BuiltinValue),
+    Handle(u32),
     String(Vec<u8>),
     Bitflags(BitflagsValue),
 }
 
 impl Value {
     pub(crate) fn to_pb_value(self, ty: &witx::Type) -> executor_pb::Value {
-        let which = match (ty, self) {
+        let which = match (ty, self.clone()) {
             | (witx::Type::Builtin(_), Value::Builtin(builtin)) => {
                 let which = match builtin {
                     | BuiltinValue::U8(i) => executor_pb::value::builtin::Which::U8(i.into()),
@@ -48,6 +48,7 @@ impl Value {
                     special_fields: Default::default(),
                 })
             },
+            | (_, Value::Handle(handle)) => executor_pb::value::Which::Handle(handle),
             | (witx::Type::List(_), Value::String(bytes)) => {
                 executor_pb::value::Which::String(bytes)
             },
@@ -72,7 +73,7 @@ impl Value {
                     special_fields: Default::default(),
                 })
             },
-            | _ => panic!("spec and value mismatch"),
+            | _ => panic!("spec and value mismatch: {:#?}", self),
         };
 
         executor_pb::Value {
@@ -94,7 +95,7 @@ impl Value {
             },
             | executor_pb::value::Which::String(_) => todo!(),
             | executor_pb::value::Which::Bitflags(_) => todo!(),
-            | executor_pb::value::Which::Handle(_) => todo!(),
+            | executor_pb::value::Which::Handle(handle) => Self::Handle(handle),
             | executor_pb::value::Which::Array(_) => todo!(),
             | executor_pb::value::Which::Record(_) => todo!(),
             | executor_pb::value::Which::ConstPointer(_) => todo!(),

@@ -732,7 +732,52 @@ static void handle_call(Request__Call * call) {
 
             break;
         }
-        default: fail("unimplemented");
+        case WASI_FUNC__PATH_OPEN: {
+            int32_t p2_path_len = 0;
+            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
+            void * p1_dirflags_ptr = value_ptr_new(call->params[1], NULL);
+            void * p2_path_ptr = value_ptr_new(call->params[2], &p2_path_len);
+            void * p3_oflags_ptr = value_ptr_new(call->params[3], NULL);
+            void * p4_fs_rights_base_ptr = value_ptr_new(call->params[4], NULL);
+            void * p5_fs_rights_inheriting_ptr = value_ptr_new(call->params[5], NULL);
+            void * p6_fdflags_ptr = value_ptr_new(call->params[6], NULL);
+            void * r0_fd_ptr = value_ptr_new(call->results[0], NULL);
+            int32_t p0_fd = * (int32_t *) p0_fd_ptr;
+            int32_t p1_dirflags = * (int32_t *) p1_dirflags_ptr;
+            int32_t p2_path = (int32_t) * (void **) p2_path_ptr;
+            int32_t p3_oflags = * (int16_t *) p3_oflags_ptr;
+            int64_t p4_fs_rights_base = * (int64_t *) p4_fs_rights_base_ptr;
+            int64_t p5_fs_rights_inheriting = * (int64_t *) p5_fs_rights_inheriting_ptr;
+            int32_t p6_fdflags = * (int16_t *) p6_fdflags_ptr;
+            int32_t r0_fd = (int32_t) r0_fd_ptr;
+
+            response.errno_some = __imported_wasi_snapshot_preview1_path_open(
+                p0_fd,
+                p1_dirflags,
+                p2_path,
+                p2_path_len,
+                p3_oflags,
+                p4_fs_rights_base,
+                p5_fs_rights_inheriting,
+                p6_fdflags,
+                r0_fd
+            );
+
+            SET_N_ALLOC(params, 7);
+            SET_N_ALLOC(results, 1);
+
+            results[0] = value_ptr_free(call->results[0], r0_fd_ptr);
+            params[6] = value_ptr_free(call->params[6], p6_fdflags_ptr);
+            params[5] = value_ptr_free(call->params[5], p5_fs_rights_inheriting_ptr);
+            params[4] = value_ptr_free(call->params[4], p4_fs_rights_base_ptr);
+            params[3] = value_ptr_free(call->params[3], p3_oflags_ptr);
+            params[2] = value_ptr_free(call->params[2], p2_path_ptr);
+            params[1] = value_ptr_free(call->params[1], p1_dirflags_ptr);
+            params[0] = value_ptr_free(call->params[0], p0_fd_ptr);
+
+            break;
+        }
+        default: fail("func unimplemented");
     }
     
     response.params = params;

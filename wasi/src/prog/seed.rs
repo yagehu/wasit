@@ -279,7 +279,7 @@ impl ProgSeed {
 
             resource_ctx.new_resource(
                 BASE_DIR_RESOURCE_TYPE,
-                stateful::Value::Builtin(BuiltinValue::U32(executor.base_dir_fd())),
+                stateful::Value::Handle(executor.base_dir_fd()),
             );
         }
 
