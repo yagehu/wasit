@@ -1,31 +1,23 @@
 {
     "mount_base_dir": false,
-    "calls": [
+    "actions": [
         {
-            "func": "args_sizes_get",
-            "results": [
-                { "resource": 0 },
-                { "resource": 1 }
-            ]
+            "call": {
+                "func": "args_sizes_get",
+                "results": [
+                    { "resource": 0 },
+                    { "resource": 1 }
+                ]
+            }
         },
         {
-            "func": "args_get",
-            "params": [
-                {
-                    "raw_value": {
-                        "pointer": {
-                            "alloc": { "resource": 0 }
-                        }
-                    }
-                },
-                {
-                    "raw_value": {
-                        "pointer": {
-                            "alloc": { "resource": 1 }
-                        }
-                    }
-                }
-            ]
+            "call": {
+                "func": "args_get",
+                "params": [
+                    { "value": { "pointer": { "alloc_from_resource": 0 } } },
+                    { "value": { "pointer": { "alloc_from_resource": 1 } } }
+                ]
+            }
         }
     ]
 }

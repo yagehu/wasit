@@ -1,5 +1,8 @@
-pub mod fs;
-pub mod mem;
+mod fs;
+mod mem;
+
+pub use fs::FsSnapshotStore;
+pub use mem::InMemorySnapshotStore;
 
 pub trait SnapshotStore {
     type Snapshot;

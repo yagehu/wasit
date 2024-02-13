@@ -2,32 +2,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdnoreturn.h>
+#include <string.h>
 
 // protobuf-c generated
 #include "wazzi-executor.pb-c.h"
 
-#define STB_DS_IMPLEMENTATION
-#include "stb_ds.h"
-
 #include "wasi_snapshot_preview1.h"
 
-#define MAX_MSG_SIZE 2048
-
-struct resource {
-    void *   ptr;
-    size_t   size;
-    bool     has_len;
-    uint32_t len;
-};
-
-struct resource_map_entry {
-    uint64_t        key;
-    struct resource value;
-};
-
-struct resource_map_entry * resource_map;
-
-noreturn static void fail(const char* err) {
+noreturn static void fail(const char * err) {
     fprintf(stderr, "%s\n", err);
     exit(1);
 }
@@ -62,7 +44,7 @@ static Request * read_request(void) {
     if (nread != 8) fail("failed to read message size");
 
     const uint64_t message_size = u64_from_bytes(size_buf);
-    uint8_t *      buf          = malloc(message_size);
+    uint8_t * buf = malloc(message_size);
 
     nread = fread(buf, 1, message_size, stdin);
     if (nread != message_size) fail("failed to read message");
@@ -79,1325 +61,650 @@ static void free_request(Request * req) {
     request__free_unpacked(req, NULL);
 }
 
-static size_t type_size(Type * type) {
-    switch (type->which_case) {
-        case TYPE__WHICH_BUILTIN: {
-            switch (type->builtin->which_case) {
-                case TYPE__BUILTIN__WHICH_U8:  return sizeof(uint8_t);
-                case TYPE__BUILTIN__WHICH_U32: return sizeof(uint32_t);
-                case TYPE__BUILTIN__WHICH_U64: return sizeof(uint64_t);
-                case TYPE__BUILTIN__WHICH_S64: return sizeof(int64_t);
-                case TYPE__BUILTIN__WHICH__NOT_SET:
-                case _TYPE__BUILTIN__WHICH__CASE_IS_INT_SIZE: fail("invalid builtin type");
-            }
-
-            break;
-        }
-        case TYPE__WHICH_STRING: fail("unimplemented: type_size string");
-        case TYPE__WHICH_BITFLAGS: {
-            switch (type->bitflags->repr) {
-                case INT_REPR__INT_REPR_U8:
-                case INT_REPR__INT_REPR_U16:
-                case INT_REPR__INT_REPR_U32: return sizeof(uint32_t);
-                case INT_REPR__INT_REPR_U64: return sizeof(uint64_t);
-                case INT_REPR__INT_REPR_UNKNOWN:
-                case _INT_REPR_IS_INT_SIZE: fail("invalid int repr");
-            }
-
-            break;
-        }
-        case TYPE__WHICH_HANDLE: return sizeof(uint32_t);
-        case TYPE__WHICH_ARRAY: fail("unimplemented: type_size array");
-        case TYPE__WHICH_RECORD: return type->record->size;
-        case TYPE__WHICH_CONST_POINTER: return sizeof(void *);
-        case TYPE__WHICH_POINTER: return sizeof(void *);
-        case TYPE__WHICH_VARIANT: return type->variant->size;
-        case TYPE__WHICH__NOT_SET:
-        case _TYPE__WHICH__CASE_IS_INT_SIZE: fail("type_size: invalid type");
-    }
-}
-
-void set_ptr_value(const ValueSpec * value, void * ptr) {
+static void set_ptr_value(void * ptr, const Value * value) {
     switch (value->which_case) {
-        case VALUE_SPEC__WHICH_RESOURCE: {
-            struct resource_map_entry * resource_entry =
-                hmgetp_null(resource_map, value->resource->id);
-
-            memcpy(ptr, resource_entry->value.ptr, resource_entry->value.size);
-
-            break;
-        }
-        case VALUE_SPEC__WHICH_RAW_VALUE: {
-            const RawValue * raw_value = value->raw_value;
-
-            switch (raw_value->which_case) {
-                case RAW_VALUE__WHICH_BUILTIN: {
-                    switch (raw_value->builtin->which_case) {
-                        case RAW_VALUE__BUILTIN__WHICH_U8:  * (uint8_t *) ptr = raw_value->builtin->u8; break;
-                        case RAW_VALUE__BUILTIN__WHICH_U32: * (uint32_t *) ptr = raw_value->builtin->u32; break;
-                        case RAW_VALUE__BUILTIN__WHICH_U64: * (uint64_t *) ptr = raw_value->builtin->u64; break;
-                        case RAW_VALUE__BUILTIN__WHICH_S64: * (int64_t *) ptr = raw_value->builtin->s64; break;
-                        case RAW_VALUE__BUILTIN__WHICH__NOT_SET:
-                        case _RAW_VALUE__BUILTIN__WHICH__CASE_IS_INT_SIZE: fail("invalid builtin value");
-                    }
-
+        case VALUE__WHICH_BUILTIN: {
+            switch (value->builtin->which_case) {
+                case VALUE__BUILTIN__WHICH_U8:
+                    * (uint8_t *) ptr = (uint8_t) value->builtin->u8;
                     break;
-                }
-                case RAW_VALUE__WHICH_STRING: memcpy(ptr, raw_value->string.data, raw_value->string.len); break;
-                case RAW_VALUE__WHICH_BITFLAGS: {
-                    uint64_t repr = 0;
-
-                    for (int i = 0; i < raw_value->bitflags->n_members; i++) {
-                        if (raw_value->bitflags->members[i]) {
-                            repr |= 0x1 << i;
-                        }
-                    }
-
-                    switch (value->type->bitflags->repr) {
-                        case INT_REPR__INT_REPR_U8:  * (uint8_t *)  ptr = (uint8_t)  repr; break;
-                        case INT_REPR__INT_REPR_U16: * (uint16_t *) ptr = (uint16_t) repr; break;
-                        case INT_REPR__INT_REPR_U32: * (uint32_t *) ptr = (uint32_t) repr; break;
-                        case INT_REPR__INT_REPR_U64: * (uint64_t *) ptr = (uint64_t) repr; break;
-                        case INT_REPR__INT_REPR_UNKNOWN:
-                        case _INT_REPR_IS_INT_SIZE: fail("invalid bitflags repr");
-                    }
-
+                case VALUE__BUILTIN__WHICH_U32:
+                    * (uint32_t *) ptr = value->builtin->u32;
                     break;
-                }
-                case RAW_VALUE__WHICH_HANDLE: fail("unimplemented handle");
-                case RAW_VALUE__WHICH_ARRAY: {
-                    for (int i = 0; i < raw_value->array->n_items; i++) {
-                        set_ptr_value(
-                            raw_value->array->items[i],
-                            ((uint8_t *) ptr) + (value->type->array->item_size * i)
-                        );
-                    }
-
+                case VALUE__BUILTIN__WHICH_U64:
+                    * (uint64_t *) ptr = value->builtin->u64;
                     break;
-                }
-                case RAW_VALUE__WHICH_RECORD: {
-                    for (int i = 0; i < raw_value->record->n_members; i++) {
-                        set_ptr_value(
-                            raw_value->record->members[i]->value,
-                            ((uint8_t *) ptr) + value->type->record->members[i]->offset
-                        );
-                    }
-
+                case VALUE__BUILTIN__WHICH_S64:
+                    * (int64_t *) ptr = value->builtin->s64;
                     break;
-                }
-                case RAW_VALUE__WHICH_CONST_POINTER: {
-                    const size_t item_size = type_size(value->type->const_pointer);
-                    void *       items     = malloc(raw_value->const_pointer->n_items * item_size);
-
-                    for (int i = 0; i < raw_value->const_pointer->n_items; i++) {
-                        set_ptr_value(
-                            raw_value->const_pointer->items[i],
-                            ((uint8_t *) items) + i * item_size
-                        );
-                    }
-
-                    * (int32_t *) ptr = (int32_t) items;
-
-                    break;
-                }
-                case RAW_VALUE__WHICH_POINTER: {
-                    switch (raw_value->pointer->alloc->which_case) {
-                        case VALUE_SPEC__WHICH_RESOURCE: {
-                            struct resource_map_entry * resource_entry =
-                                hmgetp_null(resource_map, raw_value->pointer->alloc->resource->id);
-                            if (resource_entry == NULL) fail("pointer alloc resource not found");
-
-                            * (void **) ptr = malloc(* (uint32_t *) resource_entry->value.ptr);
-
-                            break;
-                        }
-                        case VALUE_SPEC__WHICH_RAW_VALUE: {
-                            if (
-                                raw_value->pointer->alloc->raw_value->which_case != RAW_VALUE__WHICH_BUILTIN
-                                || raw_value->pointer->alloc->raw_value->builtin->which_case != RAW_VALUE__BUILTIN__WHICH_U32
-                            ) fail("only an u32 can alloc pointer");
-
-                            * (void **) ptr = malloc(raw_value->pointer->alloc->raw_value->builtin->u32);
-
-                            break;
-                        }
-                        case VALUE_SPEC__WHICH__NOT_SET:
-                        case _VALUE_SPEC__WHICH__CASE_IS_INT_SIZE: fail("invalid pointer alloc");
-                    }
-
-                    break;
-                }
-                case RAW_VALUE__WHICH_VARIANT: {
-                    switch (value->type->variant->tag_repr) {
-                        case INT_REPR__INT_REPR_U8:  * (uint8_t *)  ptr = raw_value->variant->case_idx; break;
-                        case INT_REPR__INT_REPR_U16: * (uint16_t *) ptr = raw_value->variant->case_idx; break;
-                        case INT_REPR__INT_REPR_U32: * (uint32_t *) ptr = raw_value->variant->case_idx; break;
-                        case INT_REPR__INT_REPR_U64: * (uint64_t *) ptr = raw_value->variant->case_idx; break;
-                        case INT_REPR__INT_REPR_UNKNOWN:
-                        case _INT_REPR_IS_INT_SIZE: fail("invalid variant tag int repr");
-                    }
-
-                    switch (raw_value->variant->optional_payload_case) {
-                        case RAW_VALUE__VARIANT__OPTIONAL_PAYLOAD__NOT_SET: break;
-                        case RAW_VALUE__VARIANT__OPTIONAL_PAYLOAD_PAYLOAD: {
-                            set_ptr_value(
-                                raw_value->variant->payload,
-                                ((uint8_t *) ptr) + value->type->variant->payload_offset
-                            );
-
-                            break;
-                        }
-                        case _RAW_VALUE__VARIANT__OPTIONAL_PAYLOAD__CASE_IS_INT_SIZE: fail("invalid variant payload");
-                    }
-
-                    break;
-                }
-                case RAW_VALUE__WHICH__NOT_SET:
-                case _RAW_VALUE__WHICH__CASE_IS_INT_SIZE: fail("invalid raw value");
+                case VALUE__BUILTIN__WHICH__NOT_SET:
+                case _VALUE__BUILTIN__WHICH__CASE_IS_INT_SIZE: fail("value_new: invalid builtin");
             }
 
             break;
         }
-        case VALUE_SPEC__WHICH__NOT_SET:
-        case _VALUE_SPEC__WHICH__CASE_IS_INT_SIZE: fail("invalid value spec");
+        case VALUE__WHICH_STRING: {
+            * (char **) ptr = calloc(value->string.len, sizeof(uint8_t));
+            memcpy(* (char **) ptr, value->string.data, value->string.len);
+
+            break;
+        }
+        case VALUE__WHICH_BITFLAGS: {
+            uint64_t val = 0;
+
+            for (int i = 0; i < value->bitflags->n_members; i++)
+                if (value->bitflags->members[i]->value)
+                    val |= 0x1 << i;
+
+            switch (value->bitflags->repr) {
+                case INT_REPR__U8: * (uint8_t *) ptr = (uint8_t) val; break;
+                case INT_REPR__U16: * (uint16_t *) ptr = (uint16_t) val; break;
+                case INT_REPR__U32: * (uint32_t *) ptr = (uint32_t) val; break;
+                case INT_REPR__U64: * (uint64_t *) ptr = val; break;
+                case _INT_REPR_IS_INT_SIZE: fail("value_new: invalid bitflags repr");
+            }
+
+            break;
+        }
+        case VALUE__WHICH_HANDLE: * (uint32_t *) ptr = value->handle; break;
+        case VALUE__WHICH_ARRAY: {
+            * (void **) ptr = calloc(value->array->n_items, value->array->item_size);
+
+            for (int i = 0; i < value->array->n_items; i++)
+                set_ptr_value(
+                    * (uint8_t **) ptr + (i * value->array->item_size),
+                    value->array->items[i]
+                );
+
+            break;
+        }
+        case VALUE__WHICH_RECORD: {
+            for (int i = 0; i < value->record->n_members; i++)
+                set_ptr_value(
+                    (uint8_t *) ptr + value->record->members[i]->offset,
+                    value->record->members[i]->value
+                );
+
+            break;
+        }
+        case VALUE__WHICH_CONST_POINTER: {
+            * (void **) ptr = calloc(value->const_pointer->n_items, value->const_pointer->item_size);
+
+            for (int i = 0; i < value->const_pointer->n_items; i++)
+                set_ptr_value(
+                    * (uint8_t **) ptr + (i * value->const_pointer->item_size),
+                    value->const_pointer->items[i]
+                );
+
+            break;
+        }
+        case VALUE__WHICH_POINTER: {
+            * (void **) ptr = calloc(value->pointer->n_items, value->pointer->item_size);
+
+            for (int i = 0; i < value->pointer->n_items; i++)
+                set_ptr_value(
+                    * (uint8_t **) ptr + (i * value->pointer->item_size),
+                    value->pointer->items[i]
+                );
+
+            break;
+        }
+        case VALUE__WHICH_VARIANT: {
+            switch (value->variant->tag_repr) {
+                case INT_REPR__U8: * (uint8_t *) ptr = (uint8_t) value->variant->case_idx; break;
+                case INT_REPR__U16: * (uint16_t *) ptr = (uint16_t) value->variant->case_idx; break;
+                case INT_REPR__U32: * (uint32_t *) ptr = (uint32_t) value->variant->case_idx; break;
+                case INT_REPR__U64: * (uint64_t *) ptr = value->variant->case_idx; break;
+                case _INT_REPR_IS_INT_SIZE: fail("set_ptr_value: invalid variant tag repr");
+            }
+
+            if (
+                value->variant->payload_option_case
+                == VALUE__VARIANT__PAYLOAD_OPTION_PAYLOAD_SOME
+            )
+                set_ptr_value(
+                    (uint8_t *) ptr + value->variant->payload_offset,
+                    value->variant->payload_some
+                );
+
+            break;
+        }
+        case VALUE__WHICH__NOT_SET:
+        case _VALUE__WHICH__CASE_IS_INT_SIZE: fail("set_ptr_value: invalid value");
     }
 }
 
-static struct resource alloc_raw_value(Type * type, RawValue * raw_value) {
-    void *   ptr     = NULL;
-    size_t   size    = 0;
-    bool     has_len = false;
-    uint32_t len     = 0;
+static void free_ptr_value(void * ptr, const Value * value) {
+    switch (value->which_case) {
+        case VALUE__WHICH_BUILTIN: break;
+        case VALUE__WHICH_STRING: free(* (void **) ptr); break;
+        case VALUE__WHICH_BITFLAGS: break;
+        case VALUE__WHICH_HANDLE: break;
+        case VALUE__WHICH_ARRAY: {
+            for (int i = 0; i < value->array->n_items; i++)
+                free_ptr_value(
+                    * (uint8_t **) ptr + (i * value->array->item_size),
+                    value->array->items[i]
+                );
 
-    switch (raw_value->which_case) {
-        case RAW_VALUE__WHICH_BUILTIN: {
-            switch (raw_value->builtin->which_case) {
-                case RAW_VALUE__BUILTIN__WHICH_U8: {
-                    ptr  = calloc(1, sizeof(uint8_t));
-                    size = sizeof(uint8_t);
-
-                    break;
-                }
-                case RAW_VALUE__BUILTIN__WHICH_U32: {
-                    ptr  = calloc(1, sizeof(uint32_t));
-                    size = sizeof(uint32_t);
-
-                    break;
-                }
-                case RAW_VALUE__BUILTIN__WHICH_U64: {
-                    ptr  = calloc(1, sizeof(uint64_t));
-                    size = sizeof(uint64_t);
-
-                    break;
-                }
-                case RAW_VALUE__BUILTIN__WHICH_S64: {
-                    ptr  = calloc(1, sizeof(int64_t));
-                    size = sizeof(int64_t);
-
-                    break;
-                }
-                case RAW_VALUE__BUILTIN__WHICH__NOT_SET:
-                case _RAW_VALUE__BUILTIN__WHICH__CASE_IS_INT_SIZE: fail("invalid builtin type");
-            }
+            free(* (void **) ptr);
 
             break;
         }
-        case RAW_VALUE__WHICH_STRING: {
-            ptr = malloc(raw_value->string.len);
-            len = raw_value->string.len;
+        case VALUE__WHICH_RECORD: {
+            for (int i = 0; i < value->record->n_members; i++)
+                free_ptr_value(
+                    (uint8_t *) ptr + value->record->members[i]->offset,
+                    value->record->members[i]->value
+                );
 
             break;
         }
-        case RAW_VALUE__WHICH_BITFLAGS: {
-            switch (type->bitflags->repr) {
-                case _INT_REPR_IS_INT_SIZE:
-                case INT_REPR__INT_REPR_UNKNOWN: fail("unknown int repr");
-                case INT_REPR__INT_REPR_U8:  ptr = calloc(1, sizeof(uint8_t)); break;
-                case INT_REPR__INT_REPR_U16: ptr = calloc(1, sizeof(uint16_t)); break;
-                case INT_REPR__INT_REPR_U32: ptr = calloc(1, sizeof(uint32_t)); break;
-                case INT_REPR__INT_REPR_U64: ptr = calloc(1, sizeof(uint64_t)); break;
-            }
+        case VALUE__WHICH_CONST_POINTER: {
+            for (int i = 0; i < value->const_pointer->n_items; i++)
+                free_ptr_value(
+                    * (uint8_t **) ptr + (i * value->const_pointer->item_size),
+                    value->const_pointer->items[i]
+                );
+
+            free(* (void **) ptr);
 
             break;
         }
-        case RAW_VALUE__WHICH_HANDLE: ptr = malloc(sizeof(int32_t)); break;
-        case RAW_VALUE__WHICH_ARRAY: {
-            ptr = malloc(raw_value->array->n_items * type->array->item_size);
-            len = raw_value->array->n_items;
+        case VALUE__WHICH_POINTER: {
+            for (int i = 0; i < value->pointer->n_items; i++)
+                free_ptr_value(
+                    * (uint8_t **) ptr + (i * value->pointer->item_size),
+                    value->pointer->items[i]
+                );
+
+            free(* (void **) ptr);
 
             break;
         }
-        case RAW_VALUE__WHICH_RECORD: ptr = malloc(type->record->size); break;
-        case RAW_VALUE__WHICH_CONST_POINTER: ptr = malloc(sizeof(void *)); break;
-        case RAW_VALUE__WHICH_POINTER: ptr = malloc(sizeof(void *)); break;
-        case RAW_VALUE__WHICH_VARIANT: ptr = calloc(type->variant->size, 0); break;
-        case RAW_VALUE__WHICH__NOT_SET:
-        case _RAW_VALUE__WHICH__CASE_IS_INT_SIZE: fail("invalid raw value type");
+        case VALUE__WHICH_VARIANT: {
+            if (
+                value->variant->payload_option_case
+                == VALUE__VARIANT__PAYLOAD_OPTION_PAYLOAD_SOME
+            )
+                free_ptr_value(
+                    (uint8_t *) ptr + value->variant->payload_offset,
+                    value->variant->payload_some
+                );
+
+            break;
+        }
+        case VALUE__WHICH__NOT_SET:
+        case _VALUE__WHICH__CASE_IS_INT_SIZE: fail("free_ptr_value: invalid value");
     }
-    if (ptr == NULL) fail("failed to allocate param ptr");
-
-    return (struct resource) {
-        .ptr     = ptr,
-        .size    = size,
-        .has_len = has_len,
-        .len     = len,
-    };
 }
 
-ValueView * value_view_new(Type * type, void * ptr, int n) {
-    ValueView * view = malloc(sizeof(ValueView));
-    PureValue * pure = malloc(sizeof(PureValue));
+static Value * value_new(const Value * v, const void * ptr) {
+    Value * value = malloc(sizeof(Value));
 
-    value_view__init(view);
-    pure_value__init(pure);
+    value__init(value);
 
-    switch (type->which_case) {
-        case TYPE__WHICH_BUILTIN: {
-            RawValue__Builtin * builtin = malloc(sizeof(RawValue__Builtin));
+    value->which_case = v->which_case;
 
-            raw_value__builtin__init(builtin);
+    switch (v->which_case) {
+        case VALUE__WHICH_BUILTIN: {
+            value->builtin = malloc(sizeof(Value__Builtin));
 
-            switch (type->builtin->which_case) {
-                case TYPE__BUILTIN__WHICH_U8: {
-                    builtin->which_case = RAW_VALUE__BUILTIN__WHICH_U8;
-                    builtin->u8 = * (uint8_t *) ptr;
+            value__builtin__init(value->builtin);
 
-                    break;
-                }
-                case TYPE__BUILTIN__WHICH_U32: {
-                    builtin->which_case = RAW_VALUE__BUILTIN__WHICH_U32;
-                    builtin->u32 = * (uint32_t *) ptr;
+            value->builtin->which_case = v->builtin->which_case;
 
-                    break;
-                }
-                case TYPE__BUILTIN__WHICH_U64: {
-                    builtin->which_case = RAW_VALUE__BUILTIN__WHICH_U64;
-                    builtin->u64 = * (uint64_t *) ptr;
-
-                    break;
-                }
-                case TYPE__BUILTIN__WHICH_S64: {
-                    builtin->which_case = RAW_VALUE__BUILTIN__WHICH_S64;
-                    builtin->s64 = * (int64_t *) ptr;
-
-                    break;
-                }
-                case TYPE__BUILTIN__WHICH__NOT_SET:
-                case _TYPE__BUILTIN__WHICH__CASE_IS_INT_SIZE: fail("unreachable");
+            switch (v->builtin->which_case) {
+                case VALUE__BUILTIN__WHICH_U8: value->builtin->u8 = * (uint8_t *) ptr; break;
+                case VALUE__BUILTIN__WHICH_U32: value->builtin->u32 = * (uint32_t *) ptr; break;
+                case VALUE__BUILTIN__WHICH_U64: value->builtin->u64 = * (uint64_t *) ptr; break;
+                case VALUE__BUILTIN__WHICH_S64: value->builtin->s64 = * (int64_t *) ptr; break;
+                case VALUE__BUILTIN__WHICH__NOT_SET:
+                case _VALUE__BUILTIN__WHICH__CASE_IS_INT_SIZE: fail("value_new: invalid builtin value");
             }
 
-            pure->which_case = PURE_VALUE__WHICH_BUILTIN;
-            pure->builtin = builtin;
+            break;
+        }
+        case VALUE__WHICH_STRING: {
+            uint8_t * data = calloc(v->string.len, 1);
+
+            memcpy(data, ptr, v->string.len);
+
+            value->string = (ProtobufCBinaryData) {
+                .data = data,
+                .len = v->string.len,
+            };
 
             break;
         }
-        case TYPE__WHICH_STRING: fail("unimplemented: value_view_new string");
-        case TYPE__WHICH_BITFLAGS: {
-            BitflagsValue * bitflags = malloc(sizeof(BitflagsValue));
-            protobuf_c_boolean * members = malloc(type->bitflags->n_members * sizeof(protobuf_c_boolean));
+        case VALUE__WHICH_BITFLAGS: {
+            value->bitflags = malloc(sizeof(Value__Bitflags));
 
-            for (int i = 0; i < type->bitflags->n_members; i++) {
-                bool member = false;
+            value__bitflags__init(value->bitflags);
 
-                switch (type->bitflags->repr) {
-                    case INT_REPR__INT_REPR_U8: member = ((* (uint8_t *) ptr) >> (7 - i)) & 0x1; break;
-                    case INT_REPR__INT_REPR_U16: member = ((* (uint16_t *) ptr) >> (15 - i)) & 0x1; break;
-                    case INT_REPR__INT_REPR_U32: member = ((* (uint32_t *) ptr) >> (31 - i)) & 0x1; break;
-                    case INT_REPR__INT_REPR_U64: member = ((* (uint64_t *) ptr) >> (63 - i)) & 0x1; break;
-                    case INT_REPR__INT_REPR_UNKNOWN:
-                    case _INT_REPR_IS_INT_SIZE: fail("unknown int repr");
+            Value__Bitflags__Member ** members =
+                calloc(v->bitflags->n_members, sizeof(Value__Bitflags__Member *));
+
+            for (int i = 0; i < v->bitflags->n_members; i++) {
+                members[i] = malloc(sizeof(Value__Bitflags__Member));
+
+                value__bitflags__member__init(members[i]);
+
+                size_t name_len = strlen(v->bitflags->members[i]->name);
+                char * name = calloc(name_len + 1, sizeof(char));
+
+                strncpy(name, v->bitflags->members[i]->name, name_len);
+
+                bool value = false;
+
+                switch (v->bitflags->repr) {
+                    case INT_REPR__U8: value = 0x1 & (* (uint8_t *) ptr >> i); break;
+                    case INT_REPR__U16: value = 0x1 & (* (uint16_t *) ptr >> i); break;
+                    case INT_REPR__U32: value = 0x1 & (* (uint32_t *) ptr >> i); break;
+                    case INT_REPR__U64: value = 0x1 & (* (uint64_t *) ptr >> i); break;
+                    case _INT_REPR_IS_INT_SIZE: fail("value_new: invalid bitflags repr");
                 }
 
-                if (member) { members[i] = true; }
-                else { members[i] = false; }
+                members[i]->name = name;
+                members[i]->value = value;
             }
 
-            bitflags->n_members = type->bitflags->n_members;
-            bitflags->members   = members;
-            
-            pure->which_case = PURE_VALUE__WHICH_BITFLAGS;
-            pure->bitflags   = bitflags;
+            value->bitflags->repr = v->bitflags->repr;
+            value->bitflags->members = members;
+            value->bitflags->n_members = v->bitflags->n_members;
 
             break;
         }
-        case TYPE__WHICH_HANDLE: {
-            pure->which_case = PURE_VALUE__WHICH_HANDLE;
-            pure->handle     = * (uint32_t *) ptr;
+        case VALUE__WHICH_HANDLE: value->handle = * (uint32_t *) ptr; break;
+        case VALUE__WHICH_ARRAY: {
+            value->array = malloc(sizeof(Value__Array));
 
-            break;
-        }
-        case TYPE__WHICH_ARRAY: {
-            PureValue__List * list = malloc(sizeof(PureValue__List));
+            value__array__init(value->array);
 
-            pure_value__list__init(list);
+            Value ** items = calloc(v->array->n_items, sizeof(Value *));
 
-            list->n_items = n;
-            list->items = malloc(n * sizeof(ValueView *));
-
-            for (int i = 0; i < n; i++) {
-                void * item_ptr = ((uint8_t *) ptr) + i * type->array->item_size;
-
-                list->items[i] = value_view_new(type->array->type, item_ptr, 0);
-            }
-
-            pure->which_case = PURE_VALUE__WHICH_LIST;
-            pure->list = list;
-
-            break;
-        }
-        case TYPE__WHICH_RECORD: {
-            PureValue__Record * record = malloc(sizeof(PureValue__Record));
-
-            pure_value__record__init(record);
-
-            record->n_members = type->record->n_members;
-            record->members = malloc(type->record->n_members * sizeof(PureValue__Record__Member *));
-
-            for (int i = 0; i < type->record->n_members; i++) {
-                record->members[i] = malloc(sizeof(PureValue__Record__Member));
-
-                pure_value__record__member__init(record->members[i]);
-
-                record->members[i]->name.len = type->record->members[i]->name.len;
-                record->members[i]->name.data = malloc(type->record->members[i]->name.len);
-
-                memcpy(
-                    record->members[i]->name.data,
-                    type->record->members[i]->name.data,
-                    type->record->members[i]->name.len
+            for (int i = 0; i < v->array->n_items; i++)
+                items[i] = value_new(
+                    v->array->items[i],
+                    (uint8_t *) ptr + i * v->array->item_size
                 );
 
-                record->members[i]->value = value_view_new(
-                    type->record->members[i]->type,
-                    ((uint8_t *) ptr) + type->record->members[i]->offset,
-                    0
+            value->array->items = items;
+            value->array->n_items = v->array->n_items;
+            value->array->item_size = v->array->item_size;
+
+            break;
+        }
+        case VALUE__WHICH_RECORD: {
+            value->record = malloc(sizeof(Value__Record));
+
+            value__record__init(value->record);
+
+            Value__Record__Member ** members =
+                calloc(v->record->n_members, sizeof(Value__Record__Member *));
+
+            for (int i = 0; i < v->record->n_members; i++) {
+                members[i] = malloc(sizeof(Value__Record__Member));
+
+                value__record__member__init(members[i]);
+
+                size_t name_len = strlen(v->record->members[i]->name);
+                char * name = calloc(name_len + 1, sizeof(char));
+
+                strncpy(name, v->record->members[i]->name, name_len);
+
+                members[i]->name = name;
+                members[i]->value = value_new(
+                    v->record->members[i]->value,
+                    (uint8_t *) ptr + v->record->members[i]->offset
                 );
+                members[i]->offset = v->record->members[i]->offset;
             }
 
-            pure->which_case = PURE_VALUE__WHICH_RECORD;
-            pure->record = record;
+            value->record->members = members;
+            value->record->n_members = v->record->n_members;
+            value->record->size = v->record->size;
 
             break;
         }
-        case TYPE__WHICH_CONST_POINTER: fail("unimplemented: value_view_new const_pointer");
-        case TYPE__WHICH_POINTER: {
-            PureValue__Pointer * pointer = malloc(sizeof(PureValue__Pointer));
+        case VALUE__WHICH_CONST_POINTER: {
+            value->const_pointer = malloc(sizeof(Value__Array));
 
-            pure_value__pointer__init(pointer);
+            value__array__init(value->const_pointer);
 
-            pointer->n_items = n;
-            pointer->items = malloc(n * sizeof(ValueView *));
+            Value ** items = calloc(v->const_pointer->n_items, sizeof(Value *));
 
-            for (int i = 0; i < n; i++) {
-                fprintf(stderr, "whoa0\n");
-                pointer->items[i] = value_view_new(type->pointer, ((uint8_t *) ptr) + n * type_size(type->pointer), 0);
-                fprintf(stderr, "whoa1\n");
-            }
+            for (int i = 0; i < v->const_pointer->n_items; i++)
+                items[i] = value_new(
+                    v->const_pointer->items[i],
+                    (uint8_t *) ptr + i * v->const_pointer->item_size
+                );
 
-            pure->which_case = PURE_VALUE__WHICH_POINTER;
-            pure->pointer = pointer;
+            value->const_pointer->items = items;
+            value->const_pointer->item_size = v->const_pointer->item_size;
+            value->const_pointer->n_items = v->const_pointer->n_items;
 
             break;
         }
-        case TYPE__WHICH_VARIANT: {
-            PureValue__Variant * variant = malloc(sizeof(PureValue__Variant));
+        case VALUE__WHICH_POINTER: {
+            value->pointer = malloc(sizeof(Value__Array));
 
-            pure_value__variant__init(variant);
+            value__array__init(value->pointer);
 
-            uint32_t case_idx = 0;
+            Value ** items = calloc(v->pointer->n_items, sizeof(Value *));
 
-            switch (type->variant->tag_repr) {
-                case INT_REPR__INT_REPR_U8: case_idx = * (uint8_t *) ptr; break;
-                case INT_REPR__INT_REPR_U16: case_idx = * (uint16_t *) ptr; break;
-                case INT_REPR__INT_REPR_U32: case_idx = * (uint32_t *) ptr; break;
-                case INT_REPR__INT_REPR_U64: fail("unimplemented: int repr u64");
-                case INT_REPR__INT_REPR_UNKNOWN:
-                case _INT_REPR_IS_INT_SIZE: fail("invalid variant tag repr");
+            for (int i = 0; i < v->pointer->n_items; i++)
+                items[i] = value_new(
+                    v->pointer->items[i],
+                    (uint8_t *) ptr + i * v->pointer->item_size
+                );
+
+            value->pointer->items = items;
+            value->pointer->item_size = v->pointer->item_size;
+            value->pointer->n_items = v->pointer->n_items;
+
+            break;
+        }
+        case VALUE__WHICH_VARIANT: {
+            value->variant = malloc(sizeof(Value__Variant));
+            value__variant__init(value->variant);
+
+            uint64_t case_idx = 0;
+
+            switch (v->variant->tag_repr) {
+                case INT_REPR__U8: case_idx = * (uint8_t *) ptr; break;
+                case INT_REPR__U16: case_idx = * (uint16_t *) ptr; break;
+                case INT_REPR__U32: case_idx = * (uint32_t *) ptr; break;
+                case INT_REPR__U64: case_idx = * (uint64_t *) ptr; break;
+                case _INT_REPR_IS_INT_SIZE: fail("value_new: invalid variant tag repr");
             }
 
-            uint8_t * case_name_data = malloc(type->variant->cases[case_idx]->name.len);
-            memcpy(
-                case_name_data,
-                type->variant->cases[case_idx]->name.data,
-                type->variant->cases[case_idx]->name.len
-            );
+            Empty * payload_none = NULL;
+            Value * payload_some = NULL;
 
-            PureValue__Variant__OptionalPayloadCase optional_payload_case;
-            ValueView * payload = NULL;
-
-            switch (type->variant->cases[case_idx]->optional_type_case) {
-                case TYPE__VARIANT__CASE__OPTIONAL_TYPE__NOT_SET: {
-                    optional_payload_case = PURE_VALUE__VARIANT__OPTIONAL_PAYLOAD__NOT_SET;
+            switch (v->variant->payload_option_case) {
+                case VALUE__VARIANT__PAYLOAD_OPTION_PAYLOAD_NONE: {
+                    payload_none = malloc(sizeof(Empty));
                     break;
                 }
-                case TYPE__VARIANT__CASE__OPTIONAL_TYPE_TYPE: {
-                    optional_payload_case = PURE_VALUE__VARIANT__OPTIONAL_PAYLOAD_PAYLOAD;
-                    payload = value_view_new(
-                        type->variant->cases[case_idx]->type,
-                        (uint8_t *) ptr + type->variant->payload_offset,
-                        0
+                case VALUE__VARIANT__PAYLOAD_OPTION_PAYLOAD_SOME: {
+                    payload_some = value_new(
+                        v->variant->payload_some,
+                        (uint8_t *) ptr + v->variant->payload_offset
                     );
                     break;
                 }
-                case _TYPE__VARIANT__CASE__OPTIONAL_TYPE__CASE_IS_INT_SIZE: fail("unreachable");
+                case VALUE__VARIANT__PAYLOAD_OPTION__NOT_SET:
+                case _VALUE__VARIANT__PAYLOAD_OPTION__CASE_IS_INT_SIZE: fail("value_new: invalid variant payload option");
             }
 
-            variant->case_idx  = case_idx;
-            variant->case_name = (ProtobufCBinaryData){
-                .len  = type->variant->cases[case_idx]->name.len,
-                .data = case_name_data,
-            };
-            variant->optional_payload_case = optional_payload_case;
-            variant->payload = payload;
-            
-            pure->which_case = PURE_VALUE__WHICH_VARIANT;
-            pure->variant    = variant;
+            value->variant->case_idx = case_idx;
+            value->variant->payload_none = payload_none;
+            value->variant->payload_some = payload_some;
+            value->variant->payload_option_case = v->variant->payload_option_case;
+            value->variant->payload_offset = v->variant->payload_offset;
+            value->variant->tag_repr = v->variant->tag_repr;
+            value->variant->size = v->variant->size;
 
             break;
         }
-        case TYPE__WHICH__NOT_SET:
-        case _TYPE__WHICH__CASE_IS_INT_SIZE: fail("value_view_new: invalid type");
+        case VALUE__WHICH__NOT_SET:
+        case _VALUE__WHICH__CASE_IS_INT_SIZE: fail("value_new: invalid value");
     }
 
-    view->memory_offset = (uint32_t) ptr;
-    view->content = pure;
-
-    return view;
+    return value;
 }
 
-static void * handle_param_pre(ValueSpec * spec, int32_t * len) {
-    switch (spec->which_case) {
-        case VALUE_SPEC__WHICH_RESOURCE: {
-            struct resource_map_entry * resource_entry =
-                hmgetp_null(resource_map, spec->resource->id);
-            if (resource_entry == NULL) fail("param resource not found");
+static void value_free(Value * value) {
+    switch (value->which_case) {
+        case VALUE__WHICH_BUILTIN: free(value->builtin); break;
+        case VALUE__WHICH_STRING: free(value->string.data); break;
+        case VALUE__WHICH_BITFLAGS: {
+            for (int i = 0; i < value->bitflags->n_members; i++)
+                free(value->bitflags->members[i]);
 
-            return resource_entry->value.ptr;
+            free(value->bitflags->members);
+            free(value->bitflags);
+
+            break;
         }
-        case VALUE_SPEC__WHICH_RAW_VALUE: {
-            void * ptr = NULL;
+        case VALUE__WHICH_HANDLE: break;
+        case VALUE__WHICH_ARRAY: {
+            for (int i = 0; i < value->array->n_items; i++)
+                value_free(value->array->items[i]);
 
-            switch (spec->raw_value->which_case) {
-                case RAW_VALUE__WHICH_BUILTIN: {
-                    switch (spec->raw_value->builtin->which_case) {
-                        case RAW_VALUE__BUILTIN__WHICH_U8:  ptr = calloc(sizeof(uint8_t), 0); break;
-                        case RAW_VALUE__BUILTIN__WHICH_U32: ptr = calloc(sizeof(uint32_t), 0); break;
-                        case RAW_VALUE__BUILTIN__WHICH_U64: ptr = calloc(sizeof(uint64_t), 0); break;
-                        case RAW_VALUE__BUILTIN__WHICH_S64: ptr = calloc(sizeof(int64_t), 0);  break;
-                        case RAW_VALUE__BUILTIN__WHICH__NOT_SET:
-                        case _RAW_VALUE__BUILTIN__WHICH__CASE_IS_INT_SIZE: fail("invalid builtin type");
-                    }
+            free(value->array->items);
+            free(value->array);
 
+            break;
+        }
+        case VALUE__WHICH_RECORD: {
+            for (int i = 0; i < value->record->n_members; i++) {
+                value_free(value->record->members[i]->value);
+                free(value->record->members[i]->name);
+                free(value->record->members[i]);
+            }
+
+            free(value->record->members);
+            free(value->record);
+
+            break;
+        }
+        case VALUE__WHICH_CONST_POINTER: {
+            for (int i = 0; i < value->const_pointer->n_items; i++)
+                value_free(value->const_pointer->items[i]);
+
+            free(value->const_pointer->items);
+            free(value->const_pointer);
+
+            break;
+        }
+        case VALUE__WHICH_POINTER: {
+            for (int i = 0; i < value->pointer->n_items; i++)
+                value_free(value->pointer->items[i]);
+
+            free(value->pointer->items);
+            free(value->pointer);
+
+            break;
+        }
+        case VALUE__WHICH_VARIANT: {
+            switch (value->variant->payload_option_case) {
+                case VALUE__VARIANT__PAYLOAD_OPTION_PAYLOAD_NONE: {
+                    free(value->variant->payload_none);
                     break;
                 }
-                case RAW_VALUE__WHICH_STRING: {
-                    * len = spec->raw_value->string.len;
-                    ptr   = malloc(spec->raw_value->string.len);
-
+                case VALUE__VARIANT__PAYLOAD_OPTION_PAYLOAD_SOME: {
+                    value_free(value->variant->payload_some);
                     break;
                 }
-                case RAW_VALUE__WHICH_BITFLAGS: {
-                    switch (spec->type->bitflags->repr) {
-                        case _INT_REPR_IS_INT_SIZE:
-                        case INT_REPR__INT_REPR_UNKNOWN: fail("unknown int repr");
-                        case INT_REPR__INT_REPR_U8:
-                        case INT_REPR__INT_REPR_U16:
-                        case INT_REPR__INT_REPR_U32: ptr = calloc(1, sizeof(uint32_t)); break;
-                        case INT_REPR__INT_REPR_U64: ptr = calloc(1, sizeof(uint64_t)); break;
-                    }
-
-                    break;
-                }
-                case RAW_VALUE__WHICH_HANDLE: ptr = malloc(sizeof(int32_t)); break;
-                case RAW_VALUE__WHICH_ARRAY: {
-                    ptr = malloc(spec->raw_value->array->n_items * spec->type->array->item_size);
-                    * len = spec->raw_value->array->n_items;
-
-                    break;
-                }
-                case RAW_VALUE__WHICH_RECORD: ptr = malloc(spec->type->record->size); break;
-                case RAW_VALUE__WHICH_CONST_POINTER: ptr = malloc(sizeof(void *)); break;
-                case RAW_VALUE__WHICH_POINTER: ptr = malloc(sizeof(void *)); break;
-                case RAW_VALUE__WHICH_VARIANT: ptr = calloc(spec->type->variant->size, 0); break;
-                case RAW_VALUE__WHICH__NOT_SET:
-                case _RAW_VALUE__WHICH__CASE_IS_INT_SIZE: fail("invalid raw value type");
+                case VALUE__VARIANT__PAYLOAD_OPTION__NOT_SET:
+                case _VALUE__VARIANT__PAYLOAD_OPTION__CASE_IS_INT_SIZE: fail("value_free: invalid variant payload option");
             }
-            if (ptr == NULL) fail("failed to allocate param ptr");
 
-            set_ptr_value(spec, ptr);
-
-            return ptr;
-        }
-        case VALUE_SPEC__WHICH__NOT_SET:
-        case _VALUE_SPEC__WHICH__CASE_IS_INT_SIZE: fail("invalid value spec type");
-    }
-}
-
-static void handle_param_post(ValueSpec * spec, void * ptr) {
-    switch (spec->which_case) {
-        case VALUE_SPEC__WHICH_RAW_VALUE: free(ptr); break;
-        case VALUE_SPEC__WHICH_RESOURCE: break;
-        case VALUE_SPEC__WHICH__NOT_SET:
-        case _VALUE_SPEC__WHICH__CASE_IS_INT_SIZE: fail("invalid param value spec");
-    }
-}
-
-static void * handle_result_pre(ResultSpec * spec) {
-    fprintf(stderr, "handle_result_pre\n");
-    return malloc(type_size(spec->type));
-}
-
-static ValueView * handle_result_post(ResultSpec * spec, void * ptr) {
-    ValueView * view = value_view_new(spec->type, ptr, 0);
-
-    switch (spec->which_case) {
-        case RESULT_SPEC__WHICH_RESOURCE: {
-            const size_t size = type_size(spec->type);
-            const struct resource resource = {
-                .ptr     = ptr,
-                .size    = size,
-                .has_len = false,
-                .len     = 0,
-            };
-
-            hmput(resource_map, spec->resource->id, resource);
+            free(value->variant);
 
             break;
         }
-        case RESULT_SPEC__WHICH_IGNORE: free(ptr); break;
-        case RESULT_SPEC__WHICH__NOT_SET:
-        case _RESULT_SPEC__WHICH__CASE_IS_INT_SIZE: fail("unknown result spec");
+        case VALUE__WHICH__NOT_SET:
+        case _VALUE__WHICH__CASE_IS_INT_SIZE: fail("value_free: invalid value");
     }
 
-    return view;
+    free(value);
 }
 
-static void handle_decl(Request__Decl * decl) {
-    struct resource resource = alloc_raw_value(decl->type, decl->value);
+static void * value_ptr_new(const Value * value, int32_t * len) {
+    void * ptr = NULL;
 
-    switch (decl->value->which_case) {
-        case RAW_VALUE__WHICH_BUILTIN: {
-            switch (decl->value->builtin->which_case) {
-                case RAW_VALUE__BUILTIN__WHICH_U8:  * (uint8_t  *) resource.ptr = decl->value->builtin->u8; break;
-                case RAW_VALUE__BUILTIN__WHICH_U32: * (uint32_t *) resource.ptr = decl->value->builtin->u32; break;
-                case RAW_VALUE__BUILTIN__WHICH_U64: * (uint64_t *) resource.ptr = decl->value->builtin->u64; break;
-                case RAW_VALUE__BUILTIN__WHICH_S64: * (int64_t  *) resource.ptr = decl->value->builtin->s64; break;
-                case RAW_VALUE__BUILTIN__WHICH__NOT_SET:
-                case _RAW_VALUE__BUILTIN__WHICH__CASE_IS_INT_SIZE: fail("invalid decl builtin type");
+    switch (value->which_case) {
+        case VALUE__WHICH_BUILTIN: {
+            switch (value->builtin->which_case) {
+                case VALUE__BUILTIN__WHICH_U8: ptr = calloc(1, sizeof(uint8_t)); break;
+                case VALUE__BUILTIN__WHICH_U32: ptr = calloc(1, sizeof(uint32_t)); break;
+                case VALUE__BUILTIN__WHICH_U64: ptr = calloc(1, sizeof(uint64_t)); break;
+                case VALUE__BUILTIN__WHICH_S64: ptr = calloc(1, sizeof(int64_t)); break;
+                case VALUE__BUILTIN__WHICH__NOT_SET:
+                case _VALUE__BUILTIN__WHICH__CASE_IS_INT_SIZE: fail("invalid builtin");
             }
 
             break;
         }
-        case RAW_VALUE__WHICH_STRING:   fail("cannot decl string");
-        case RAW_VALUE__WHICH_BITFLAGS: fail("cannot decl bitflags");
-        case RAW_VALUE__WHICH_HANDLE: * (uint32_t *) resource.ptr = decl->value->handle->value; break;
-        case RAW_VALUE__WHICH_ARRAY: fail("cannot decl array");
-        case RAW_VALUE__WHICH_RECORD: {
-                for (int i = 0; i < decl->value->record->n_members; i++) {
-                    Type__Record__Member * member = decl->type->record->members[i];
-                    void * member_ptr = ((uint8_t *) resource.ptr) + member->offset;
-
-                    set_ptr_value(decl->value->record->members[i]->value, member_ptr);
-                }
+        case VALUE__WHICH_STRING: {
+            ptr = calloc(1, sizeof(char *));
+            * len = value->string.len;
 
             break;
         }
-        case RAW_VALUE__WHICH_CONST_POINTER: fail("cannot decl const pointer");
-        case RAW_VALUE__WHICH_POINTER: fail("cannot decl pointer");
-        case RAW_VALUE__WHICH_VARIANT: fail("cannot decl variant");
-        case RAW_VALUE__WHICH__NOT_SET:
-        case _RAW_VALUE__WHICH__CASE_IS_INT_SIZE: fail("invalid decl valid");
+        case VALUE__WHICH_BITFLAGS: {
+            switch (value->bitflags->repr) {
+                case INT_REPR__U8: ptr = calloc(1, sizeof(uint8_t)); break;
+                case INT_REPR__U16: ptr = calloc(1, sizeof(uint16_t)); break;
+                case INT_REPR__U32: ptr = calloc(1, sizeof(uint32_t)); break;
+                case INT_REPR__U64: ptr = calloc(1, sizeof(uint64_t)); break;
+                case _INT_REPR_IS_INT_SIZE: fail("value_ptr_new: invalid int repr");
+            }
+
+            break;
+        }
+        case VALUE__WHICH_HANDLE: ptr = calloc(1, sizeof(int32_t)); break;
+        case VALUE__WHICH_ARRAY: {
+            ptr = malloc(sizeof(void *));
+            * len = value->array->n_items;
+
+            break;
+        }
+        case VALUE__WHICH_RECORD: ptr = calloc(1, value->record->size); break;
+        case VALUE__WHICH_CONST_POINTER: ptr = calloc(1, sizeof(void *)); break;
+        case VALUE__WHICH_POINTER: ptr = calloc(1, sizeof(void *)); break;
+        case VALUE__WHICH_VARIANT: ptr = calloc(1, value->variant->size); break;
+        case VALUE__WHICH__NOT_SET:
+        case _VALUE__WHICH__CASE_IS_INT_SIZE: fail("value_ptr_new: invalid value");
     }
+    if (ptr == NULL) fail("failed to allocate ptr");
 
-    hmput(resource_map, decl->resource_id, resource);
+    set_ptr_value(ptr, value);
 
-    Response       msg   = RESPONSE__INIT;
-    Response__Decl decl_ = RESPONSE__DECL__INIT;
-
-    msg.decl       = &decl_;
-    msg.which_case = RESPONSE__WHICH_DECL;
-
-    const size_t msg_size = response__get_packed_size(&msg);
-    void *       buf      = malloc(msg_size);
-
-    uint8_t size_buf[8];
-
-    u64_to_bytes(size_buf, msg_size);
-    response__pack(&msg, buf);
-
-    size_t blks_written = fwrite(size_buf, 8, 1, stdout);
-    if (blks_written != 1) fail("failed to write message size out");
-
-    blks_written = fwrite(buf, msg_size, 1, stdout);
-    if (blks_written != 1) fail("failed to write message out");
-
-    fflush(stdout);
-    free(buf);
+    return ptr;
 }
 
-void value_view_free(ValueView * ptr) {
-    switch (ptr->content->which_case) {
-        case PURE_VALUE__WHICH_BUILTIN: free(ptr->content->builtin); break;
-        case PURE_VALUE__WHICH_BITFLAGS: {
-            free(ptr->content->bitflags->members);
-            free(ptr->content->bitflags);
-            
-            break;
-        }
-        case PURE_VALUE__WHICH_HANDLE: break;
-        case PURE_VALUE__WHICH_LIST: {
-            for (int i = 0; i < ptr->content->list->n_items; i++) {
-                value_view_free(ptr->content->list->items[i]);
-            }
+// Translate the value represented by `ptr` to a new `Value` an return it while
+// freeing the old `Value` and the `ptr` itself.
+// Must be paired with a call to `value_free()`.
+static Value * value_ptr_free(const Value * value, void * ptr) {
+    Value * v = value_new(value, ptr);
 
-            free(ptr->content->list->items);
-            free(ptr->content->list);
-
-            break;
-        }
-        case PURE_VALUE__WHICH_RECORD: {
-            for (int i = 0; i < ptr->content->record->n_members; i++) {
-                value_view_free(ptr->content->record->members[i]->value);
-                free(ptr->content->record->members[i]->name.data);
-                free(ptr->content->record->members[i]);
-            }
-
-            free(ptr->content->record->members);
-            free(ptr->content->record);
-
-            break;
-        }
-        case PURE_VALUE__WHICH_POINTER: {
-            for (int i = 0; i < ptr->content->pointer->n_items; i++) {
-                value_view_free(ptr->content->pointer->items[i]);
-            }
-
-            free(ptr->content->pointer->items);
-            free(ptr->content->pointer);
-
-            break;
-        }
-        case PURE_VALUE__WHICH_VARIANT: {
-            if (ptr->content->variant->optional_payload_case == PURE_VALUE__VARIANT__OPTIONAL_PAYLOAD_PAYLOAD) {
-                value_view_free(ptr->content->variant->payload);
-            }
-            
-            free(ptr->content->variant->case_name.data);
-            free(ptr->content->variant);
-
-            break;
-        }
-        case PURE_VALUE__WHICH__NOT_SET:
-        case _PURE_VALUE__WHICH__CASE_IS_INT_SIZE: fail("value_view_free unreachable");
-    }
-
-    free(ptr->content);
+    free_ptr_value(ptr, value);
     free(ptr);
+
+    return v;
 }
+
+#define SET_N_ALLOC(name, n) \
+    n_ ## name = n; \
+    name = calloc(n, sizeof(Value *));
 
 static void handle_call(Request__Call * call) {
     Response__Call response = RESPONSE__CALL__INIT;
-    ReturnValue    return_  = RETURN_VALUE__INIT;
+    Value ** params = NULL;
+    Value ** results = NULL;
+    size_t n_params = 0;
+    size_t n_results = 0;
 
-    ValueView ** params    = NULL;
-    ValueView ** results   = NULL;
-    int          n_params  = 0;
-    int          n_results = 0;
+    response.errno_option_case = RESPONSE__CALL__ERRNO_OPTION_ERRNO_SOME;
 
     switch (call->func) {
-        case WASI_FUNC__WASI_FUNC_UNKNOWN: fail("unknown func");
-        case WASI_FUNC__WASI_FUNC_ARGS_GET: {
-            void *  p0_argv_ptr     = handle_param_pre(call->params[0], NULL);
-            void *  p1_argv_buf_ptr = handle_param_pre(call->params[1], NULL);
-            int32_t p0_argv         = * (int32_t *) p0_argv_ptr;
-            int32_t p1_argv_buf     = * (int32_t *) p1_argv_buf_ptr;
+        case _WASI_FUNC_IS_INT_SIZE: fail("unreachable");
+        case WASI_FUNC__ARGS_GET: {
+            void * p0_argv_ptr = value_ptr_new(call->params[0], NULL);
+            void * p1_argv_buf_ptr = value_ptr_new(call->params[1], NULL);
+            int32_t p0_argv = (int32_t) (* (void **) p0_argv_ptr);
+            int32_t p1_argv_buf = (int32_t) (* (void **) p1_argv_buf_ptr);
 
-            int32_t errno = __imported_wasi_snapshot_preview1_args_get(p0_argv,  p1_argv_buf);
+            response.errno_some = __imported_wasi_snapshot_preview1_args_get(
+                p0_argv,
+                p1_argv_buf
+            );
 
-            handle_param_post(call->params[0], p0_argv_ptr);
-            handle_param_post(call->params[1], p1_argv_buf_ptr);
+            SET_N_ALLOC(params, 2);
+            SET_N_ALLOC(results, 0);
 
-            return_.which_case = RETURN_VALUE__WHICH_ERRNO;
-            return_.errno      = errno;
+            params[1] = value_ptr_free(call->params[1], p1_argv_buf_ptr);
+            params[0] = value_ptr_free(call->params[0], p0_argv_ptr);
 
             break;
         }
-        case WASI_FUNC__WASI_FUNC_ARGS_SIZES_GET: {
-            void *  r0_argv_size_ptr     = handle_result_pre(call->results[0]);
-            void *  r1_argv_buf_size_ptr = handle_result_pre(call->results[1]);
-            int32_t r0_argv_size         = (int32_t) r0_argv_size_ptr;
-            int32_t r1_argv_buf_size     = (int32_t) r1_argv_buf_size_ptr;
+        case WASI_FUNC__ARGS_SIZES_GET: {
+            void * r0_argv_size_ptr = value_ptr_new(call->results[0], NULL);
+            void * r1_argv_buf_size_ptr = value_ptr_new(call->results[1], NULL);
+            int32_t r0_argv_size = (int32_t) r0_argv_size_ptr;
+            int32_t r1_argv_buf_size = (int32_t) r1_argv_buf_size_ptr;
 
-            int32_t errno = __imported_wasi_snapshot_preview1_args_sizes_get(
+            response.errno_some = __imported_wasi_snapshot_preview1_args_sizes_get(
                 r0_argv_size,
                 r1_argv_buf_size
             );
 
-            handle_result_post(call->results[0], r0_argv_size_ptr);
-            handle_result_post(call->results[1], r1_argv_buf_size_ptr);
+            SET_N_ALLOC(params, 0);
+            SET_N_ALLOC(results, 2);
 
-            return_.which_case = RETURN_VALUE__WHICH_ERRNO;
-            return_.errno      = errno;
-
-            break;
-        };
-        case WASI_FUNC__WASI_FUNC_ENVIRON_GET: {
-            void *  p0_environ_ptr     = handle_param_pre(call->params[0], NULL);
-            void *  p1_environ_buf_ptr = handle_param_pre(call->params[1], NULL);
-            int32_t p0_environ         = * (int32_t *) p0_environ_ptr;
-            int32_t p1_environ_buf     = * (int32_t *) p1_environ_buf_ptr;
-
-            int32_t errno = __imported_wasi_snapshot_preview1_environ_get(p0_environ, p1_environ_buf);
-
-            handle_param_post(call->params[0], p0_environ_ptr);
-            handle_param_post(call->params[1], p1_environ_buf_ptr);
-
-            return_.which_case = RETURN_VALUE__WHICH_ERRNO;
-            return_.errno      = errno;
+            results[1] = value_ptr_free(call->results[1], r1_argv_buf_size_ptr);
+            results[0] = value_ptr_free(call->results[0], r0_argv_size_ptr);
 
             break;
         }
-        case WASI_FUNC__WASI_FUNC_ENVIRON_SIZES_GET: {
-            void *  r0_environ_size_ptr     = handle_result_pre(call->results[0]);
-            void *  r1_environ_buf_size_ptr = handle_result_pre(call->results[1]);
-            int32_t r0_environ_size         = (int32_t) r0_environ_size_ptr;
-            int32_t r1_environ_buf_size     = (int32_t) r1_environ_buf_size_ptr;
+        case WASI_FUNC__ENVIRON_GET: {
+            void * p0_environ_ptr = value_ptr_new(call->params[0], NULL);
+            void * p1_environ_buf_ptr = value_ptr_new(call->params[1], NULL);
+            int32_t p0_environ = * (int32_t *) p0_environ_ptr;
+            int32_t p1_environ_buf = * (int32_t *) p1_environ_buf_ptr;
 
-            int32_t errno = __imported_wasi_snapshot_preview1_environ_sizes_get(r0_environ_size, r1_environ_buf_size);
-
-            handle_result_post(call->results[0], r0_environ_size_ptr);
-            handle_result_post(call->results[1], r1_environ_buf_size_ptr);
-
-            return_.which_case = RETURN_VALUE__WHICH_ERRNO;
-            return_.errno      = errno;
-
-            break;
-        }
-        case WASI_FUNC__WASI_FUNC_CLOCK_RES_GET: {
-            void *  p0_clockid_ptr   = handle_param_pre(call->params[0], NULL);
-            void *  r0_clock_res_ptr = handle_result_pre(call->results[0]);
-            int32_t p0_clockid       = * (int32_t *) p0_clockid_ptr;
-            int32_t r0_clock_res     = (int32_t) r0_clock_res_ptr;
-
-            int32_t errno = __imported_wasi_snapshot_preview1_clock_res_get(
-                p0_clockid,
-                r0_clock_res
+            response.errno_some = __imported_wasi_snapshot_preview1_environ_get(
+                p0_environ,
+                p1_environ_buf
             );
 
-            handle_result_post(call->results[0], r0_clock_res_ptr);
-            handle_param_post(call->params[0], p0_clockid_ptr);
+            SET_N_ALLOC(params, 2);
+            SET_N_ALLOC(results, 0);
 
-            return_.which_case = RETURN_VALUE__WHICH_ERRNO;
-            return_.errno      = errno;
+            params[1] = value_ptr_free(call->params[1], p1_environ_buf_ptr);
+            params[2] = value_ptr_free(call->params[0], p0_environ_ptr);
 
             break;
         }
-        case WASI_FUNC__WASI_FUNC_CLOCK_TIME_GET: {
-            void *  p0_clockid_ptr   = handle_param_pre(call->params[0], NULL);
-            void *  p1_precision_ptr = handle_param_pre(call->params[1], NULL);
-            void *  r0_time_ptr      = handle_result_pre(call->results[0]);
-            int32_t p0_clockid       = * (int32_t *) p0_clockid_ptr;
-            int64_t p1_precision     = * (int64_t *) p1_precision_ptr;
-            int32_t r0_time          = (int32_t) r0_time_ptr;
+        case WASI_FUNC__ENVIRON_SIZES_GET: {
+            void * r0_environ_size_ptr = value_ptr_new(call->results[0], NULL);
+            void * r1_environ_buf_size_ptr = value_ptr_new(call->results[1], NULL);
+            int32_t r0_environ_size = (int32_t) r0_environ_size_ptr;
+            int32_t r1_environ_buf_size = (int32_t) r1_environ_buf_size_ptr;
 
-            int32_t errno = __imported_wasi_snapshot_preview1_clock_time_get(
-                p0_clockid,
-                p1_precision,
-                r0_time
+            response.errno_some = __imported_wasi_snapshot_preview1_environ_sizes_get(
+                r0_environ_size,
+                r1_environ_buf_size
             );
 
-            handle_result_post(call->results[0], r0_time_ptr);
-            handle_param_post(call->params[1], p1_precision_ptr);
-            handle_param_post(call->params[0], p0_clockid_ptr);
+            SET_N_ALLOC(params, 0);
+            SET_N_ALLOC(results, 2);
 
-            return_.which_case = RETURN_VALUE__WHICH_ERRNO;
-            return_.errno      = errno;
-
-            break;
-        }
-        case WASI_FUNC__WASI_FUNC_FD_ADVISE: {
-            void *  p0_fd_ptr     = handle_param_pre(call->params[0], NULL);
-            void *  p1_offset_ptr = handle_param_pre(call->params[1], NULL);
-            void *  p2_len_ptr    = handle_param_pre(call->params[2], NULL);
-            void *  p3_advice_ptr = handle_param_pre(call->params[3], NULL);
-            int32_t p0_fd         = * (int32_t *) p0_fd_ptr;
-            int64_t p1_offset     = * (int64_t *) p1_offset_ptr;
-            int64_t p2_len        = * (int64_t *) p2_len_ptr;
-            int32_t p3_advice     = * (int8_t *)  p3_advice_ptr;
-
-            int32_t errno = __imported_wasi_snapshot_preview1_fd_advise(
-                p0_fd,
-                p1_offset,
-                p2_len,
-                p3_advice
-            );
-
-            handle_param_post(call->params[3], p3_advice_ptr);
-            handle_param_post(call->params[2], p2_len_ptr);
-            handle_param_post(call->params[1], p1_offset_ptr);
-            handle_param_post(call->params[0], p0_fd_ptr);
-
-            return_.which_case = RETURN_VALUE__WHICH_ERRNO;
-            return_.errno      = errno;
+            results[1] = value_ptr_free(call->results[1], r1_environ_buf_size_ptr);
+            results[0] = value_ptr_free(call->results[0], r0_environ_size_ptr);
 
             break;
         }
-        case WASI_FUNC__WASI_FUNC_FD_ALLOCATE: {
-            void *  p0_fd_ptr     = handle_param_pre(call->params[0], NULL);
-            void *  p1_offset_ptr = handle_param_pre(call->params[1], NULL);
-            void *  p2_len_ptr    = handle_param_pre(call->params[2], NULL);
-            int32_t p0_fd         = * (int32_t *) p0_fd_ptr;
-            int64_t p1_offset     = * (int64_t *) p1_offset_ptr;
-            int64_t p2_len        = * (int64_t *) p2_len_ptr;
-
-            int32_t errno = __imported_wasi_snapshot_preview1_fd_allocate(
-                p0_fd,
-                p1_offset,
-                p2_len
-            );
-
-            handle_param_post(call->params[2], p2_len_ptr);
-            handle_param_post(call->params[1], p1_offset_ptr);
-            handle_param_post(call->params[0], p0_fd_ptr);
-
-            return_.which_case = RETURN_VALUE__WHICH_ERRNO;
-            return_.errno      = errno;
-
-            break;
-        }
-        case WASI_FUNC__WASI_FUNC_FD_CLOSE: {
-            void *  p0_fd_ptr = handle_param_pre(call->params[0], NULL);
-            int32_t p0_fd     = * (int32_t *) p0_fd_ptr;
-
-            int32_t errno = __imported_wasi_snapshot_preview1_fd_close(p0_fd);
-
-            handle_param_post(call->params[0], p0_fd_ptr);
-
-            return_.which_case = RETURN_VALUE__WHICH_ERRNO;
-            return_.errno      = errno;
-
-            break;
-        }
-        case WASI_FUNC__WASI_FUNC_FD_DATASYNC: {
-            void *  p0_fd_ptr = handle_param_pre(call->params[0], NULL);
-            int32_t p0_fd     = * (int32_t *) p0_fd_ptr;
-
-            int32_t errno = __imported_wasi_snapshot_preview1_fd_datasync(p0_fd);
-
-            handle_param_post(call->params[0], p0_fd_ptr);
-
-            return_.which_case = RETURN_VALUE__WHICH_ERRNO;
-            return_.errno      = errno;
-
-            break;
-        }
-        case WASI_FUNC__WASI_FUNC_FD_FDSTAT_GET: {
-            void *  p0_fd_ptr     = handle_param_pre(call->params[0], NULL);
-            void *  r0_fdstat_ptr = handle_result_pre(call->results[0]);
-            int32_t p0_fd         = * (int32_t *) p0_fd_ptr;
-            int32_t r0_fdstat     = (int32_t) r0_fdstat_ptr;
-
-            int32_t errno = __imported_wasi_snapshot_preview1_fd_fdstat_get(p0_fd, r0_fdstat);
-
-            handle_result_post(call->results[0], r0_fdstat_ptr);
-            handle_param_post(call->params[0], p0_fd_ptr);
-
-            return_.which_case = RETURN_VALUE__WHICH_ERRNO;
-            return_.errno      = errno;
-
-            break;
-        }
-        case WASI_FUNC__WASI_FUNC_FD_FDSTAT_SET_FLAGS: {
-            void *  p0_fd_ptr    = handle_param_pre(call->params[0], NULL);
-            void *  p1_flags_ptr = handle_param_pre(call->params[1], NULL);
-            int32_t p0_fd        = * (int32_t *) p0_fd_ptr;
-            int32_t p1_flags     = * (int16_t *) p1_flags_ptr;
-
-            int32_t errno = __imported_wasi_snapshot_preview1_fd_fdstat_set_flags(
-                p0_fd,
-                p1_flags
-            );
-
-            handle_param_post(call->params[1], p1_flags_ptr);
-            handle_param_post(call->params[0], p0_fd_ptr);
-
-            return_.which_case = RETURN_VALUE__WHICH_ERRNO;
-            return_.errno      = errno;
-
-            break;
-        }
-        case WASI_FUNC__WASI_FUNC_FD_FDSTAT_SET_RIGHTS: {
-            void *  p0_fd_ptr                   = handle_param_pre(call->params[0], NULL);
-            void *  p1_fs_rights_base_ptr       = handle_param_pre(call->params[1], NULL);
-            void *  p2_fs_rights_inheriting_ptr = handle_param_pre(call->params[2], NULL);
-            int32_t p0_fd                       = * (int32_t *) p0_fd_ptr;
-            int64_t p1_fs_rights_base           = * (int64_t *) p1_fs_rights_base_ptr;
-            int64_t p2_fs_rights_inheriting     = * (int64_t *) p2_fs_rights_inheriting_ptr;
-
-            int32_t errno = __imported_wasi_snapshot_preview1_fd_fdstat_set_rights(
-                p0_fd,
-                p1_fs_rights_base,
-                p2_fs_rights_inheriting
-            );
-
-            handle_param_post(call->params[2], p2_fs_rights_inheriting_ptr);
-            handle_param_post(call->params[1], p1_fs_rights_base_ptr);
-            handle_param_post(call->params[0], p0_fd_ptr);
-
-            return_.which_case = RETURN_VALUE__WHICH_ERRNO;
-            return_.errno      = errno;
-
-            break;
-        }
-        case WASI_FUNC__WASI_FUNC_FD_FILESTAT_GET: {
-            void *  p0_fd_ptr       = handle_param_pre(call->params[0], NULL);
-            void *  r0_filestat_ptr = handle_result_pre(call->results[0]);
-            int32_t p0_fd           = * (int32_t *) p0_fd_ptr;
-            int32_t r0_filestat     = (int32_t) r0_filestat_ptr;
-
-            int32_t errno = __imported_wasi_snapshot_preview1_fd_filestat_get(
-                p0_fd,
-                r0_filestat
-            );
-
-            handle_result_post(call->results[0], r0_filestat_ptr);
-            handle_param_post(call->params[0], p0_fd_ptr);
-
-            return_.which_case = RETURN_VALUE__WHICH_ERRNO;
-            return_.errno      = errno;
-
-            break;
-        }
-        case WASI_FUNC__WASI_FUNC_FD_FILESTAT_SET_SIZE: {
-            void *  p0_fd_ptr   = handle_param_pre(call->params[0], NULL);
-            void *  p1_size_ptr = handle_param_pre(call->params[1], NULL);
-            int32_t p0_fd       = * (int32_t *) p0_fd_ptr;
-            int64_t p1_size     = * (int64_t *) p1_size_ptr;
-
-            int32_t errno = __imported_wasi_snapshot_preview1_fd_filestat_set_size(
-                p0_fd,
-                p1_size
-            );
-
-            handle_param_post(call->params[1], p1_size_ptr);
-            handle_param_post(call->params[0], p0_fd_ptr);
-
-            return_.which_case = RETURN_VALUE__WHICH_ERRNO;
-            return_.errno      = errno;
-
-            break;
-        }
-        case WASI_FUNC__WASI_FUNC_FD_FILESTAT_SET_TIMES: {
-            void *  p0_fd_ptr        = handle_param_pre(call->params[0], NULL);
-            void *  p1_atim_ptr      = handle_param_pre(call->params[1], NULL);
-            void *  p2_mtim_ptr      = handle_param_pre(call->params[2], NULL);
-            void *  p3_fst_flags_ptr = handle_param_pre(call->params[3], NULL);
-            int32_t p0_fd            = * (int32_t *) p0_fd_ptr;
-            int64_t p1_atim          = * (int64_t *) p1_atim_ptr;
-            int64_t p2_mtim          = * (int64_t *) p2_mtim_ptr;
-            int32_t p3_fst_flags     = * (int16_t *) p3_fst_flags_ptr;
-
-            int32_t errno = __imported_wasi_snapshot_preview1_fd_filestat_set_times(
-                p0_fd,
-                p1_atim,
-                p2_mtim,
-                p3_fst_flags
-            );
-
-            handle_param_post(call->params[3], p3_fst_flags_ptr);
-            handle_param_post(call->params[2], p2_mtim_ptr);
-            handle_param_post(call->params[1], p1_atim_ptr);
-            handle_param_post(call->params[0], p0_fd_ptr);
-
-            return_.which_case = RETURN_VALUE__WHICH_ERRNO;
-            return_.errno      = errno;
-
-            break;
-        }
-        case WASI_FUNC__WASI_FUNC_FD_PREAD: {
-            int32_t p1_iovs_len   = 0;
-            void *  p0_fd_ptr     = handle_param_pre(call->params[0], NULL);
-            void *  p1_iovs_ptr   = handle_param_pre(call->params[1], &p1_iovs_len);
-            void *  p2_offset_ptr = handle_param_pre(call->params[2], NULL);
-            void *  r0_size_ptr   = handle_result_pre(call->results[0]);
-            int32_t p0_fd         = * (int32_t *) p0_fd_ptr;
-            int32_t p1_iovs       = (int32_t) p1_iovs_ptr;
-            int64_t p2_offset     = * (int64_t *) p2_offset_ptr;
-            int32_t r0_size       = (int32_t) r0_size_ptr;
-
-            int32_t errno = __imported_wasi_snapshot_preview1_fd_pread(
-                p0_fd,
-                p1_iovs,
-                p1_iovs_len,
-                p2_offset,
-                r0_size
-            );
-
-            handle_result_post(call->results[0], r0_size_ptr);
-            handle_param_post(call->params[2], p2_offset_ptr);
-            handle_param_post(call->params[1], p1_iovs_ptr);
-            handle_param_post(call->params[0], p0_fd_ptr);
-
-            return_.which_case = RETURN_VALUE__WHICH_ERRNO;
-            return_.errno      = errno;
-
-            break;
-        }
-        case WASI_FUNC__WASI_FUNC_FD_PRESTAT_GET: {
-            void *  p0_fd_ptr      = handle_param_pre(call->params[0], NULL);
-            void *  r0_prestat_ptr = handle_result_pre(call->results[0]);
-            int32_t p0_fd          = * (int32_t *) p0_fd_ptr;
-            int32_t r0_prestat     = (int32_t) r0_prestat_ptr;
-
-            int32_t errno = __imported_wasi_snapshot_preview1_fd_prestat_get(
-                p0_fd,
-                r0_prestat
-            );
-
-            n_results = 1;
-            results = malloc(n_results * sizeof(ValueView *));
-            results[0] = handle_result_post(call->results[0], r0_prestat_ptr);
-            handle_param_post(call->params[0], p0_fd_ptr);
-
-            return_.which_case = RETURN_VALUE__WHICH_ERRNO;
-            return_.errno      = errno;
-
-            break;
-        }
-        case WASI_FUNC__WASI_FUNC_FD_PRESTAT_DIR_NAME: {
-            void *  p0_fd_ptr       = handle_param_pre(call->params[0], NULL);
-            void *  p1_path_ptr     = handle_param_pre(call->params[1], NULL);
-            void *  p2_path_len_ptr = handle_param_pre(call->params[2], NULL);
-            int32_t p0_fd           = * (int32_t *) p0_fd_ptr;
-            int32_t p1_path         = (int32_t) p1_path_ptr;
-            int32_t p2_path_len     = * (int32_t *) p2_path_len_ptr;
-
-            int32_t errno = __imported_wasi_snapshot_preview1_fd_prestat_dir_name(
-                p0_fd,
-                p1_path,
-                p2_path_len
-            );
-
-            handle_param_post(call->params[2], p2_path_len_ptr);
-            handle_param_post(call->params[1], p1_path_ptr);
-            handle_param_post(call->params[0], p0_fd_ptr);
-
-            return_.which_case = RETURN_VALUE__WHICH_ERRNO;
-            return_.errno      = errno;
-
-            break;
-        }
-        case WASI_FUNC__WASI_FUNC_FD_PWRITE: {
-            int32_t p1_iovs_len   = 0;
-            void *  p0_fd_ptr     = handle_param_pre(call->params[0], NULL);
-            void *  p1_iovs_ptr   = handle_param_pre(call->params[1], &p1_iovs_len);
-            void *  p2_offset_ptr = handle_param_pre(call->params[2], NULL);
-            void *  r0_size_ptr   = handle_result_pre(call->results[0]);
-            int32_t p0_fd         = * (int32_t *) p0_fd_ptr;
-            int32_t p1_iovs       = (int32_t) p1_iovs_ptr;
-            int64_t p2_offset     = * (int64_t *) p2_offset_ptr;
-            int32_t r0_size       = (int32_t) r0_size_ptr;
-
-            int32_t errno = __imported_wasi_snapshot_preview1_fd_pwrite(
-                p0_fd,
-                p1_iovs,
-                p1_iovs_len,
-                p2_offset,
-                r0_size
-            );
-
-            n_results = 1;
-            results = malloc(n_results * sizeof(ValueView *));
-            results[0] = handle_result_post(call->results[0], r0_size_ptr);
-
-            handle_param_post(call->params[2], p2_offset_ptr);
-            handle_param_post(call->params[1], p1_iovs_ptr);
-            handle_param_post(call->params[0], p0_fd_ptr);
-
-            return_.which_case = RETURN_VALUE__WHICH_ERRNO;
-            return_.errno      = errno;
-
-            break;
-        }
-        case WASI_FUNC__WASI_FUNC_FD_READ: {
-            int32_t p1_iovs_len = 0;
-            void *  p0_fd_ptr   = handle_param_pre(call->params[0], NULL);
-            void *  p1_iovs_ptr = handle_param_pre(call->params[1], &p1_iovs_len);
-            void *  r0_size_ptr = handle_result_pre(call->results[0]);
-            int32_t p0_fd       = * (int32_t *) p0_fd_ptr;
-            int32_t p1_iovs     = (int32_t) p1_iovs_ptr;
-            int32_t r0_size     = (int32_t) r0_size_ptr;
-
-            int32_t errno = __imported_wasi_snapshot_preview1_fd_read(
-                p0_fd,
-                p1_iovs,
-                p1_iovs_len,
-                r0_size
-            );
-
-            n_params = 2;
-            params = malloc(n_params * sizeof(ValueView *));
-            params[0] = value_view_new(call->params[0]->type, p0_fd_ptr, 0);
-            params[1] = value_view_new(call->params[1]->type, p1_iovs_ptr, p1_iovs_len);
-
-            handle_result_post(call->results[0], r0_size_ptr);
-            handle_param_post(call->params[1], p1_iovs_ptr);
-            handle_param_post(call->params[0], p0_fd_ptr);
-
-            return_.which_case = RETURN_VALUE__WHICH_ERRNO;
-            return_.errno      = errno;
-
-            break;
-        }
-        case WASI_FUNC__WASI_FUNC_FD_READDIR: {
-            void *  p0_fd_ptr      = handle_param_pre(call->params[0], NULL);
-            void *  p1_buf_ptr     = handle_param_pre(call->params[1], NULL);
-            void *  p2_buf_len_ptr = handle_param_pre(call->params[2], NULL);
-            void *  p3_cookie_ptr  = handle_param_pre(call->params[3], NULL);
-            void *  r0_size_ptr    = handle_result_pre(call->results[0]);
-            int32_t p0_fd          = * (int32_t *) p0_fd_ptr;
-            int32_t p1_buf         = (int32_t) p1_buf_ptr;
-            int32_t p2_buf_len     = * (int32_t *) p2_buf_len_ptr;
-            int64_t p3_cookie      = * (int64_t *) p3_cookie_ptr;
-            int32_t r0_size        = (int32_t) r0_size_ptr;
-
-            int32_t errno = __imported_wasi_snapshot_preview1_fd_readdir(
-                p0_fd,
-                p1_buf,
-                p2_buf_len,
-                p3_cookie,
-                r0_size
-            );
-
-            n_results = 1;
-            results = malloc(n_results * sizeof(ValueView *));
-            results[0] = handle_result_post(call->results[0], r0_size_ptr);
-
-            handle_param_post(call->params[3], p3_cookie_ptr);
-            handle_param_post(call->params[2], p2_buf_len_ptr);
-            handle_param_post(call->params[1], p1_buf_ptr);
-            handle_param_post(call->params[0], p0_fd_ptr);
-
-            return_.which_case = RETURN_VALUE__WHICH_ERRNO;
-            return_.errno      = errno;
-
-            break;
-        }
-        case WASI_FUNC__WASI_FUNC_FD_SEEK: {
-            void *  p0_fd_ptr     = handle_param_pre(call->params[0], NULL);
-            void *  p1_offset_ptr = handle_param_pre(call->params[1], NULL);
-            void *  p2_whence_ptr = handle_param_pre(call->params[2], NULL);
-            void *  r0_offset_ptr = handle_result_pre(call->results[0]);
-            int32_t p0_fd         = * (int32_t *) p0_fd_ptr;
-            int64_t p1_offset     = * (int64_t *) p1_offset_ptr;
-            int32_t p2_whence     = * (int8_t *) p2_whence_ptr;
-            int32_t r0_offset     = (int32_t) r0_offset_ptr;
-
-            int32_t errno = __imported_wasi_snapshot_preview1_fd_seek(
-                p0_fd,
-                p1_offset,
-                p2_whence,
-                r0_offset
-            );
-
-            handle_result_post(call->results[0], r0_offset_ptr);
-            handle_param_post(call->params[2], p2_whence_ptr);
-            handle_param_post(call->params[1], p1_offset_ptr);
-            handle_param_post(call->params[0], p0_fd_ptr);
-
-            return_.which_case = RETURN_VALUE__WHICH_ERRNO;
-            return_.errno      = errno;
-
-            break;
-        }
-        case WASI_FUNC__WASI_FUNC_FD_WRITE: {
-            // Loopify this.
-
-            int32_t p1_iovs_len = 0;
-            void *  p0_fd_ptr   = handle_param_pre(call->params[0], NULL);
-            void *  p1_iovs_ptr = handle_param_pre(call->params[1], &p1_iovs_len);
-            void *  r0_size_ptr = handle_result_pre(call->results[0]);
-            int32_t p0_fd       = * (int32_t *) p0_fd_ptr;
-            int32_t p1_iovs     = (int32_t) p1_iovs_ptr;
-            int32_t r0_size     = (int32_t) r0_size_ptr;
-
-            int32_t errno = __imported_wasi_snapshot_preview1_fd_write(
-                p0_fd,
-                p1_iovs,
-                p1_iovs_len,
-                r0_size
-            );
-
-            handle_result_post(call->results[0], r0_size_ptr);
-            handle_param_post(call->params[1], p1_iovs_ptr);
-            handle_param_post(call->params[0], p0_fd_ptr);
-
-            return_.which_case = RETURN_VALUE__WHICH_ERRNO;
-            return_.errno      = errno;
-
-            break;
-        }
-        case WASI_FUNC__WASI_FUNC_PATH_OPEN: {
-            int32_t p2_path_len                 = 0;
-            void *  p0_fd_ptr                   = handle_param_pre(call->params[0], NULL);
-            void *  p1_dirflags_ptr             = handle_param_pre(call->params[1], NULL);
-            void *  p2_path_ptr                 = handle_param_pre(call->params[2], &p2_path_len);
-            void *  p3_oflags_ptr               = handle_param_pre(call->params[3], NULL);
-            void *  p4_fs_rights_base_ptr       = handle_param_pre(call->params[4], NULL);
-            void *  p5_fs_rights_inheriting_ptr = handle_param_pre(call->params[5], NULL);
-            void *  p6_fdflags_ptr              = handle_param_pre(call->params[6], NULL);
-            void *  r0_fd_ptr                   = handle_result_pre(call->results[0]);
-            int32_t p0_fd                       = * (int32_t *) p0_fd_ptr;
-            int32_t p1_dirflags                 = * (int32_t *) p1_dirflags_ptr;
-            int32_t p2_path                     = (int32_t) p2_path_ptr;
-            int32_t p3_oflags                   = * (int32_t *) p3_oflags_ptr;
-            int64_t p4_fs_rights_base           = * (int64_t *) p4_fs_rights_base_ptr;
-            int64_t p5_fs_rights_inheriting     = * (int64_t *) p5_fs_rights_inheriting_ptr;
-            int32_t p6_fdflags                  = * (int32_t *) p6_fdflags_ptr;
-            int32_t r0_fd                       = (int32_t) r0_fd_ptr;
-
-            int32_t errno = __imported_wasi_snapshot_preview1_path_open(
-                p0_fd,
-                p1_dirflags,
-                p2_path,
-                p2_path_len,
-                p3_oflags,
-                p4_fs_rights_base,
-                p5_fs_rights_inheriting,
-                p6_fdflags,
-                r0_fd
-            );
-
-            handle_param_post(call->params[0], p0_fd_ptr);
-            handle_param_post(call->params[1], p1_dirflags_ptr);
-            handle_param_post(call->params[2], p2_path_ptr);
-            handle_param_post(call->params[3], p3_oflags_ptr);
-            handle_param_post(call->params[4], p4_fs_rights_base_ptr);
-            handle_param_post(call->params[5], p5_fs_rights_inheriting_ptr);
-            handle_param_post(call->params[6], p6_fdflags_ptr);
-            handle_result_post(call->results[0], r0_fd_ptr);
-
-            return_.which_case = RETURN_VALUE__WHICH_ERRNO;
-            return_.errno      = errno;
-
-            break;
-        }
-        case _WASI_FUNC_IS_INT_SIZE: fail("unreachable");
+        default: fail("unimplemented");
     }
-
-    response.return_   = &return_;
-    response.params    = params;
-    response.n_params  = n_params;
-    response.results   = results;
+    
+    response.params = params;
+    response.results = results;
+    response.n_params = n_params;
     response.n_results = n_results;
 
     Response msg = RESPONSE__INIT;
 
-    msg.call       = &response;
+    msg.call = &response;
     msg.which_case = RESPONSE__WHICH_CALL;
 
     const size_t msg_size = response__get_packed_size(&msg);
-    void *       buf      = malloc(msg_size);
+    void * buf = malloc(msg_size);
 
     uint8_t size_buf[8];
 
@@ -1413,11 +720,15 @@ static void handle_call(Request__Call * call) {
     fflush(stdout);
     free(buf);
 
-    for (int i = 0; i < n_params; i++) value_view_free(params[i]);
-    for (int i = 0; i < n_results; i++) value_view_free(results[i]);
+    for (int i = 0; i < n_params; i++) value_free(params[i]);
+    for (int i = 0; i < n_results; i++) value_free(results[i]);
 
     free(params);
     free(results);
+
+    if (response.errno_option_case == RESPONSE__CALL__ERRNO_OPTION_ERRNO_NONE) {
+        free(response.errno_none);
+    }
 }
 
 int main(void) {
@@ -1426,7 +737,6 @@ int main(void) {
 
         switch (req->which_case) {
             case REQUEST__WHICH_CALL: handle_call(req->call); break;
-            case REQUEST__WHICH_DECL: handle_decl(req->decl); break;
             case REQUEST__WHICH__NOT_SET:
             case _REQUEST__WHICH__CASE_IS_INT_SIZE: fail("invalid request");
         }

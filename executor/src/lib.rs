@@ -15,8 +15,8 @@ use wazzi_runners::WasiRunner;
 #[derive(Debug)]
 pub struct ExecutorRunner<WR> {
     wasi_runner: WR,
-    executor: PathBuf,
-    base_dir: Option<PathBuf>,
+    executor:    PathBuf,
+    base_dir:    Option<PathBuf>,
 }
 
 impl<WR> ExecutorRunner<WR>
@@ -53,11 +53,11 @@ where
 
 #[derive(Debug)]
 pub struct RunningExecutor {
-    child: Arc<Mutex<process::Child>>,
-    stdin: Arc<Mutex<process::ChildStdin>>,
-    stdout: Arc<Mutex<process::ChildStdout>>,
+    child:              Arc<Mutex<process::Child>>,
+    stdin:              Arc<Mutex<process::ChildStdin>>,
+    stdout:             Arc<Mutex<process::ChildStdout>>,
     stderr_copy_handle: Arc<Mutex<Option<thread::JoinHandle<u64>>>>,
-    base_dir_fd: u32,
+    base_dir_fd:        u32,
 }
 
 impl RunningExecutor {
@@ -88,27 +88,6 @@ impl RunningExecutor {
             .unwrap()
             .join()
             .unwrap();
-    }
-
-    pub fn decl(&self, decl: pb::request::Decl) -> Result<pb::response::Decl, protobuf::Error> {
-        let mut stdin = self.stdin.lock().unwrap();
-        let mut stdout = self.stdout.lock().unwrap();
-        let mut os = protobuf::CodedOutputStream::new(stdin.deref_mut());
-        let mut is = protobuf::CodedInputStream::new(stdout.deref_mut());
-        let mut request = pb::Request::new();
-
-        request.set_decl(decl);
-
-        let message_size = request.compute_size();
-
-        os.write_raw_bytes(&message_size.to_le_bytes()).unwrap();
-        request.write_to(&mut os)?;
-        drop(os);
-
-        let msg_size = is.read_fixed64()?;
-        let raw_bytes = is.read_raw_bytes(msg_size as u32)?;
-
-        Ok(pb::Response::parse_from_bytes(&raw_bytes)?.take_decl())
     }
 
     pub fn call(&self, call: pb::request::Call) -> Result<pb::response::Call, protobuf::Error> {

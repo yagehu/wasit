@@ -3,140 +3,45 @@ syntax = "proto3";
 message Empty {}
 
 message Request {
-    message Decl {
-        uint64 resource_id = 1;
-        RawValue value = 2;
-        Type type = 3;
-    }
-
     message Call {
         WasiFunc func = 1;
-        repeated ValueSpec params = 2;
-        repeated ResultSpec results = 3;
+        repeated Value params = 2;
+        repeated Value results = 3;
     }
 
     oneof which {
-        Decl decl = 1;
-        Call call = 2;
+        Call call = 1;
     }
 }
 
 message Response {
-    message Decl {}
-
     message Call {
-        ReturnValue return = 1;
-        repeated ValueView params = 2;
-        repeated ValueView results = 3;
+        oneof errno_option {
+            int32 errno_some = 1;
+            Empty errno_none = 2;
+        }
+
+        repeated Value params = 4;
+        repeated Value results = 3;
     }
 
     oneof which {
-        Decl decl = 1;
-        Call call = 2;
-    }
-}
-
-message ReturnValue {
-    oneof which {
-        Empty none = 1;
-        int32 errno = 2;
+        Call call = 1;
     }
 }
 
 message ResultSpec {
-    Type type = 1;
-
-    oneof which {
-        Resource resource = 2;
-        Empty ignore = 3;
-    }
+    uint32 size = 1;
 }
 
 enum IntRepr {
-    INT_REPR_UNKNOWN = 0;
-    INT_REPR_U8 = 1;
-    INT_REPR_U16 = 2;
-    INT_REPR_U32 = 3;
-    INT_REPR_U64 = 4;
+    U8 = 0;
+    U16 = 1;
+    U32 = 2;
+    U64 = 3;
 }
 
-message Type {
-    message Builtin {
-        oneof which {
-            Empty u8 = 1;
-            Empty u32 = 3;
-            Empty u64 = 4;
-            Empty s64 = 8;
-        }
-    }
-
-    message Bitflags {
-        IntRepr repr = 1;
-        repeated string members = 2;
-    }
-
-    message Array {
-        Type type = 1;
-        uint32 item_size = 2;
-    }
-
-    message Record {
-        message Member {
-            bytes name = 1;
-            Type type = 2;
-            uint32 offset = 3;
-        }
-
-        repeated Member members = 1;
-        uint32 size = 2;
-    }
-
-    message Variant {
-        message Case {
-            bytes name = 1;
-
-            oneof optional_type {
-                Type type = 2;
-            }
-        }
-
-        IntRepr tag_repr = 1;
-        repeated Case cases = 2;
-        uint32 payload_offset = 3;
-        uint32 size = 4;
-    }
-
-    oneof which {
-        Builtin builtin = 1;
-        Empty string = 2;
-        Bitflags bitflags = 3;
-        Empty handle = 4;
-        Array array = 5;
-        Record record = 6;
-        Type const_pointer = 7;
-        Type pointer = 8;
-        Variant variant = 9;
-    }
-}
-
-message ValueSpec {
-    Type type = 3;
-
-    oneof which {
-        Resource resource = 1;
-        RawValue raw_value = 2;
-    }
-}
-
-message Resource {
-    uint64 id = 1;
-}
-
-message BitflagsValue {
-    repeated bool members = 1;
-}
-
-message RawValue {
+message Value {
     message Builtin {
         oneof which {
             uint32 u8 = 1;
@@ -146,121 +51,82 @@ message RawValue {
         }
     }
 
-    message Handle {
-        uint32 value = 1;
+    message Bitflags {
+        message Member {
+            string name = 1;
+            bool value = 2;
+        }
+
+        IntRepr repr = 1;
+        repeated Member members = 2;
     }
 
     message Array {
-        repeated ValueSpec items = 1;
+        repeated Value items = 1;
+        uint32 item_size = 2;
     }
 
     message Record {
         message Member {
-            bytes name = 1;
-            ValueSpec value = 2;
+            string name = 1;
+            Value value = 2;
+            uint32 offset = 3;
         }
 
         repeated Member members = 1;
-    }
-
-    message ConstPointer {
-        repeated ValueSpec items = 1;
-    }
-
-    message Pointer {
-        ValueSpec alloc = 1;
+        uint32 size = 2;
     }
 
     message Variant {
-        uint32 case_idx = 1;
-        bytes case_name = 2;
+        uint64 case_idx = 1;
+        uint32 size = 3;
+        IntRepr tag_repr = 5;
+        uint32 payload_offset = 7;
 
-        oneof optional_payload {
-            ValueSpec payload = 3;
+        oneof payload_option {
+            Value payload_some = 4;
+            Empty payload_none = 6;
         }
     }
 
     oneof which {
         Builtin builtin = 1;
         bytes string = 2;
-        BitflagsValue bitflags = 3;
-        Handle  handle = 4;
+        Bitflags bitflags = 3;
+        uint32 handle = 4;
         Array array = 5;
         Record record = 6;
-        ConstPointer const_pointer = 7;
-        Pointer pointer = 8;
-        Variant variant = 9;
-    }
-}
-
-message ValueView {
-    uint32 memory_offset = 1;
-    PureValue content = 2;
-}
-
-message PureValue {
-    message List {
-        repeated ValueView items = 1;
-    }
-
-    message Record {
-        message Member {
-            bytes name = 1;
-            ValueView value = 2;
-        }
-
-        repeated Member members = 1;
-    }
-
-    message Pointer {
-        repeated ValueView items = 1;
-    }
-
-    message Variant {
-        uint32 case_idx = 1;
-        bytes case_name = 2;
-
-        oneof optional_payload {
-            ValueView payload = 3;
-        }
-    }
-
-    oneof which {
-        RawValue.Builtin builtin = 1;
-        BitflagsValue bitflags = 3;
-        uint32 handle = 4;
-        List list = 5;
-        Record record = 6;
-        Pointer pointer = 8;
+        Array const_pointer = 7;
+        Array pointer = 8;
         Variant variant = 9;
     }
 }
 
 enum WasiFunc {
-    WASI_FUNC_UNKNOWN               = 0;
-    WASI_FUNC_ARGS_GET              = 1;
-    WASI_FUNC_ARGS_SIZES_GET        = 2;
-    WASI_FUNC_ENVIRON_GET           = 3;
-    WASI_FUNC_ENVIRON_SIZES_GET     = 4;
-    WASI_FUNC_CLOCK_RES_GET         = 5;
-    WASI_FUNC_CLOCK_TIME_GET        = 6;
-    WASI_FUNC_FD_ADVISE             = 7;
-    WASI_FUNC_FD_ALLOCATE           = 8;
-    WASI_FUNC_FD_CLOSE              = 9;
-    WASI_FUNC_FD_DATASYNC           = 10;
-    WASI_FUNC_FD_FDSTAT_GET         = 11;
-    WASI_FUNC_FD_FDSTAT_SET_FLAGS   = 12;
-    WASI_FUNC_FD_FDSTAT_SET_RIGHTS  = 13;
-    WASI_FUNC_FD_FILESTAT_GET       = 14;
-    WASI_FUNC_FD_FILESTAT_SET_SIZE  = 15;
-    WASI_FUNC_FD_FILESTAT_SET_TIMES = 16;
-    WASI_FUNC_FD_PREAD              = 17;
-    WASI_FUNC_FD_PRESTAT_GET        = 18;
-    WASI_FUNC_FD_PRESTAT_DIR_NAME   = 19;
-    WASI_FUNC_FD_PWRITE             = 20;
-    WASI_FUNC_FD_READ               = 21;
-    WASI_FUNC_FD_READDIR            = 22;
-    WASI_FUNC_FD_SEEK               = 26;
-    WASI_FUNC_FD_WRITE              = 27;
-    WASI_FUNC_PATH_OPEN             = 32;
+    ARGS_GET              = 0;
+    ARGS_SIZES_GET        = 1;
+    ENVIRON_GET           = 2;
+    ENVIRON_SIZES_GET     = 3;
+    CLOCK_RES_GET         = 4;
+    CLOCK_TIME_GET        = 5;
+    FD_ADVISE             = 6;
+    FD_ALLOCATE           = 7;
+    FD_CLOSE              = 8;
+    FD_DATASYNC           = 9;
+    FD_FDSTAT_GET         = 10;
+    FD_FDSTAT_SET_FLAGS   = 11;
+    FD_FDSTAT_SET_RIGHTS  = 12;
+    FD_FILESTAT_GET       = 13;
+    FD_FILESTAT_SET_SIZE  = 14;
+    FD_FILESTAT_SET_TIMES = 15;
+    FD_PREAD              = 16;
+    FD_PRESTAT_GET        = 17;
+    FD_PRESTAT_DIR_NAME   = 18;
+    FD_PWRITE             = 19;
+    FD_READ               = 20;
+    FD_READDIR            = 21;
+    FD_RENUMBER           = 22;
+    FD_SEEK               = 25;
+    FD_WRITE              = 26;
+    PATH_OPEN             = 31;
 }

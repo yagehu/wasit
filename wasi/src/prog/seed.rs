@@ -1,0 +1,437 @@
+use color_eyre::{eyre, eyre::WrapErr};
+use executor_pb::WasiFunc::*;
+use serde::{Deserialize, Serialize};
+use wazzi_executor::RunningExecutor;
+use witx::{BuiltinType, Layout};
+
+use super::stateful;
+use crate::{
+    resource_ctx::{ResourceContext, ResourceId},
+    snapshot::{SnapshotStore, WasiSnapshot},
+    Prog,
+};
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct ProgSeed {
+    pub mount_base_dir: bool,
+    pub actions:        Vec<Action>,
+}
+
+fn prepare_param(
+    resource_ctx: &mut ResourceContext,
+    tref: &witx::TypeRef,
+    param: &ParamSpec,
+) -> executor_pb::Value {
+    match param {
+        | &ParamSpec::Resource(resource_id) => resource_ctx
+            .get_resource(resource_id)
+            .unwrap()
+            .to_pb_value(tref.type_().as_ref()),
+        | ParamSpec::Value(value) => {
+            let which = match (tref.type_().as_ref(), value) {
+                | (_, Value::Builtin(builtin)) => {
+                    let which = match builtin {
+                        | &BuiltinValue::U8(i) => executor_pb::value::builtin::Which::U8(i.into()),
+                        | &BuiltinValue::U32(i) => executor_pb::value::builtin::Which::U32(i),
+                        | &BuiltinValue::U64(i) => executor_pb::value::builtin::Which::U64(i),
+                        | &BuiltinValue::S64(i) => executor_pb::value::builtin::Which::S64(i),
+                    };
+
+                    executor_pb::value::Which::Builtin(executor_pb::value::Builtin {
+                        which:          Some(which).into(),
+                        special_fields: Default::default(),
+                    })
+                },
+                | (_, Value::String(string)) => executor_pb::value::Which::String(match string {
+                    | StringValue::Utf8(s) => s.as_bytes().to_vec(),
+                }),
+                | (witx::Type::Record(record), Value::Bitflags(bitflags))
+                    if record.bitflags_repr().is_some() =>
+                {
+                    let mut members = Vec::with_capacity(bitflags.0.len());
+
+                    for member in &bitflags.0 {
+                        members.push(executor_pb::value::bitflags::Member {
+                            name:           member.name.clone(),
+                            value:          member.value,
+                            special_fields: Default::default(),
+                        });
+                    }
+
+                    executor_pb::value::Which::Bitflags(executor_pb::value::Bitflags {
+                        repr: protobuf::EnumOrUnknown::new(match record.bitflags_repr().unwrap() {
+                            | witx::IntRepr::U8 => executor_pb::IntRepr::U8,
+                            | witx::IntRepr::U16 => executor_pb::IntRepr::U16,
+                            | witx::IntRepr::U32 => executor_pb::IntRepr::U32,
+                            | witx::IntRepr::U64 => executor_pb::IntRepr::U64,
+                        }),
+                        members,
+                        special_fields: Default::default(),
+                    })
+                },
+                | (witx::Type::Pointer(pointee_tref), Value::Pointer(pointer)) => {
+                    let resource = resource_ctx
+                        .get_resource(pointer.alloc_from_resource)
+                        .unwrap();
+                    let n_items = match resource {
+                        | stateful::Value::Builtin(BuiltinValue::U32(i)) => i,
+                        | _ => panic!("alloc from resource must be a u32"),
+                    };
+
+                    let mut items = Vec::with_capacity(n_items as usize);
+
+                    for _i in 0..n_items {
+                        let which = match pointee_tref.type_().as_ref() {
+                            | witx::Type::Record(_) => unimplemented!(),
+                            | witx::Type::Variant(_) => unimplemented!(),
+                            | witx::Type::Handle(_) => unimplemented!(),
+                            | witx::Type::List(_) => unimplemented!(),
+                            | witx::Type::Pointer(pointee_) => {
+                                executor_pb::value::Which::Pointer(executor_pb::value::Array {
+                                    items:          Vec::with_capacity(0),
+                                    item_size:      pointee_.mem_size() as u32,
+                                    special_fields: Default::default(),
+                                })
+                            },
+                            | witx::Type::ConstPointer(pointee_) => {
+                                executor_pb::value::Which::ConstPointer(executor_pb::value::Array {
+                                    items:          Vec::with_capacity(0),
+                                    item_size:      pointee_.mem_size() as u32,
+                                    special_fields: Default::default(),
+                                })
+                            },
+                            | witx::Type::Builtin(builtin) => {
+                                let which = match builtin {
+                                    | BuiltinType::Char => unimplemented!(),
+                                    | BuiltinType::U8 { .. } => {
+                                        executor_pb::value::builtin::Which::U8(0)
+                                    },
+                                    | BuiltinType::U16 => unimplemented!(),
+                                    | BuiltinType::U32 { .. } => {
+                                        executor_pb::value::builtin::Which::U32(0)
+                                    },
+                                    | BuiltinType::U64 => {
+                                        executor_pb::value::builtin::Which::U64(0)
+                                    },
+                                    | BuiltinType::S8 => unimplemented!(),
+                                    | BuiltinType::S16 => unimplemented!(),
+                                    | BuiltinType::S32 => unimplemented!(),
+                                    | BuiltinType::S64 => {
+                                        executor_pb::value::builtin::Which::S64(0)
+                                    },
+                                    | BuiltinType::F32 => unimplemented!(),
+                                    | BuiltinType::F64 => unimplemented!(),
+                                };
+
+                                executor_pb::value::Which::Builtin(executor_pb::value::Builtin {
+                                    which:          Some(which).into(),
+                                    special_fields: Default::default(),
+                                })
+                            },
+                        };
+                        let item = executor_pb::Value {
+                            which:          Some(which).into(),
+                            special_fields: Default::default(),
+                        };
+
+                        items.push(item);
+                    }
+
+                    executor_pb::value::Which::Pointer(executor_pb::value::Array {
+                        items,
+                        item_size: pointee_tref.mem_size() as u32,
+                        special_fields: Default::default(),
+                    })
+                },
+                | _ => panic!("spec and value mismatch"),
+            };
+
+            executor_pb::Value {
+                which:          Some(which).into(),
+                special_fields: Default::default(),
+            }
+        },
+    }
+}
+
+fn prepare_result(tref: &witx::TypeRef) -> executor_pb::Value {
+    let which = match tref.type_().as_ref() {
+        | witx::Type::Record(record) => {
+            let mut members = Vec::with_capacity(record.members.len());
+
+            for (member_layout, member) in record
+                .member_layout()
+                .into_iter()
+                .zip(record.members.iter())
+            {
+                members.push(executor_pb::value::record::Member {
+                    name:           member.name.as_str().to_owned(),
+                    value:          Some(prepare_result(&member.tref)).into(),
+                    offset:         member_layout.offset as u32,
+                    special_fields: Default::default(),
+                });
+            }
+
+            executor_pb::value::Which::Record(executor_pb::value::Record {
+                members,
+                size: record.mem_size() as u32,
+                special_fields: Default::default(),
+            })
+        },
+        | witx::Type::Variant(variant) => {
+            executor_pb::value::Which::Variant(Box::new(executor_pb::value::Variant {
+                case_idx:       0,
+                size:           variant.mem_size() as u32,
+                tag_repr:       protobuf::EnumOrUnknown::new(match variant.tag_repr {
+                    | witx::IntRepr::U8 => executor_pb::IntRepr::U8,
+                    | witx::IntRepr::U16 => executor_pb::IntRepr::U16,
+                    | witx::IntRepr::U32 => executor_pb::IntRepr::U32,
+                    | witx::IntRepr::U64 => executor_pb::IntRepr::U64,
+                }),
+                payload_offset: 0,
+                payload_option: None,
+                special_fields: Default::default(),
+            }))
+        },
+        | witx::Type::Handle(_) => executor_pb::value::Which::Handle(0),
+        | witx::Type::List(tref) => unreachable!(),
+        | witx::Type::Pointer(_) => unreachable!(),
+        | witx::Type::ConstPointer(_) => unreachable!(),
+        | witx::Type::Builtin(builtin) => {
+            let which = match builtin {
+                | BuiltinType::Char => todo!(),
+                | BuiltinType::U8 { .. } => executor_pb::value::builtin::Which::U8(0),
+                | BuiltinType::U16 => todo!(),
+                | BuiltinType::U32 { .. } => executor_pb::value::builtin::Which::U32(0),
+                | BuiltinType::U64 => executor_pb::value::builtin::Which::U64(0),
+                | BuiltinType::S8 => todo!(),
+                | BuiltinType::S16 => todo!(),
+                | BuiltinType::S32 => todo!(),
+                | BuiltinType::S64 => executor_pb::value::builtin::Which::S64(0),
+                | BuiltinType::F32 => todo!(),
+                | BuiltinType::F64 => todo!(),
+            };
+
+            executor_pb::value::Which::Builtin(executor_pb::value::Builtin {
+                which:          Some(which).into(),
+                special_fields: Default::default(),
+            })
+        },
+    };
+
+    executor_pb::Value {
+        which:          Some(which).into(),
+        special_fields: Default::default(),
+    }
+}
+
+impl ProgSeed {
+    pub fn execute<'s, S>(
+        self,
+        executor: &RunningExecutor,
+        spec: &'s witx::Document,
+        snapshot_store: &mut S,
+    ) -> Result<Prog, eyre::Error>
+    where
+        S: SnapshotStore<Snapshot = WasiSnapshot>,
+    {
+        let mut resource_ctx = ResourceContext::new();
+        let module_spec = spec
+            .module(&witx::Id::new("wasi_snapshot_preview1"))
+            .unwrap();
+
+        if self.mount_base_dir {
+            const BASE_DIR_RESOURCE_TYPE: &str = "dirfd";
+
+            resource_ctx.new_resource(
+                BASE_DIR_RESOURCE_TYPE,
+                stateful::Value::Builtin(BuiltinValue::U32(executor.base_dir_fd())),
+            );
+        }
+
+        let mut calls = Vec::new();
+
+        for action in self.actions {
+            match action {
+                | Action::Decl(_) => {},
+                | Action::Call(call) => {
+                    let func = match call.func.as_str() {
+                        | "args_get" => ARGS_GET,
+                        | "args_sizes_get" => ARGS_SIZES_GET,
+                        | "environ_get" => ENVIRON_GET,
+                        | "environ_sizes_get" => ENVIRON_SIZES_GET,
+                        | "clock_res_get" => CLOCK_RES_GET,
+                        | "clock_time_get" => CLOCK_TIME_GET,
+                        | "fd_advise" => FD_ADVISE,
+                        | "fd_allocate" => FD_ALLOCATE,
+                        | "fd_close" => FD_CLOSE,
+                        | "fd_datasync" => FD_DATASYNC,
+                        | "fd_fdstat_get" => FD_FDSTAT_GET,
+                        | "fd_fdstat_set_flags" => FD_FDSTAT_SET_FLAGS,
+                        | "fd_fdstat_set_rights" => FD_FDSTAT_SET_RIGHTS,
+                        | "fd_filestat_get" => FD_FILESTAT_GET,
+                        | "fd_filestat_set_size" => FD_FILESTAT_SET_SIZE,
+                        | "fd_filestat_set_times" => FD_FILESTAT_SET_TIMES,
+                        | "fd_pread" => FD_PREAD,
+                        | "fd_prestat_get" => FD_PRESTAT_GET,
+                        | "fd_prestat_dir_name" => FD_PRESTAT_DIR_NAME,
+                        | "fd_pwrite" => FD_PWRITE,
+                        | "fd_read" => FD_READ,
+                        | "fd_readdir" => FD_READDIR,
+                        | "fd_seek" => FD_SEEK,
+                        | "fd_write" => FD_WRITE,
+                        | "path_open" => PATH_OPEN,
+                        | _ => panic!("{}", call.func.as_str()),
+                    };
+                    let func_spec = module_spec
+                        .func(&witx::Id::new(call.func.as_str()))
+                        .unwrap();
+                    let result_trefs = func_spec.unpack_expected_result();
+                    let mut params = Vec::with_capacity(func_spec.params.len());
+                    let mut results = Vec::with_capacity(result_trefs.len());
+
+                    for (param_type, param) in func_spec.params.iter().zip(call.params.iter()) {
+                        params.push(prepare_param(&mut resource_ctx, &param_type.tref, &param));
+                    }
+
+                    for result_tref in &result_trefs {
+                        results.push(prepare_result(result_tref));
+                    }
+
+                    let call_response = executor
+                        .call(executor_pb::request::Call {
+                            func: protobuf::EnumOrUnknown::new(func),
+                            params,
+                            results,
+                            special_fields: Default::default(),
+                        })
+                        .wrap_err("failed to call executor")?;
+
+                    let errno = match call_response.errno_option.unwrap() {
+                        | executor_pb::response::call::Errno_option::ErrnoSome(errno) => {
+                            if errno == 0 {
+                                for ((result_value, result_tref), result_spec) in call_response
+                                    .results
+                                    .into_iter()
+                                    .zip(result_trefs.iter())
+                                    .zip(call.results.iter())
+                                {
+                                    let resource = result_tref.resource(spec).unwrap();
+
+                                    resource_ctx.register_resource(
+                                        resource.name.as_str(),
+                                        stateful::Value::from_pb_value(result_value),
+                                        result_spec.resource,
+                                    );
+                                }
+                            }
+
+                            Some(errno)
+                        },
+                        | executor_pb::response::call::Errno_option::ErrnoNone(_) => None,
+                        | _ => unreachable!(),
+                    };
+
+                    calls.push(stateful::Call {
+                        func: func_spec.name.as_str().to_owned(),
+                        errno,
+                    });
+                },
+            }
+        }
+
+        Ok(Prog { calls })
+    }
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum Action {
+    Decl(Decl),
+    Call(Call),
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct Decl {
+    pub resource_id: u64,
+    pub value:       Value,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct Call {
+    pub func: String,
+
+    #[serde(default)]
+    pub params: Vec<ParamSpec>,
+
+    #[serde(default)]
+    pub results: Vec<ResultSpec>,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum ParamSpec {
+    Resource(u64),
+    Value(Value),
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct ResultSpec {
+    pub resource: u64,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum Value {
+    Builtin(BuiltinValue),
+    String(StringValue),
+    Bitflags(BitflagsValue),
+    Pointer(PointerValue),
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum BuiltinValue {
+    U8(u8),
+    U32(u32),
+    U64(u64),
+    S64(i64),
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum StringValue {
+    Utf8(String),
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct BitflagsValue(pub Vec<BitflagsMember>);
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct BitflagsMember {
+    pub name:  String,
+    pub value: bool,
+}
+
+impl From<BitflagsMember> for executor_pb::value::bitflags::Member {
+    fn from(x: BitflagsMember) -> Self {
+        Self {
+            name:           x.name,
+            value:          x.value,
+            special_fields: Default::default(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct PointerValue {
+    pub alloc_from_resource: ResourceId,
+    pub default_value:       Option<Box<Value>>,
+}

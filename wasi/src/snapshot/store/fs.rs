@@ -10,7 +10,6 @@ pub struct FsSnapshotStore {
 }
 
 impl FsSnapshotStore {
-    const LINEAR_MEMORY_FILE_NAME: &'static str = "mem";
     const CALL_FILE_NAME: &'static str = "call.json";
 
     pub fn new(dir: PathBuf) -> Self {
@@ -32,10 +31,8 @@ impl SnapshotStore for FsSnapshotStore {
     fn push_snapshot(&mut self, snapshot: WasiSnapshot) -> Result<(), Self::Error> {
         let idx = self.count;
         let dir = self.root.join(Self::idx_string(idx));
-        let linear_memory_path = dir.join(Self::LINEAR_MEMORY_FILE_NAME);
 
         fs::create_dir(&dir)?;
-        fs::write(linear_memory_path, &snapshot.linear_memory)?;
 
         let file = fs::OpenOptions::new()
             .create_new(true)
@@ -59,13 +56,10 @@ impl SnapshotStore for FsSnapshotStore {
         }
 
         let dir = self.root.join(Self::idx_string(idx));
-        let linear_memory = fs::read(dir.join(Self::LINEAR_MEMORY_FILE_NAME))?;
         let call_file = fs::OpenOptions::new()
             .read(true)
             .open(dir.join(Self::CALL_FILE_NAME))?;
-        let mut snapshot: WasiSnapshot = serde_json::from_reader(call_file)?;
-
-        snapshot.linear_memory = linear_memory;
+        let snapshot: WasiSnapshot = serde_json::from_reader(call_file)?;
 
         Ok(Some(snapshot))
     }
@@ -81,13 +75,7 @@ mod tests {
     fn ok() {
         let root = tempdir().unwrap();
         let mut store = FsSnapshotStore::new(root.path().to_path_buf());
-        let snapshot = WasiSnapshot {
-            errno:         Some(21),
-            params:        vec![],
-            param_views:   vec![],
-            results:       vec![],
-            linear_memory: vec![42],
-        };
+        let snapshot = WasiSnapshot { errno: Some(21) };
 
         store.push_snapshot(snapshot.clone()).unwrap();
 
