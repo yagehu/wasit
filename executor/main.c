@@ -690,6 +690,48 @@ static void handle_call(Request__Call * call) {
 
             break;
         }
+        case WASI_FUNC__CLOCK_RES_GET: {
+            void * p0_id_ptr = value_ptr_new(call->params[0], NULL);
+            void * r0_clock_res_ptr = value_ptr_new(call->results[0], NULL);
+            int32_t p0_id = * (int32_t *) p0_id_ptr;
+            int32_t r0_clock_res = (int32_t) r0_clock_res_ptr;
+
+            response.errno_some = __imported_wasi_snapshot_preview1_clock_res_get(
+                p0_id,
+                r0_clock_res
+            );
+
+            SET_N_ALLOC(params, 1);
+            SET_N_ALLOC(results, 1);
+
+            results[0] = value_ptr_free(call->results[0], r0_clock_res_ptr);
+            params[0] = value_ptr_free(call->params[0], p0_id_ptr);
+
+            break;
+        }
+        case WASI_FUNC__CLOCK_TIME_GET: {
+            void * p0_id_ptr = value_ptr_new(call->params[0], NULL);
+            void * p1_precision_ptr = value_ptr_new(call->params[1], NULL);
+            void * r0_timestamp_ptr = value_ptr_new(call->results[0], NULL);
+            int32_t p0_id = * (int32_t *) p0_id_ptr;
+            int64_t p1_precision = * (int64_t *) p1_precision_ptr;
+            int32_t r0_timestamp = (int32_t) r0_timestamp_ptr;
+
+            response.errno_some = __imported_wasi_snapshot_preview1_clock_time_get(
+                p0_id,
+                p1_precision,
+                r0_timestamp
+            );
+
+            SET_N_ALLOC(params, 2);
+            SET_N_ALLOC(results, 1);
+
+            results[0] = value_ptr_free(call->results[0], r0_timestamp_ptr);
+            params[1] = value_ptr_free(call->params[1], p1_precision_ptr);
+            params[0] = value_ptr_free(call->params[0], p0_id_ptr);
+
+            break;
+        }
         default: fail("unimplemented");
     }
     

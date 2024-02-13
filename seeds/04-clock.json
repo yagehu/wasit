@@ -1,18 +1,22 @@
 {
     "mount_base_dir": false,
-    "calls": [
+    "actions": [
         {
-            "func": "clock_res_get",
-            "params": [ { "raw_value": { "variant": { "name": "realtime" } } } ],
-            "results": [ { "resource": 0 } ]
+            "call": {
+                "func": "clock_res_get",
+                "params": [ { "value": { "variant": { "name": "realtime" } } } ],
+                "results": [ { "resource": 0 } ]
+            }
         },
         {
-            "func": "clock_time_get",
-            "params": [
-                { "raw_value": { "variant": { "name": "realtime" } } },
-                { "resource": 0 }
-            ],
-            "results": [ { "resource": 1 } ]
+            "call": {
+                "func": "clock_time_get",
+                "params": [
+                    { "value": { "variant": { "name": "realtime" } } },
+                    { "resource": 0 }
+                ],
+                "results": [ { "resource": 1 } ]
+            }
         }
     ]
 }

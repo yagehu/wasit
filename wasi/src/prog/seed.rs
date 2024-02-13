@@ -144,6 +144,39 @@ fn prepare_param(
                         special_fields: Default::default(),
                     })
                 },
+                | (witx::Type::Variant(variant_type), Value::Variant(variant)) => {
+                    let case_idx = variant_type
+                        .cases
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, case)| {
+                            if case.name.as_str() == variant.name {
+                                Some(i)
+                            } else {
+                                None
+                            }
+                        })
+                        .next()
+                        .unwrap();
+
+                    executor_pb::value::Which::Variant(Box::new(executor_pb::value::Variant {
+                        case_idx:       case_idx as u64,
+                        size:           variant_type.mem_size() as u32,
+                        tag_repr:       protobuf::EnumOrUnknown::new(match variant_type.tag_repr {
+                            | witx::IntRepr::U8 => executor_pb::IntRepr::U8,
+                            | witx::IntRepr::U16 => executor_pb::IntRepr::U16,
+                            | witx::IntRepr::U32 => executor_pb::IntRepr::U32,
+                            | witx::IntRepr::U64 => executor_pb::IntRepr::U64,
+                        }),
+                        payload_offset: variant_type.payload_offset() as u32,
+                        payload_option: Some(
+                            executor_pb::value::variant::Payload_option::PayloadNone(
+                                Default::default(),
+                            ),
+                        ),
+                        special_fields: Default::default(),
+                    }))
+                },
                 | _ => panic!("spec and value mismatch"),
             };
 
@@ -391,6 +424,7 @@ pub enum Value {
     String(StringValue),
     Bitflags(BitflagsValue),
     Pointer(PointerValue),
+    Variant(VariantValue),
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
@@ -434,4 +468,10 @@ impl From<BitflagsMember> for executor_pb::value::bitflags::Member {
 pub struct PointerValue {
     pub alloc_from_resource: ResourceId,
     pub default_value:       Option<Box<Value>>,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct VariantValue {
+    pub name: String,
 }

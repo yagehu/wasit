@@ -1,7 +1,6 @@
 mod common;
 
 use crate::common::run_seed;
-use std::fmt::Pointer;
 
 #[test]
 fn args() {
