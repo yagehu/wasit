@@ -667,7 +667,7 @@ static void handle_call(Request__Call * call) {
             SET_N_ALLOC(results, 0);
 
             params[1] = value_ptr_free(call->params[1], p1_environ_buf_ptr);
-            params[2] = value_ptr_free(call->params[0], p0_environ_ptr);
+            params[0] = value_ptr_free(call->params[0], p0_environ_ptr);
 
             break;
         }
