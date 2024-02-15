@@ -99,3 +99,11 @@ fn close() {
 
     assert_eq!(prog.calls.last().unwrap().errno, Some(0));
 }
+
+#[test]
+fn datasync() {
+    let run = run_seed("09-datasync.json");
+    let prog = run.result.expect(&run.stderr).finish();
+
+    assert_eq!(prog.calls.last().unwrap().errno, Some(0));
+}
