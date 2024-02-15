@@ -4,6 +4,8 @@
 #include <stdnoreturn.h>
 #include <string.h>
 
+#include "wasi/api.h"
+
 // protobuf-c generated
 #include "wazzi-executor.pb-c.h"
 
@@ -187,11 +189,12 @@ static void free_ptr_value(void * ptr, const Value * value) {
                     value->array->items[i]
                 );
 
-            free(* (void **) ptr);
+            free(ptr);
 
             break;
         }
         case VALUE__WHICH_RECORD: {
+            fprintf(stderr, "[exec] free record\n");
             for (int i = 0; i < value->record->n_members; i++)
                 free_ptr_value(
                     (uint8_t *) ptr + value->record->members[i]->offset,
@@ -207,7 +210,7 @@ static void free_ptr_value(void * ptr, const Value * value) {
                     value->const_pointer->items[i]
                 );
 
-            free(* (void **) ptr);
+            free(ptr);
 
             break;
         }
@@ -218,7 +221,7 @@ static void free_ptr_value(void * ptr, const Value * value) {
                     value->pointer->items[i]
                 );
 
-            free(* (void **) ptr);
+            free(ptr);
 
             break;
         }
@@ -732,21 +735,142 @@ static void handle_call(Request__Call * call) {
 
             break;
         }
+        case WASI_FUNC__FD_READ: {
+            int32_t p1_iovs_len = 0;
+            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
+            void * p1_iovs_ptr = value_ptr_new(call->params[1], &p1_iovs_len);
+            void * r0_size_ptr = value_ptr_new(call->results[0], NULL);
+            int32_t p0_fd = * (int32_t *) p0_fd_ptr;
+            int32_t r0_size = (int32_t) r0_size_ptr;
+
+            int iovs_idx = 0;
+            __wasi_size_t to_read = 0;
+            __wasi_size_t n_read  = 0;
+
+
+            for (int i = 0; i < p1_iovs_len; i++)
+                to_read += (* (__wasi_iovec_t **) p1_iovs_ptr + i)->buf_len;
+
+            while (n_read < to_read) {
+                __wasi_iovec_t * iovs_curr = & (* (__wasi_iovec_t **) p1_iovs_ptr)[iovs_idx];
+
+                response.errno_some = __imported_wasi_snapshot_preview1_fd_read(
+                    p0_fd,
+                    (int32_t) iovs_curr,
+                    p1_iovs_len - iovs_idx,
+                    r0_size
+                );
+                if (response.errno_some != __WASI_ERRNO_SUCCESS) {
+                    if (
+                        response.errno_some == __WASI_ERRNO_INTR
+                        || response.errno_some == __WASI_ERRNO_AGAIN
+                    ) continue;
+
+                    break;
+                }
+
+                __wasi_size_t read_this_time = * (__wasi_size_t *) r0_size_ptr;
+
+                n_read += read_this_time;
+
+                fprintf(stderr, "[exec] read_this_time %lu\n", read_this_time);
+
+                while (n_read < to_read && read_this_time >= iovs_curr->buf_len) {
+                    read_this_time -= iovs_curr->buf_len;
+                    iovs_idx += 1;
+                }
+
+                iovs_curr->buf += read_this_time;
+                fprintf(stderr, "[exec] buf_len %lu\n", iovs_curr->buf_len);
+                iovs_curr->buf_len -= read_this_time;
+                fprintf(stderr, "[exec] buf_len %lu\n", iovs_curr->buf_len);
+            }
+
+            * (int32_t *) r0_size_ptr = n_read;
+
+            SET_N_ALLOC(params, 2);
+            SET_N_ALLOC(results, 1);
+
+            results[0] = value_ptr_free(call->results[0], r0_size_ptr);
+            params[1] = value_ptr_free(call->params[1], p1_iovs_ptr);
+            params[0] = value_ptr_free(call->params[0], p0_fd_ptr);
+
+            break;
+        }
+        case WASI_FUNC__FD_SEEK: {
+            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
+            void * p1_offset_ptr = value_ptr_new(call->params[1], NULL);
+            void * p2_whence_ptr = value_ptr_new(call->params[2], NULL);
+            void * r0_offset_ptr = value_ptr_new(call->results[0], NULL);
+            int32_t p0_fd = * (int32_t *) p0_fd_ptr;
+            int64_t p1_offset = * (int64_t *) p1_offset_ptr;
+            int32_t p2_whence = * (uint8_t *) p2_whence_ptr;
+            int32_t r0_offset = (int32_t) r0_offset_ptr;
+
+            response.errno_some = __imported_wasi_snapshot_preview1_fd_seek(
+                p0_fd,
+                p1_offset,
+                p2_whence,
+                r0_offset
+            );
+
+            SET_N_ALLOC(params, 3);
+            SET_N_ALLOC(results, 1);
+
+            results[0] = value_ptr_free(call->results[0], r0_offset_ptr);
+            params[2] = value_ptr_free(call->params[2], p2_whence_ptr);
+            params[1] = value_ptr_free(call->params[1], p1_offset_ptr);
+            params[0] = value_ptr_free(call->params[0], p0_fd_ptr);
+
+            break;
+        }
         case WASI_FUNC__FD_WRITE: {
             int32_t p1_iovs_len = 0;
             void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
             void * p1_iovs_ptr = value_ptr_new(call->params[1], &p1_iovs_len);
             void * r0_size_ptr = value_ptr_new(call->results[0], NULL);
             int32_t p0_fd = * (int32_t *) p0_fd_ptr;
-            int32_t p1_iovs = * (int32_t *) p1_iovs_ptr;
             int32_t r0_size = (int32_t) r0_size_ptr;
 
-            response.errno_some = __imported_wasi_snapshot_preview1_fd_write(
-                p0_fd,
-                p1_iovs,
-                p1_iovs_len,
-                r0_size
-            );
+            int iovs_idx = 0;
+            __wasi_size_t to_write = 0;
+            __wasi_size_t written  = 0;
+
+            for (int i = 0; i < p1_iovs_len; i++)
+                to_write += (* (__wasi_ciovec_t **) p1_iovs_ptr + i)->buf_len;
+
+            while (written < to_write) {
+                __wasi_ciovec_t * iovs_curr = & (* (__wasi_ciovec_t **) p1_iovs_ptr)[iovs_idx];
+
+                response.errno_some = __imported_wasi_snapshot_preview1_fd_write(
+                    p0_fd,
+                    (int32_t) iovs_curr,
+                    p1_iovs_len - iovs_idx,
+                    r0_size
+                );
+                if (response.errno_some != __WASI_ERRNO_SUCCESS) {
+                    if (
+                        response.errno_some == __WASI_ERRNO_INTR
+                        || response.errno_some == __WASI_ERRNO_AGAIN
+                    ) continue;
+
+                    break;
+                }
+
+                __wasi_size_t written_this_time = * (__wasi_size_t *) r0_size_ptr;
+
+                written += written_this_time;
+
+                while (written < to_write && written_this_time >= iovs_curr->buf_len) {
+                    written_this_time -= iovs_curr->buf_len;
+                    iovs_idx += 1;
+                }
+
+                iovs_curr->buf += written_this_time;
+                iovs_curr->buf_len -= written_this_time;
+            }
+
+            * (int32_t *) r0_size_ptr = written;
 
             SET_N_ALLOC(params, 2);
             SET_N_ALLOC(results, 1);

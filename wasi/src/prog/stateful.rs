@@ -1,6 +1,12 @@
 use witx::IntRepr;
 
-use crate::{prog::r#final, BitflagsValue, BuiltinValue, FinalProg};
+use crate::{
+    prog::{
+        r#final,
+        seed::{BitflagsValue, BuiltinValue},
+    },
+    FinalProg,
+};
 
 #[derive(Debug)]
 pub struct Prog {
@@ -15,7 +21,7 @@ impl Prog {
             calls.push(r#final::Call {
                 func:    call.func,
                 params:  vec![],
-                results: vec![],
+                results: call.results.into_iter().map(Into::into).collect(),
                 errno:   call.errno,
             });
         }
@@ -108,6 +114,7 @@ impl Value {
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub(crate) struct Call {
-    pub func:  String,
-    pub errno: Option<i32>,
+    pub func:    String,
+    pub errno:   Option<i32>,
+    pub results: Vec<Value>,
 }

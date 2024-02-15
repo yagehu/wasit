@@ -8,12 +8,11 @@ use super::stateful;
 use crate::{
     resource_ctx::{ResourceContext, ResourceId},
     snapshot::{SnapshotStore, WasiSnapshot},
-    Prog,
 };
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 #[serde(deny_unknown_fields)]
-pub struct ProgSeed {
+pub struct Prog {
     pub mount_base_dir: bool,
     pub actions:        Vec<Action>,
 }
@@ -105,13 +104,13 @@ fn prepare_result(tref: &witx::TypeRef) -> executor_pb::Value {
     }
 }
 
-impl ProgSeed {
+impl Prog {
     pub fn execute<'s, S>(
         self,
         executor: &RunningExecutor,
         spec: &'s witx::Document,
         snapshot_store: &mut S,
-    ) -> Result<Prog, eyre::Error>
+    ) -> Result<stateful::Prog, eyre::Error>
     where
         S: SnapshotStore<Snapshot = WasiSnapshot>,
     {
@@ -192,7 +191,7 @@ impl ProgSeed {
                             if errno == 0 {
                                 for ((result_value, result_tref), result_spec) in call_response
                                     .results
-                                    .into_iter()
+                                    .iter()
                                     .zip(result_trefs.iter())
                                     .zip(call.results.iter())
                                 {
@@ -200,7 +199,7 @@ impl ProgSeed {
 
                                     resource_ctx.register_resource(
                                         resource.name.as_str(),
-                                        stateful::Value::from_pb_value(result_value),
+                                        stateful::Value::from_pb_value(result_value.to_owned()),
                                         result_spec.resource,
                                     );
                                 }
@@ -215,12 +214,17 @@ impl ProgSeed {
                     calls.push(stateful::Call {
                         func: func_spec.name.as_str().to_owned(),
                         errno,
+                        results: call_response
+                            .results
+                            .into_iter()
+                            .map(stateful::Value::from_pb_value)
+                            .collect(),
                     });
                 },
             }
         }
 
-        Ok(Prog { calls })
+        Ok(stateful::Prog { calls })
     }
 }
 
@@ -235,7 +239,7 @@ pub enum Action {
 #[serde(deny_unknown_fields)]
 pub struct Decl {
     pub resource_id: u64,
-    pub value:       Value,
+    pub value:       SeedValue,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
@@ -254,7 +258,20 @@ pub struct Call {
 #[serde(rename_all = "snake_case")]
 pub enum ParamSpec {
     Resource(u64),
-    Value(Value),
+    Value(SeedValue),
+}
+
+impl ParamSpec {
+    fn to_pb_value(self, resource_ctx: &ResourceContext, ty: &witx::Type) -> executor_pb::Value {
+        match self {
+            | Self::Value(value) => value.to_pb_value(resource_ctx, ty),
+            | Self::Resource(resource_id) => {
+                let value = resource_ctx.get_resource(resource_id).unwrap();
+
+                value.to_pb_value(ty)
+            },
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
@@ -265,7 +282,7 @@ pub struct ResultSpec {
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
-pub enum Value {
+pub enum SeedValue {
     Builtin(BuiltinValue),
     String(StringValue),
     Bitflags(BitflagsValue),
@@ -276,10 +293,10 @@ pub enum Value {
     Variant(VariantValue),
 }
 
-impl Value {
+impl SeedValue {
     fn to_pb_value(self, resource_ctx: &ResourceContext, ty: &witx::Type) -> executor_pb::Value {
         let which = match (ty, self.clone()) {
-            | (_, Value::Builtin(builtin)) => {
+            | (_, SeedValue::Builtin(builtin)) => {
                 let which = match builtin {
                     | BuiltinValue::U8(i) => executor_pb::value::builtin::Which::U8(i.into()),
                     | BuiltinValue::U32(i) => executor_pb::value::builtin::Which::U32(i),
@@ -292,10 +309,11 @@ impl Value {
                     special_fields: Default::default(),
                 })
             },
-            | (_, Value::String(string)) => executor_pb::value::Which::String(match string {
+            | (_, SeedValue::String(string)) => executor_pb::value::Which::String(match string {
                 | StringValue::Utf8(s) => s.as_bytes().to_vec(),
+                | StringValue::Bytes(b) => b,
             }),
-            | (witx::Type::Record(record), Value::Bitflags(bitflags))
+            | (witx::Type::Record(record), SeedValue::Bitflags(bitflags))
                 if record.bitflags_repr().is_some() =>
             {
                 let mut members = Vec::with_capacity(bitflags.0.len());
@@ -319,7 +337,7 @@ impl Value {
                     special_fields: Default::default(),
                 })
             },
-            | (witx::Type::Record(record_type), Value::Record(record)) => {
+            | (witx::Type::Record(record_type), SeedValue::Record(record)) => {
                 let mut members = Vec::with_capacity(record.0.len());
 
                 for ((member_layout, member_type), member) in record_type
@@ -348,7 +366,7 @@ impl Value {
                     special_fields: Default::default(),
                 })
             },
-            | (witx::Type::List(item_tref), Value::List(list)) => {
+            | (witx::Type::List(item_tref), SeedValue::List(list)) => {
                 let mut items = Vec::with_capacity(list.0.len());
 
                 for item in &list.0 {
@@ -364,7 +382,7 @@ impl Value {
                     special_fields: Default::default(),
                 })
             },
-            | (witx::Type::ConstPointer(item_tref), Value::ConstPointer(list)) => {
+            | (witx::Type::ConstPointer(item_tref), SeedValue::ConstPointer(list)) => {
                 let mut items = Vec::with_capacity(list.0.len());
 
                 for item in &list.0 {
@@ -380,7 +398,7 @@ impl Value {
                     special_fields: Default::default(),
                 })
             },
-            | (witx::Type::Pointer(pointee_tref), Value::Pointer(pointer)) => {
+            | (witx::Type::Pointer(pointee_tref), SeedValue::Pointer(pointer)) => {
                 let resource = resource_ctx
                     .get_resource(pointer.alloc_from_resource)
                     .unwrap();
@@ -450,7 +468,7 @@ impl Value {
                     special_fields: Default::default(),
                 })
             },
-            | (witx::Type::Variant(variant_type), Value::Variant(variant)) => {
+            | (witx::Type::Variant(variant_type), SeedValue::Variant(variant)) => {
                 let case_idx = variant_type
                     .cases
                     .iter()
@@ -504,6 +522,16 @@ pub enum BuiltinValue {
 #[serde(rename_all = "snake_case")]
 pub enum StringValue {
     Utf8(String),
+    Bytes(Vec<u8>),
+}
+
+impl From<Vec<u8>> for StringValue {
+    fn from(x: Vec<u8>) -> Self {
+        match String::from_utf8(x) {
+            | Ok(s) => Self::Utf8(s),
+            | Err(err) => Self::Bytes(err.into_bytes()),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
@@ -525,7 +553,7 @@ pub struct RecordValue(pub Vec<RecordMember>);
 #[serde(deny_unknown_fields)]
 pub struct RecordMember {
     pub name:  String,
-    pub value: Value,
+    pub value: ParamSpec,
 }
 
 impl From<BitflagsMember> for executor_pb::value::bitflags::Member {
@@ -540,13 +568,13 @@ impl From<BitflagsMember> for executor_pb::value::bitflags::Member {
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 #[serde(deny_unknown_fields)]
-pub struct ListValue(pub Vec<Value>);
+pub struct ListValue(pub Vec<SeedValue>);
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct PointerValue {
     pub alloc_from_resource: ResourceId,
-    pub default_value:       Option<Box<Value>>,
+    pub default_value:       Option<Box<SeedValue>>,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]

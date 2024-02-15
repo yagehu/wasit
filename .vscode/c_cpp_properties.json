@@ -5,6 +5,7 @@
             "includePath": [
                 "${workspaceFolder}/target/debug",
                 "${workspaceFolder}/executor/protobuf-c/upstream",
+                "${workspaceFolder}/wasi-sdk/upstream/build/install/opt/wasi-sdk/share/wasi-sysroot/include"
             ]
         }
     ],

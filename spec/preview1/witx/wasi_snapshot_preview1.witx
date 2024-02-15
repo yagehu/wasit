@@ -44,6 +44,9 @@
 (typename $dirent_buf_size $size)
 (resource $dirent_buf_size (type $dirent_buf_size) (@alloc $dirent_buf))
 
+(typename $file_offset $filesize)
+(resource $file_offset (type $file_offset))
+
 (module $wasi_snapshot_preview1
   ;;; Linear memory to be accessed by WASI functions that need it.
   (import "memory" (memory))
@@ -309,7 +312,7 @@
     ;;; The base from which the offset is relative.
     (param $whence $whence)
     ;;; The new offset of the file descriptor, relative to the start of the file.
-    (result $error (expected $filesize (error $errno)))
+    (result $error (expected $file_offset (error $errno)))
   )
 
   ;;; Synchronize the data and metadata of a file to disk.

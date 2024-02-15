@@ -12,9 +12,14 @@ use std::{
 use tempfile::{tempdir, TempDir};
 
 use wazzi_executor::ExecutorRunner;
-use wazzi_wasi::{InMemorySnapshotStore, Prog, ProgSeed, WasiSnapshot};
+use wazzi_wasi::{
+    prog::seed::{self},
+    InMemorySnapshotStore,
+    Prog,
+    WasiSnapshot,
+};
 
-pub fn get_seed(name: &str) -> ProgSeed {
+pub fn get_seed(name: &str) -> seed::Prog {
     serde_json::from_reader(
         fs::OpenOptions::new()
             .read(true)
@@ -49,6 +54,11 @@ pub struct RunInstance<S, E> {
 
 pub fn run_seed(name: &str) -> RunInstance<InMemorySnapshotStore<WasiSnapshot>, eyre::Error> {
     let seed = get_seed(name);
+
+    run(seed)
+}
+
+pub fn run(seed: seed::Prog) -> RunInstance<InMemorySnapshotStore<WasiSnapshot>, eyre::Error> {
     let base_dir = tempdir().unwrap();
     let wasmtime = wazzi_runners::Wasmtime::new("wasmtime");
     let stderr = Arc::new(Mutex::new(Vec::new()));

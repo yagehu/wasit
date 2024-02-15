@@ -124,15 +124,17 @@
                                         {
                                             "name": "buf",
                                             "value": {
-                                                "const_pointer": [
-                                                    { "builtin": { "u8": 97 } },
-                                                    { "builtin": { "u8": 98 } }
-                                                ]
+                                                "value": {
+                                                    "const_pointer": [
+                                                        { "builtin": { "u8": 97 } },
+                                                        { "builtin": { "u8": 98 } }
+                                                    ]
+                                                }
                                             }
                                         },
                                         {
                                             "name": "buf_len",
-                                            "value": { "builtin": { "u32": 2 } }
+                                            "value": { "value": { "builtin": { "u32": 2 } } }
                                         }
                                     ]
                                 }
