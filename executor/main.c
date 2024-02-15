@@ -194,7 +194,6 @@ static void free_ptr_value(void * ptr, const Value * value) {
             break;
         }
         case VALUE__WHICH_RECORD: {
-            fprintf(stderr, "[exec] free record\n");
             for (int i = 0; i < value->record->n_members; i++)
                 free_ptr_value(
                     (uint8_t *) ptr + value->record->members[i]->offset,
@@ -428,6 +427,8 @@ static Value * value_new(const Value * v, const void * ptr) {
             switch (v->variant->payload_option_case) {
                 case VALUE__VARIANT__PAYLOAD_OPTION_PAYLOAD_NONE: {
                     payload_none = malloc(sizeof(Empty));
+                    empty__init(payload_none);
+                    value->variant->payload_none = payload_none;
                     break;
                 }
                 case VALUE__VARIANT__PAYLOAD_OPTION_PAYLOAD_SOME: {
@@ -435,6 +436,7 @@ static Value * value_new(const Value * v, const void * ptr) {
                         v->variant->payload_some,
                         (uint8_t *) ptr + v->variant->payload_offset
                     );
+                    value->variant->payload_some = payload_some;
                     break;
                 }
                 case VALUE__VARIANT__PAYLOAD_OPTION__NOT_SET:
@@ -442,8 +444,6 @@ static Value * value_new(const Value * v, const void * ptr) {
             }
 
             value->variant->case_idx = case_idx;
-            value->variant->payload_none = payload_none;
-            value->variant->payload_some = payload_some;
             value->variant->payload_option_case = v->variant->payload_option_case;
             value->variant->payload_offset = v->variant->payload_offset;
             value->variant->tag_repr = v->variant->tag_repr;
@@ -811,6 +811,22 @@ static void handle_call(Request__Call * call) {
 
             break;
         }
+        case WASI_FUNC__FD_FDSTAT_GET: {
+            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
+            void * r0_fdstat_ptr = value_ptr_new(call->results[0], NULL);
+            int32_t p0_fd = * (int32_t *) p0_fd_ptr;
+            int32_t r0_fdstat = (int32_t) r0_fdstat_ptr;
+
+            response.errno_some = __imported_wasi_snapshot_preview1_fd_fdstat_get(p0_fd, r0_fdstat);
+
+            SET_N_ALLOC(params, 1);
+            SET_N_ALLOC(results, 1);
+
+            results[0] = value_ptr_free(call->results[0], r0_fdstat_ptr);
+            params[0] = value_ptr_free(call->params[0], p0_fd_ptr);
+
+            break;
+        }
         case WASI_FUNC__FD_READ: {
             int32_t p1_iovs_len = 0;
             void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
@@ -849,17 +865,13 @@ static void handle_call(Request__Call * call) {
 
                 n_read += read_this_time;
 
-                fprintf(stderr, "[exec] read_this_time %lu\n", read_this_time);
-
                 while (n_read < to_read && read_this_time >= iovs_curr->buf_len) {
                     read_this_time -= iovs_curr->buf_len;
                     iovs_idx += 1;
                 }
 
                 iovs_curr->buf += read_this_time;
-                fprintf(stderr, "[exec] buf_len %lu\n", iovs_curr->buf_len);
                 iovs_curr->buf_len -= read_this_time;
-                fprintf(stderr, "[exec] buf_len %lu\n", iovs_curr->buf_len);
             }
 
             * (int32_t *) r0_size_ptr = n_read;

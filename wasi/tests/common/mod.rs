@@ -97,7 +97,7 @@ pub fn run(seed: seed::Prog) -> RunInstance<InMemorySnapshotStore<WasiSnapshot>,
     }
 }
 
-fn spec() -> witx::Document {
+pub fn spec() -> witx::Document {
     let dir = wazzi_compile_time::root()
         .join("spec")
         .join("preview1")

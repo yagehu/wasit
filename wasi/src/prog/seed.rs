@@ -26,15 +26,37 @@ fn prepare_param(
         | &ParamSpec::Resource(resource_id) => resource_ctx
             .get_resource(resource_id)
             .unwrap()
-            .to_pb_value(tref.type_().as_ref()),
+            .into_pb_value(tref.type_().as_ref()),
         | ParamSpec::Value(value) => value
             .to_owned()
-            .to_pb_value(resource_ctx, tref.type_().as_ref()),
+            .into_pb_value(resource_ctx, tref.type_().as_ref()),
     }
 }
 
 fn prepare_result(tref: &witx::TypeRef) -> executor_pb::Value {
     let which = match tref.type_().as_ref() {
+        | witx::Type::Record(record) if record.bitflags_repr().is_some() => {
+            let mut members = Vec::with_capacity(record.members.len());
+
+            for member in &record.members {
+                members.push(executor_pb::value::bitflags::Member {
+                    name:           member.name.as_str().to_owned(),
+                    value:          false,
+                    special_fields: Default::default(),
+                });
+            }
+
+            executor_pb::value::Which::Bitflags(executor_pb::value::Bitflags {
+                repr: protobuf::EnumOrUnknown::new(match record.bitflags_repr().unwrap() {
+                    | witx::IntRepr::U8 => executor_pb::IntRepr::U8,
+                    | witx::IntRepr::U16 => executor_pb::IntRepr::U16,
+                    | witx::IntRepr::U32 => executor_pb::IntRepr::U32,
+                    | witx::IntRepr::U64 => executor_pb::IntRepr::U64,
+                }),
+                members,
+                special_fields: Default::default(),
+            })
+        },
         | witx::Type::Record(record) => {
             let mut members = Vec::with_capacity(record.members.len());
 
@@ -68,7 +90,14 @@ fn prepare_result(tref: &witx::TypeRef) -> executor_pb::Value {
                     | witx::IntRepr::U64 => executor_pb::IntRepr::U64,
                 }),
                 payload_offset: 0,
-                payload_option: None,
+                payload_option: Some(match variant.cases.first().unwrap().tref.as_ref() {
+                    | Some(tref) => executor_pb::value::variant::Payload_option::PayloadSome(
+                        Box::new(prepare_result(tref)),
+                    ),
+                    | None => {
+                        executor_pb::value::variant::Payload_option::PayloadNone(Default::default())
+                    },
+                }),
                 special_fields: Default::default(),
             }))
         },
@@ -92,23 +121,23 @@ fn prepare_result(tref: &witx::TypeRef) -> executor_pb::Value {
             };
 
             executor_pb::value::Which::Builtin(executor_pb::value::Builtin {
-                which:          Some(which).into(),
+                which:          Some(which),
                 special_fields: Default::default(),
             })
         },
     };
 
     executor_pb::Value {
-        which:          Some(which).into(),
+        which:          Some(which),
         special_fields: Default::default(),
     }
 }
 
 impl Prog {
-    pub fn execute<'s, S>(
+    pub fn execute<S>(
         self,
         executor: &RunningExecutor,
-        spec: &'s witx::Document,
+        spec: &witx::Document,
         snapshot_store: &mut S,
     ) -> Result<stateful::Prog, eyre::Error>
     where
@@ -170,7 +199,7 @@ impl Prog {
                     let mut results = Vec::with_capacity(result_trefs.len());
 
                     for (param_type, param) in func_spec.params.iter().zip(call.params.iter()) {
-                        params.push(prepare_param(&mut resource_ctx, &param_type.tref, &param));
+                        params.push(prepare_param(&resource_ctx, &param_type.tref, param));
                     }
 
                     for result_tref in &result_trefs {
@@ -262,13 +291,13 @@ pub enum ParamSpec {
 }
 
 impl ParamSpec {
-    fn to_pb_value(self, resource_ctx: &ResourceContext, ty: &witx::Type) -> executor_pb::Value {
+    fn into_pb_value(self, resource_ctx: &ResourceContext, ty: &witx::Type) -> executor_pb::Value {
         match self {
-            | Self::Value(value) => value.to_pb_value(resource_ctx, ty),
+            | Self::Value(value) => value.into_pb_value(resource_ctx, ty),
             | Self::Resource(resource_id) => {
                 let value = resource_ctx.get_resource(resource_id).unwrap();
 
-                value.to_pb_value(ty)
+                value.into_pb_value(ty)
             },
         }
     }
@@ -294,7 +323,7 @@ pub enum SeedValue {
 }
 
 impl SeedValue {
-    fn to_pb_value(self, resource_ctx: &ResourceContext, ty: &witx::Type) -> executor_pb::Value {
+    fn into_pb_value(self, resource_ctx: &ResourceContext, ty: &witx::Type) -> executor_pb::Value {
         let which = match (ty, self.clone()) {
             | (_, SeedValue::Builtin(builtin)) => {
                 let which = match builtin {
@@ -305,7 +334,7 @@ impl SeedValue {
                 };
 
                 executor_pb::value::Which::Builtin(executor_pb::value::Builtin {
-                    which:          Some(which).into(),
+                    which:          Some(which),
                     special_fields: Default::default(),
                 })
             },
@@ -352,7 +381,7 @@ impl SeedValue {
                             member
                                 .value
                                 .clone()
-                                .to_pb_value(resource_ctx, member_type.tref.type_().as_ref()),
+                                .into_pb_value(resource_ctx, member_type.tref.type_().as_ref()),
                         )
                         .into(),
                         offset:         member_layout.offset as u32,
@@ -372,7 +401,7 @@ impl SeedValue {
                 for item in &list.0 {
                     items.push(
                         item.to_owned()
-                            .to_pb_value(resource_ctx, item_tref.type_().as_ref()),
+                            .into_pb_value(resource_ctx, item_tref.type_().as_ref()),
                     );
                 }
 
@@ -388,7 +417,7 @@ impl SeedValue {
                 for item in &list.0 {
                     items.push(
                         item.to_owned()
-                            .to_pb_value(resource_ctx, item_tref.type_().as_ref()),
+                            .into_pb_value(resource_ctx, item_tref.type_().as_ref()),
                     );
                 }
 
@@ -449,13 +478,13 @@ impl SeedValue {
                             };
 
                             executor_pb::value::Which::Builtin(executor_pb::value::Builtin {
-                                which:          Some(which).into(),
+                                which:          Some(which),
                                 special_fields: Default::default(),
                             })
                         },
                     };
                     let item = executor_pb::Value {
-                        which:          Some(which).into(),
+                        which:          Some(which),
                         special_fields: Default::default(),
                     };
 
@@ -503,7 +532,7 @@ impl SeedValue {
         };
 
         executor_pb::Value {
-            which:          Some(which).into(),
+            which:          Some(which),
             special_fields: Default::default(),
         }
     }

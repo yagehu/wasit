@@ -7,12 +7,12 @@ use wazzi_wasi::{
     Value,
 };
 
-use crate::common::{get_seed, run, run_seed};
+use crate::common::{get_seed, run, run_seed, spec};
 
 #[test]
 fn creat() {
     let run = run_seed("00-creat.json");
-    let prog = run.result.expect(&run.stderr).finish();
+    let prog = run.result.expect(&run.stderr).finish(&spec());
 
     assert_eq!(prog.calls.last().unwrap().errno, Some(0));
     assert!(run.base_dir.path().join("a").exists());
@@ -21,7 +21,7 @@ fn creat() {
 #[test]
 fn write() {
     let run = run_seed("01-write.json");
-    let prog = run.result.expect(&run.stderr).finish();
+    let prog = run.result.expect(&run.stderr).finish(&spec());
 
     assert_eq!(prog.calls.last().unwrap().errno, Some(0));
 
@@ -59,7 +59,7 @@ fn read_after_write() {
     }
 
     let run = run(seed);
-    let prog = run.result.expect(&run.stderr).finish();
+    let prog = run.result.expect(&run.stderr).finish(&spec());
     let read_call = prog.calls.last().unwrap();
 
     assert_eq!(read_call.errno, Some(0));
@@ -77,7 +77,7 @@ fn read_after_write() {
 #[test]
 fn advise() {
     let run = run_seed("06-advise.json");
-    let prog = run.result.expect(&run.stderr).finish();
+    let prog = run.result.expect(&run.stderr).finish(&spec());
 
     assert_eq!(prog.calls.last().unwrap().errno, Some(0));
 }
@@ -85,7 +85,7 @@ fn advise() {
 #[test]
 fn allocate() {
     let run = run_seed("07-allocate.json");
-    let prog = run.result.expect(&run.stderr).finish();
+    let prog = run.result.expect(&run.stderr).finish(&spec());
 
     // Wasmtime no longer supports `fd_allocate`.
     // https://github.com/bytecodealliance/wasmtime/pull/6217
@@ -95,7 +95,7 @@ fn allocate() {
 #[test]
 fn close() {
     let run = run_seed("08-close.json");
-    let prog = run.result.expect(&run.stderr).finish();
+    let prog = run.result.expect(&run.stderr).finish(&spec());
 
     assert_eq!(prog.calls.last().unwrap().errno, Some(0));
 }
@@ -103,7 +103,15 @@ fn close() {
 #[test]
 fn datasync() {
     let run = run_seed("09-datasync.json");
-    let prog = run.result.expect(&run.stderr).finish();
+    let prog = run.result.expect(&run.stderr).finish(&spec());
+
+    assert_eq!(prog.calls.last().unwrap().errno, Some(0));
+}
+
+#[test]
+fn fdstat_get() {
+    let run = run_seed("10-fdstat_get.json");
+    let prog = run.result.expect(&run.stderr).finish(&spec());
 
     assert_eq!(prog.calls.last().unwrap().errno, Some(0));
 }
