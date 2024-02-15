@@ -81,3 +81,13 @@ fn advise() {
 
     assert_eq!(prog.calls.last().unwrap().errno, Some(0));
 }
+
+#[test]
+fn allocate() {
+    let run = run_seed("07-allocate.json");
+    let prog = run.result.expect(&run.stderr).finish();
+
+    // Wasmtime no longer supports `fd_allocate`.
+    // https://github.com/bytecodealliance/wasmtime/pull/6217
+    assert_eq!(prog.calls.last().unwrap().errno, Some(58));
+}
