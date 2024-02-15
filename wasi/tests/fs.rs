@@ -115,3 +115,11 @@ fn fdstat_get() {
 
     assert_eq!(prog.calls.last().unwrap().errno, Some(0));
 }
+
+#[test]
+fn fdstat_set_flags() {
+    let run = run_seed("11-fdstat_set_flags.json");
+    let prog = run.result.expect(&run.stderr).finish(&spec());
+
+    assert_eq!(prog.calls.last().unwrap().errno, Some(0));
+}
