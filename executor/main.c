@@ -735,6 +735,33 @@ static void handle_call(Request__Call * call) {
 
             break;
         }
+        case WASI_FUNC__FD_ADVISE: {
+            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
+            void * p1_offset_ptr = value_ptr_new(call->params[1], NULL);
+            void * p2_len_ptr = value_ptr_new(call->params[2], NULL);
+            void * p3_advice_ptr = value_ptr_new(call->params[3], NULL);
+            int32_t p0_fd = * (int32_t *) p0_fd_ptr;
+            int64_t p1_offset = * (int64_t *) p1_offset_ptr;
+            int64_t p2_len = * (int64_t *) p2_len_ptr;
+            int32_t p3_advice = * (uint8_t *) p3_advice_ptr;
+
+            response.errno_some = __imported_wasi_snapshot_preview1_fd_advise(
+                p0_fd,
+                p1_offset,
+                p2_len,
+                p3_advice
+            );
+
+            SET_N_ALLOC(params, 4);
+            SET_N_ALLOC(results, 0);
+
+            params[3] = value_ptr_free(call->params[3], p3_advice_ptr);
+            params[2] = value_ptr_free(call->params[2], p2_len_ptr);
+            params[1] = value_ptr_free(call->params[1], p1_offset_ptr);
+            params[0] = value_ptr_free(call->params[0], p0_fd_ptr);
+
+            break;
+        }
         case WASI_FUNC__FD_READ: {
             int32_t p1_iovs_len = 0;
             void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);

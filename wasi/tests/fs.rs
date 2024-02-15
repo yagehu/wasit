@@ -73,3 +73,11 @@ fn read_after_write() {
         read_call.results.first().unwrap()
     );
 }
+
+#[test]
+fn advise() {
+    let run = run_seed("06-advise.json");
+    let prog = run.result.expect(&run.stderr).finish();
+
+    assert_eq!(prog.calls.last().unwrap().errno, Some(0));
+}
