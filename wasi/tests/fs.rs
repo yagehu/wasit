@@ -91,3 +91,11 @@ fn allocate() {
     // https://github.com/bytecodealliance/wasmtime/pull/6217
     assert_eq!(prog.calls.last().unwrap().errno, Some(58));
 }
+
+#[test]
+fn close() {
+    let run = run_seed("08-close.json");
+    let prog = run.result.expect(&run.stderr).finish();
+
+    assert_eq!(prog.calls.last().unwrap().errno, Some(0));
+}

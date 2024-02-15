@@ -1,45 +1,38 @@
 {
     "mount_base_dir": true,
-    "calls": [
+    "actions": [
         {
-            "func": "path_open",
-            "params": [
-                { "resource": 0 },
-                {
-                    "raw_value": {
-                        "bitflags": {
-                            "repr": "u32",
-                            "members": [
+            "call": {
+                "func": "path_open",
+                "params": [
+                    { "resource": 0 },
+                    {
+                        "value": {
+                            "bitflags": [
                                 { "name": "symlink_follow", "value": false }
                             ]
                         }
-                    }
-                },
-                {
-                    "raw_value": {
-                        "string": {
-                            "utf8": "a"
+                    },
+                    {
+                        "value": {
+                            "string": {
+                                "utf8": "a"
+                            }
                         }
-                    }
-                },
-                {
-                    "raw_value": {
-                        "bitflags": {
-                            "repr": "u16",
-                            "members": [
+                    },
+                    {
+                        "value": {
+                            "bitflags": [
                                 { "name": "creat",     "value": true },
                                 { "name": "directory", "value": false },
                                 { "name": "excl",      "value": true },
                                 { "name": "trunc",     "value": false }
                             ]
                         }
-                    }
-                },
-                {
-                    "raw_value": {
-                        "bitflags": {
-                            "repr": "u64",
-                            "members": [
+                    },
+                    {
+                        "value": {
+                            "bitflags": [
                                 { "name": "fd_datasync",             "value": true },
                                 { "name": "fd_read",                 "value": true },
                                 { "name": "fd_seek",                 "value": true },
@@ -72,13 +65,10 @@
                                 { "name": "sock_accept",             "value": false }
                             ]
                         }
-                    }
-                },
-                {
-                    "raw_value": {
-                        "bitflags": {
-                            "repr": "u64",
-                            "members": [
+                    },
+                    {
+                        "value": {
+                            "bitflags": [
                                 { "name": "fd_datasync",             "value": true },
                                 { "name": "fd_read",                 "value": true },
                                 { "name": "fd_seek",                 "value": true },
@@ -111,13 +101,10 @@
                                 { "name": "sock_accept",             "value": false }
                             ]
                         }
-                    }
-                },
-                {
-                    "raw_value": {
-                        "bitflags": {
-                            "repr": "u8",
-                            "members": [
+                    },
+                    {
+                        "value": {
+                            "bitflags": [
                                 { "name": "append",   "value": false },
                                 { "name": "dsync",    "value": false },
                                 { "name": "nonblock", "value": false },
@@ -126,15 +113,15 @@
                             ]
                         }
                     }
-                }
-            ],
-            "results": [
-                { "resource": 1 }
-            ]
+                ],
+                "results": [ { "resource": 1 } ]
+            }
         },
         {
-            "func": "fd_close",
-            "params": [ { "resource": 1 } ]
+            "call": {
+                "func": "fd_close",
+                "params": [ { "resource": 1 } ]
+            }
         }
     ]
 }
