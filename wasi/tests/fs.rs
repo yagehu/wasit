@@ -147,3 +147,11 @@ fn filestat_set_size() {
 
     assert_eq!(prog.calls.last().unwrap().errno, Some(0));
 }
+
+#[test]
+fn filestat_set_times() {
+    let run = run_seed("15-filestat_set_times.json");
+    let prog = run.result.expect(&run.stderr).finish(&spec());
+
+    assert_eq!(prog.calls.last().unwrap().errno, Some(0));
+}
