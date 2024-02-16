@@ -123,3 +123,11 @@ fn fdstat_set_flags() {
 
     assert_eq!(prog.calls.last().unwrap().errno, Some(0));
 }
+
+#[test]
+fn fdstat_set_rights() {
+    let run = run_seed("12-fdstat_set_rights.json");
+    let prog = run.result.expect(&run.stderr).finish(&spec());
+
+    assert_eq!(prog.calls.last().unwrap().errno, Some(0));
+}
