@@ -131,3 +131,11 @@ fn fdstat_set_rights() {
 
     assert_eq!(prog.calls.last().unwrap().errno, Some(0));
 }
+
+#[test]
+fn filestat_get() {
+    let run = run_seed("13-filestat_get.json");
+    let prog = run.result.expect(&run.stderr).finish(&spec());
+
+    assert_eq!(prog.calls.last().unwrap().errno, Some(0));
+}
