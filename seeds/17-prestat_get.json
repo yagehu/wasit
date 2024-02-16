@@ -1,10 +1,12 @@
 {
     "mount_base_dir": true,
-    "calls": [
+    "actions": [
         {
-            "func": "fd_prestat_get",
-            "params": [ { "resource": 0 } ],
-            "results": [ { "resource": 1 } ]
+            "call": {
+                "func": "fd_prestat_get",
+                "params": [ { "resource": 0 } ],
+                "results": [ { "resource": 1 } ]
+            }
         }
     ]
 }

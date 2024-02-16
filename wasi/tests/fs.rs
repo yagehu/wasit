@@ -226,3 +226,11 @@ fn pread() {
         values.last()
     );
 }
+
+#[test]
+fn prestat_get() {
+    let run = run_seed("17-prestat_get.json");
+    let prog = run.result.expect(&run.stderr).finish(&spec());
+
+    assert_eq!(prog.calls.last().unwrap().errno, Some(0));
+}

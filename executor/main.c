@@ -985,6 +985,45 @@ static void handle_call(Request__Call * call) {
 
             break;
         }
+        case WASI_FUNC__FD_PRESTAT_GET: {
+            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
+            void * r0_prestat_ptr = value_ptr_new(call->results[0], NULL);
+            int32_t p0_fd = * (int32_t *) p0_fd_ptr;
+            int32_t r0_prestat = (int32_t) r0_prestat_ptr;
+
+            response.errno_some = __imported_wasi_snapshot_preview1_fd_prestat_get(p0_fd, r0_prestat);
+
+            SET_N_ALLOC(params, 1);
+            SET_N_ALLOC(results, 1);
+
+            results[0] = value_ptr_free(call->results[0], r0_prestat_ptr);
+            params[0] = value_ptr_free(call->params[0], p0_fd_ptr);
+
+            break;
+        }
+        case WASI_FUNC__FD_PRESTAT_DIR_NAME: {
+            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
+            void * p1_path_ptr = value_ptr_new(call->params[1], NULL);
+            void * p2_path_len_ptr = value_ptr_new(call->params[2], NULL);
+            int32_t p0_fd = * (int32_t *) p0_fd_ptr;
+            int32_t p1_path = * (int32_t *) p1_path_ptr;
+            int32_t p2_path_len = * (int32_t *) p2_path_len_ptr;
+
+            response.errno_some = __imported_wasi_snapshot_preview1_fd_prestat_dir_name(
+                p0_fd,
+                p1_path,
+                p2_path_len
+            );
+
+            SET_N_ALLOC(params, 3);
+            SET_N_ALLOC(results, 0);
+
+            params[2] = value_ptr_free(call->params[2], p2_path_len_ptr);
+            params[1] = value_ptr_free(call->params[1], p1_path_ptr);
+            params[0] = value_ptr_free(call->params[0], p0_fd_ptr);
+
+            break;
+        }
         case WASI_FUNC__FD_READ: {
             int32_t p1_iovs_len = 0;
             void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
