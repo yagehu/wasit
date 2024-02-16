@@ -243,6 +243,11 @@ impl Prog {
                     calls.push(stateful::Call {
                         func: func_spec.name.as_str().to_owned(),
                         errno,
+                        params_post: call_response
+                            .params
+                            .into_iter()
+                            .map(stateful::Value::from_pb_value)
+                            .collect(),
                         results: call_response
                             .results
                             .into_iter()

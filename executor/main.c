@@ -80,7 +80,7 @@ static void set_ptr_value(void * ptr, const Value * value) {
                     * (int64_t *) ptr = value->builtin->s64;
                     break;
                 case VALUE__BUILTIN__WHICH__NOT_SET:
-                case _VALUE__BUILTIN__WHICH__CASE_IS_INT_SIZE: fail("value_new: invalid builtin");
+                case _VALUE__BUILTIN__WHICH__CASE_IS_INT_SIZE: fail("set_ptr_value: invalid builtin");
             }
 
             break;
@@ -103,7 +103,7 @@ static void set_ptr_value(void * ptr, const Value * value) {
                 case INT_REPR__U16: * (uint16_t *) ptr = (uint16_t) val; break;
                 case INT_REPR__U32: * (uint32_t *) ptr = (uint32_t) val; break;
                 case INT_REPR__U64: * (uint64_t *) ptr = val; break;
-                case _INT_REPR_IS_INT_SIZE: fail("value_new: invalid bitflags repr");
+                case _INT_REPR_IS_INT_SIZE: fail("set_ptr_value: invalid bitflags repr");
             }
 
             break;
@@ -114,7 +114,7 @@ static void set_ptr_value(void * ptr, const Value * value) {
 
             for (int i = 0; i < value->array->n_items; i++)
                 set_ptr_value(
-                    * (uint8_t **) ptr + (i * value->array->item_size),
+                    (* (uint8_t **) ptr) + (i * value->array->item_size),
                     value->array->items[i]
                 );
 
@@ -134,7 +134,7 @@ static void set_ptr_value(void * ptr, const Value * value) {
 
             for (int i = 0; i < value->const_pointer->n_items; i++)
                 set_ptr_value(
-                    * (uint8_t **) ptr + (i * value->const_pointer->item_size),
+                    (* (uint8_t **) ptr) + (i * value->const_pointer->item_size),
                     value->const_pointer->items[i]
                 );
 
@@ -145,7 +145,7 @@ static void set_ptr_value(void * ptr, const Value * value) {
 
             for (int i = 0; i < value->pointer->n_items; i++)
                 set_ptr_value(
-                    * (uint8_t **) ptr + (i * value->pointer->item_size),
+                    (* (uint8_t **) ptr) + (i * value->pointer->item_size),
                     value->pointer->items[i]
                 );
 
@@ -243,7 +243,6 @@ static void free_ptr_value(void * ptr, const Value * value) {
 
 static Value * value_new(const Value * v, const void * ptr) {
     Value * value = malloc(sizeof(Value));
-
     value__init(value);
 
     value->which_case = v->which_case;
@@ -251,7 +250,6 @@ static Value * value_new(const Value * v, const void * ptr) {
     switch (v->which_case) {
         case VALUE__WHICH_BUILTIN: {
             value->builtin = malloc(sizeof(Value__Builtin));
-
             value__builtin__init(value->builtin);
 
             value->builtin->which_case = v->builtin->which_case;
@@ -320,7 +318,6 @@ static Value * value_new(const Value * v, const void * ptr) {
         case VALUE__WHICH_HANDLE: value->handle = * (uint32_t *) ptr; break;
         case VALUE__WHICH_ARRAY: {
             value->array = malloc(sizeof(Value__Array));
-
             value__array__init(value->array);
 
             Value ** items = calloc(v->array->n_items, sizeof(Value *));
@@ -328,7 +325,7 @@ static Value * value_new(const Value * v, const void * ptr) {
             for (int i = 0; i < v->array->n_items; i++)
                 items[i] = value_new(
                     v->array->items[i],
-                    (uint8_t *) ptr + i * v->array->item_size
+                    (* (uint8_t **) ptr) + i * v->array->item_size
                 );
 
             value->array->items = items;
@@ -358,7 +355,7 @@ static Value * value_new(const Value * v, const void * ptr) {
                 members[i]->name = name;
                 members[i]->value = value_new(
                     v->record->members[i]->value,
-                    (uint8_t *) ptr + v->record->members[i]->offset
+                    ((uint8_t *) ptr) + v->record->members[i]->offset
                 );
                 members[i]->offset = v->record->members[i]->offset;
             }
@@ -371,7 +368,6 @@ static Value * value_new(const Value * v, const void * ptr) {
         }
         case VALUE__WHICH_CONST_POINTER: {
             value->const_pointer = malloc(sizeof(Value__Array));
-
             value__array__init(value->const_pointer);
 
             Value ** items = calloc(v->const_pointer->n_items, sizeof(Value *));
@@ -379,7 +375,7 @@ static Value * value_new(const Value * v, const void * ptr) {
             for (int i = 0; i < v->const_pointer->n_items; i++)
                 items[i] = value_new(
                     v->const_pointer->items[i],
-                    (uint8_t *) ptr + i * v->const_pointer->item_size
+                    (* (uint8_t **) ptr) + i * v->const_pointer->item_size
                 );
 
             value->const_pointer->items = items;
@@ -390,7 +386,6 @@ static Value * value_new(const Value * v, const void * ptr) {
         }
         case VALUE__WHICH_POINTER: {
             value->pointer = malloc(sizeof(Value__Array));
-
             value__array__init(value->pointer);
 
             Value ** items = calloc(v->pointer->n_items, sizeof(Value *));
@@ -398,7 +393,7 @@ static Value * value_new(const Value * v, const void * ptr) {
             for (int i = 0; i < v->pointer->n_items; i++)
                 items[i] = value_new(
                     v->pointer->items[i],
-                    (uint8_t *) ptr + i * v->pointer->item_size
+                    (* (uint8_t **) ptr) + i * v->pointer->item_size
                 );
 
             value->pointer->items = items;
@@ -928,6 +923,68 @@ static void handle_call(Request__Call * call) {
 
             break;
         }
+        case WASI_FUNC__FD_PREAD: {
+            int32_t p1_iovs_len = 0;
+            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
+            void * p1_iovs_ptr = value_ptr_new(call->params[1], &p1_iovs_len);
+            void * p2_offset_ptr = value_ptr_new(call->params[2], NULL);
+            void * r0_size_ptr = value_ptr_new(call->results[0], NULL);
+            int32_t p0_fd = * (int32_t *) p0_fd_ptr;
+            int64_t p2_offset = * (int64_t *) p2_offset_ptr;
+            int32_t r0_size = (int32_t) r0_size_ptr;
+
+            int iovs_idx = 0;
+            __wasi_size_t to_read = 0;
+            __wasi_size_t n_read  = 0;
+
+
+            for (int i = 0; i < p1_iovs_len; i++)
+                to_read += (* (__wasi_iovec_t **) p1_iovs_ptr)[i].buf_len;
+
+            __wasi_iovec_t iovs_curr = (* (__wasi_iovec_t **) p1_iovs_ptr)[iovs_idx];
+
+            while (n_read < to_read) {
+                response.errno_some = __imported_wasi_snapshot_preview1_fd_pread(
+                    p0_fd,
+                    (int32_t) &iovs_curr,
+                    p1_iovs_len - iovs_idx,
+                    p2_offset + n_read,
+                    r0_size
+                );
+                if (response.errno_some != __WASI_ERRNO_SUCCESS) {
+                    if (
+                        response.errno_some == __WASI_ERRNO_INTR
+                        || response.errno_some == __WASI_ERRNO_AGAIN
+                    ) continue;
+
+                    break;
+                }
+
+                __wasi_size_t read_this_time = * (__wasi_size_t *) r0_size_ptr;
+
+                n_read += read_this_time;
+
+                while (n_read < to_read && read_this_time >= iovs_curr.buf_len) {
+                    read_this_time -= iovs_curr.buf_len;
+                    iovs_idx += 1;
+                }
+
+                iovs_curr.buf += read_this_time;
+                iovs_curr.buf_len -= read_this_time;
+            }
+
+            * (int32_t *) r0_size_ptr = n_read;
+
+            SET_N_ALLOC(params, 3);
+            SET_N_ALLOC(results, 1);
+
+            results[0] = value_ptr_free(call->results[0], r0_size_ptr);
+            params[2] = value_ptr_free(call->params[2], p2_offset_ptr);
+            params[1] = value_ptr_free(call->params[1], p1_iovs_ptr);
+            params[0] = value_ptr_free(call->params[0], p0_fd_ptr);
+
+            break;
+        }
         case WASI_FUNC__FD_READ: {
             int32_t p1_iovs_len = 0;
             void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
@@ -944,12 +1001,13 @@ static void handle_call(Request__Call * call) {
             for (int i = 0; i < p1_iovs_len; i++)
                 to_read += (* (__wasi_iovec_t **) p1_iovs_ptr + i)->buf_len;
 
+            __wasi_iovec_t iovs_curr = (* (__wasi_iovec_t **) p1_iovs_ptr)[iovs_idx];
+
             while (n_read < to_read) {
-                __wasi_iovec_t * iovs_curr = & (* (__wasi_iovec_t **) p1_iovs_ptr)[iovs_idx];
 
                 response.errno_some = __imported_wasi_snapshot_preview1_fd_read(
                     p0_fd,
-                    (int32_t) iovs_curr,
+                    (int32_t) &iovs_curr,
                     p1_iovs_len - iovs_idx,
                     r0_size
                 );
@@ -966,13 +1024,13 @@ static void handle_call(Request__Call * call) {
 
                 n_read += read_this_time;
 
-                while (n_read < to_read && read_this_time >= iovs_curr->buf_len) {
-                    read_this_time -= iovs_curr->buf_len;
+                while (n_read < to_read && read_this_time >= iovs_curr.buf_len) {
+                    read_this_time -= iovs_curr.buf_len;
                     iovs_idx += 1;
                 }
 
-                iovs_curr->buf += read_this_time;
-                iovs_curr->buf_len -= read_this_time;
+                iovs_curr.buf += read_this_time;
+                iovs_curr.buf_len -= read_this_time;
             }
 
             * (int32_t *) r0_size_ptr = n_read;
@@ -1028,12 +1086,12 @@ static void handle_call(Request__Call * call) {
             for (int i = 0; i < p1_iovs_len; i++)
                 to_write += (* (__wasi_ciovec_t **) p1_iovs_ptr + i)->buf_len;
 
-            while (written < to_write) {
-                __wasi_ciovec_t * iovs_curr = & (* (__wasi_ciovec_t **) p1_iovs_ptr)[iovs_idx];
+            __wasi_ciovec_t iovs_curr = (* (__wasi_ciovec_t **) p1_iovs_ptr)[iovs_idx];
 
+            while (written < to_write) {
                 response.errno_some = __imported_wasi_snapshot_preview1_fd_write(
                     p0_fd,
-                    (int32_t) iovs_curr,
+                    (int32_t) &iovs_curr,
                     p1_iovs_len - iovs_idx,
                     r0_size
                 );
@@ -1050,13 +1108,13 @@ static void handle_call(Request__Call * call) {
 
                 written += written_this_time;
 
-                while (written < to_write && written_this_time >= iovs_curr->buf_len) {
-                    written_this_time -= iovs_curr->buf_len;
+                while (written < to_write && written_this_time >= iovs_curr.buf_len) {
+                    written_this_time -= iovs_curr.buf_len;
                     iovs_idx += 1;
                 }
 
-                iovs_curr->buf += written_this_time;
-                iovs_curr->buf_len -= written_this_time;
+                iovs_curr.buf += written_this_time;
+                iovs_curr.buf_len -= written_this_time;
             }
 
             * (int32_t *) r0_size_ptr = written;

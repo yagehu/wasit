@@ -20,15 +20,22 @@ impl Prog {
             let result_trefs = func_spec.unpack_expected_result();
 
             calls.push(r#final::Call {
-                func:    call.func,
-                params:  vec![],
-                results: call
+                func:        call.func,
+                params_post: call
+                    .params_post
+                    .into_iter()
+                    .zip(func_spec.params.iter())
+                    .map(|(v, param)| {
+                        r#final::Value::from_stateful_value(param.tref.type_().as_ref(), v)
+                    })
+                    .collect(),
+                results:     call
                     .results
                     .into_iter()
                     .zip(result_trefs.iter())
                     .map(|(v, tref)| r#final::Value::from_stateful_value(tref.type_().as_ref(), v))
                     .collect(),
-                errno:   call.errno,
+                errno:       call.errno,
             });
         }
 
@@ -43,6 +50,9 @@ pub(crate) enum Value {
     String(Vec<u8>),
     Bitflags(seed::BitflagsValue),
     Record(RecordValue),
+    Pointer(Vec<Value>),
+    ConstPointer(Vec<Value>),
+    List(Vec<Value>),
     Variant(VariantValue),
 }
 
@@ -107,7 +117,7 @@ impl Value {
                     | _ => unreachable!(),
                 })
             },
-            | executor_pb::value::Which::String(_) => todo!(),
+            | executor_pb::value::Which::String(string) => Self::String(string),
             | executor_pb::value::Which::Bitflags(bitflags) => {
                 let mut members = Vec::with_capacity(bitflags.members.len());
 
@@ -121,7 +131,9 @@ impl Value {
                 Self::Bitflags(seed::BitflagsValue(members))
             },
             | executor_pb::value::Which::Handle(handle) => Self::Handle(handle),
-            | executor_pb::value::Which::Array(_) => todo!(),
+            | executor_pb::value::Which::Array(array) => {
+                Self::List(array.items.into_iter().map(Self::from_pb_value).collect())
+            },
             | executor_pb::value::Which::Record(record) => Self::Record(RecordValue(
                 record
                     .members
@@ -129,8 +141,12 @@ impl Value {
                     .map(|m| Self::from_pb_value(*m.value.0.clone().unwrap()))
                     .collect(),
             )),
-            | executor_pb::value::Which::ConstPointer(_) => todo!(),
-            | executor_pb::value::Which::Pointer(_) => todo!(),
+            | executor_pb::value::Which::ConstPointer(array) => {
+                Self::ConstPointer(array.items.into_iter().map(Self::from_pb_value).collect())
+            },
+            | executor_pb::value::Which::Pointer(items) => {
+                Self::Pointer(items.items.into_iter().map(Self::from_pb_value).collect())
+            },
             | executor_pb::value::Which::Variant(variant) => {
                 let payload = match variant.payload_option.unwrap() {
                     | executor_pb::value::variant::Payload_option::PayloadNone(_) => None,
@@ -161,7 +177,8 @@ pub struct VariantValue {
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub(crate) struct Call {
-    pub func:    String,
-    pub errno:   Option<i32>,
-    pub results: Vec<Value>,
+    pub func:        String,
+    pub errno:       Option<i32>,
+    pub params_post: Vec<Value>,
+    pub results:     Vec<Value>,
 }

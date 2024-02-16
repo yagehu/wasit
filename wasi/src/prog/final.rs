@@ -11,10 +11,10 @@ pub struct FinalProg {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct Call {
-    pub func:    String,
-    pub params:  Vec<Value>,
-    pub results: Vec<Value>,
-    pub errno:   Option<i32>,
+    pub func:        String,
+    pub params_post: Vec<Value>,
+    pub results:     Vec<Value>,
+    pub errno:       Option<i32>,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
@@ -25,6 +25,9 @@ pub enum Value {
     Handle(u32),
     String(seed::StringValue),
     Record(RecordValue),
+    Pointer(Vec<Value>),
+    ConstPointer(Vec<Value>),
+    List(Vec<Value>),
     Variant(VariantValue),
 }
 
@@ -51,6 +54,29 @@ impl Value {
                 Self::Record(RecordValue(members))
             },
             | (_, stateful::Value::Record(_)) => panic!(),
+            | (witx::Type::Pointer(tref), stateful::Value::Pointer(values)) => Self::Pointer(
+                values
+                    .into_iter()
+                    .map(|v| Self::from_stateful_value(tref.type_().as_ref(), v))
+                    .collect(),
+            ),
+            | (witx::Type::ConstPointer(tref), stateful::Value::ConstPointer(values)) => {
+                Self::ConstPointer(
+                    values
+                        .into_iter()
+                        .map(|v| Self::from_stateful_value(tref.type_().as_ref(), v))
+                        .collect(),
+                )
+            },
+            | (_, stateful::Value::Pointer(_)) => unreachable!(),
+            | (_, stateful::Value::ConstPointer(_)) => unreachable!(),
+            | (witx::Type::List(tref), stateful::Value::List(values)) => Self::List(
+                values
+                    .into_iter()
+                    .map(|v| Self::from_stateful_value(tref.type_().as_ref(), v))
+                    .collect(),
+            ),
+            | (_, stateful::Value::List(_)) => unreachable!(),
             | (witx::Type::Variant(variant_type), stateful::Value::Variant(variant)) => {
                 let case = variant_type.cases.get(variant.case_idx as usize).unwrap();
 
