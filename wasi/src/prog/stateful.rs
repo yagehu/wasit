@@ -1,4 +1,4 @@
-use witx::IntRepr;
+use witx::{IntRepr, Layout};
 
 use super::seed;
 use crate::{prog::r#final, FinalProg};
@@ -96,6 +96,60 @@ impl Value {
                         .collect(),
                     special_fields: Default::default(),
                 })
+            },
+            | (witx::Type::Record(record_type), Value::Record(record)) => {
+                executor_pb::value::Which::Record(executor_pb::value::Record {
+                    members:        record
+                        .0
+                        .into_iter()
+                        .zip(record_type.member_layout())
+                        .zip(record_type.members.iter())
+                        .map(|((member, member_layout), member_type)| {
+                            executor_pb::value::record::Member {
+                                name:           member_type.name.as_str().to_owned(),
+                                value:          Some(
+                                    member.into_pb_value(member_type.tref.type_().as_ref()),
+                                )
+                                .into(),
+                                offset:         member_layout.offset as u32,
+                                special_fields: Default::default(),
+                            }
+                        })
+                        .collect(),
+                    size:           record_type.mem_size() as u32,
+                    special_fields: Default::default(),
+                })
+            },
+            | (witx::Type::Variant(variant_type), Value::Variant(variant)) => {
+                executor_pb::value::Which::Variant(Box::new(executor_pb::value::Variant {
+                    case_idx:       variant.case_idx,
+                    size:           variant_type.mem_size() as u32,
+                    tag_repr:       protobuf::EnumOrUnknown::new(match variant_type.tag_repr {
+                        | IntRepr::U8 => executor_pb::IntRepr::U8,
+                        | IntRepr::U16 => executor_pb::IntRepr::U16,
+                        | IntRepr::U32 => executor_pb::IntRepr::U32,
+                        | IntRepr::U64 => executor_pb::IntRepr::U64,
+                    }),
+                    payload_offset: variant_type.payload_offset() as u32,
+                    payload_option: Some(match variant.payload {
+                        | Some(payload) => {
+                            executor_pb::value::variant::Payload_option::PayloadSome(Box::new(
+                                payload.into_pb_value(
+                                    variant_type.cases[variant.case_idx as usize]
+                                        .tref
+                                        .as_ref()
+                                        .unwrap()
+                                        .type_()
+                                        .as_ref(),
+                                ),
+                            ))
+                        },
+                        | None => executor_pb::value::variant::Payload_option::PayloadNone(
+                            Default::default(),
+                        ),
+                    }),
+                    special_fields: Default::default(),
+                }))
             },
             | _ => panic!("spec and value mismatch: {:#?}", self),
         };

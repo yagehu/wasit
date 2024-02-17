@@ -89,7 +89,7 @@ fn prepare_result(tref: &witx::TypeRef) -> executor_pb::Value {
                     | witx::IntRepr::U32 => executor_pb::IntRepr::U32,
                     | witx::IntRepr::U64 => executor_pb::IntRepr::U64,
                 }),
-                payload_offset: 0,
+                payload_offset: variant.payload_offset() as u32,
                 payload_option: Some(match variant.cases.first().unwrap().tref.as_ref() {
                     | Some(tref) => executor_pb::value::variant::Payload_option::PayloadSome(
                         Box::new(prepare_result(tref)),
@@ -130,6 +130,69 @@ fn prepare_result(tref: &witx::TypeRef) -> executor_pb::Value {
     executor_pb::Value {
         which:          Some(which),
         special_fields: Default::default(),
+    }
+}
+
+pub(crate) fn register_resource_rec(
+    ctx: &mut ResourceContext,
+    spec: &witx::Document,
+    tref: &witx::TypeRef,
+    value: executor_pb::Value,
+    resource_id: Option<ResourceId>,
+) {
+    let v = stateful::Value::from_pb_value(value);
+
+    if let Some(resource) = tref.resource(spec) {
+        eprintln!("resource {:#?}", v);
+        match resource_id {
+            | Some(resource_id) => {
+                ctx.register_resource(resource.name.as_str(), v.clone(), resource_id)
+            },
+            | None => ctx.new_resource(resource.name.as_str(), v.clone()),
+        }
+    }
+
+    match (tref.type_().as_ref(), v) {
+        | (_, stateful::Value::Builtin(_)) => (),
+        | (_, stateful::Value::Handle(_)) => (),
+        | (_, stateful::Value::String(_)) => (),
+        | (_, stateful::Value::Bitflags(_)) => (),
+        | (witx::Type::Record(record_type), stateful::Value::Record(record)) => {
+            for (member_type, member) in record_type.members.iter().zip(record.0.iter()) {
+                register_resource_rec(
+                    ctx,
+                    spec,
+                    &member_type.tref,
+                    member
+                        .to_owned()
+                        .into_pb_value(member_type.tref.type_().as_ref()),
+                    None,
+                );
+            }
+        },
+        | (_, stateful::Value::Record(_)) => unreachable!(),
+        | (_, stateful::Value::Pointer(_)) => todo!(),
+        | (_, stateful::Value::ConstPointer(_)) => todo!(),
+        | (_, stateful::Value::List(_)) => todo!(),
+        | (witx::Type::Variant(variant_type), stateful::Value::Variant(variant)) => {
+            let case_type = variant_type.cases.get(variant.case_idx as usize).unwrap();
+
+            if let Some(case_tref) = &case_type.tref {
+                register_resource_rec(
+                    ctx,
+                    spec,
+                    case_tref,
+                    variant
+                        .payload
+                        .as_ref()
+                        .unwrap()
+                        .clone()
+                        .into_pb_value(case_tref.type_().as_ref()),
+                    None,
+                );
+            }
+        },
+        | (_, stateful::Value::Variant(_)) => unreachable!(),
     }
 }
 
@@ -224,13 +287,13 @@ impl Prog {
                                     .zip(result_trefs.iter())
                                     .zip(call.results.iter())
                                 {
-                                    let resource = result_tref.resource(spec).unwrap();
-
-                                    resource_ctx.register_resource(
-                                        resource.name.as_str(),
-                                        stateful::Value::from_pb_value(result_value.to_owned()),
-                                        result_spec.resource,
-                                    );
+                                    register_resource_rec(
+                                        &mut resource_ctx,
+                                        spec,
+                                        result_tref,
+                                        result_value.to_owned(),
+                                        Some(result_spec.resource),
+                                    )
                                 }
                             }
 
@@ -438,7 +501,7 @@ impl SeedValue {
                     .unwrap();
                 let n_items = match resource {
                     | stateful::Value::Builtin(BuiltinValue::U32(i)) => i,
-                    | _ => panic!("alloc from resource must be a u32"),
+                    | _ => panic!("alloc from resource must be a u32, it is {:?}", resource),
                 };
 
                 let mut items = Vec::with_capacity(n_items as usize);

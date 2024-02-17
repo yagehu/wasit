@@ -416,20 +416,17 @@ static Value * value_new(const Value * v, const void * ptr) {
                 case _INT_REPR_IS_INT_SIZE: fail("value_new: invalid variant tag repr");
             }
 
-            Empty * payload_none = NULL;
-            Value * payload_some = NULL;
-
             switch (v->variant->payload_option_case) {
                 case VALUE__VARIANT__PAYLOAD_OPTION_PAYLOAD_NONE: {
-                    payload_none = malloc(sizeof(Empty));
+                    Empty * payload_none = malloc(sizeof(Empty));
                     empty__init(payload_none);
                     value->variant->payload_none = payload_none;
                     break;
                 }
                 case VALUE__VARIANT__PAYLOAD_OPTION_PAYLOAD_SOME: {
-                    payload_some = value_new(
+                    Value * payload_some = value_new(
                         v->variant->payload_some,
-                        (uint8_t *) ptr + v->variant->payload_offset
+                        ((uint8_t *) ptr) + v->variant->payload_offset
                     );
                     value->variant->payload_some = payload_some;
                     break;

@@ -234,3 +234,30 @@ fn prestat_get() {
 
     assert_eq!(prog.calls.last().unwrap().errno, Some(0));
 }
+
+#[test]
+fn prestat_dir_name() {
+    let run = run_seed("18-prestat_dir_name.json");
+    let prog = run.result.expect(&run.stderr).finish(&spec());
+    let call = prog.calls.last().unwrap();
+
+    assert_eq!(call.errno, Some(0), "{}", run.stderr);
+
+    let values = match &call.params_post[1] {
+        | Value::Pointer(values) => values,
+        | _ => panic!(),
+    };
+    let bytes = values
+        .iter()
+        .map(|value| match value {
+            | Value::Builtin(builtin) => match builtin {
+                | &seed::BuiltinValue::U8(i) => i,
+                | _ => panic!(),
+            },
+            | _ => panic!(),
+        })
+        .collect::<Vec<_>>();
+    let string = String::from_utf8(bytes).unwrap();
+
+    assert!(string.ends_with(&run.base_dir.path().to_string_lossy().to_string()));
+}

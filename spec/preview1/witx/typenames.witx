@@ -770,7 +770,7 @@
     (field $pr_name_len $pr_name_len)
   )
 )
-(resource $prestat_dir (type $prestat_dir))
+;;(resource $prestat_dir (type $prestat_dir))
 
 ;;; Information about a pre-opened capability.
 (typename $prestat
