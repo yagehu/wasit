@@ -281,3 +281,15 @@ fn fd_readdir() {
 
     assert_eq!(prog.calls.last().unwrap().errno, Some(0));
 }
+
+#[test]
+fn fd_renumber() {
+    let run = run_seed("21-fd_renumber.json");
+    let prog = run.result.expect(&run.stderr).finish(&spec());
+
+    assert_eq!(prog.calls.last().unwrap().errno, Some(0));
+
+    let file_content = fs::read(run.base_dir.path().join("a")).unwrap();
+
+    assert_eq!(&file_content, &[97, 98]);
+}

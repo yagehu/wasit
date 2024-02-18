@@ -259,6 +259,7 @@ impl Prog {
                         | "fd_pwrite" => FD_PWRITE,
                         | "fd_read" => FD_READ,
                         | "fd_readdir" => FD_READDIR,
+                        | "fd_renumber" => FD_RENUMBER,
                         | "fd_seek" => FD_SEEK,
                         | "fd_write" => FD_WRITE,
                         | "path_open" => PATH_OPEN,

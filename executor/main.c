@@ -1174,6 +1174,25 @@ static void handle_call(Request__Call * call) {
 
             break;
         }
+        case WASI_FUNC__FD_RENUMBER: {
+            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
+            void * p1_to_ptr = value_ptr_new(call->params[1], NULL);
+            int32_t p0_fd = * (int32_t *) p0_fd_ptr;
+            int32_t p1_to = * (int32_t *) p1_to_ptr;
+
+            response.errno_some = __imported_wasi_snapshot_preview1_fd_renumber(
+                p0_fd,
+                p1_to
+            );
+
+            SET_N_ALLOC(params, 2);
+            SET_N_ALLOC(results, 0);
+
+            params[1] = value_ptr_free(call->params[1], p1_to_ptr);
+            params[0] = value_ptr_free(call->params[0], p0_fd_ptr);
+
+            break;
+        }
         case WASI_FUNC__FD_SEEK: {
             void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
             void * p1_offset_ptr = value_ptr_new(call->params[1], NULL);
