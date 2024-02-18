@@ -1,45 +1,38 @@
 {
     "mount_base_dir": true,
-    "calls": [
+    "actions": [
         {
-            "func": "path_open",
-            "params": [
-                { "resource": 0 },
-                {
-                    "raw_value": {
-                        "bitflags": {
-                            "repr": "u32",
-                            "members": [
+            "call": {
+                "func": "path_open",
+                "params": [
+                    { "resource": 0 },
+                    {
+                        "value": {
+                            "bitflags": [
                                 { "name": "symlink_follow", "value": false }
                             ]
                         }
-                    }
-                },
-                {
-                    "raw_value": {
-                        "string": {
-                            "utf8": "a"
+                    },
+                    {
+                        "value": {
+                            "string": {
+                                "utf8": "a"
+                            }
                         }
-                    }
-                },
-                {
-                    "raw_value": {
-                        "bitflags": {
-                            "repr": "u16",
-                            "members": [
+                    },
+                    {
+                        "value": {
+                            "bitflags": [
                                 { "name": "creat",     "value": true },
                                 { "name": "directory", "value": false },
                                 { "name": "excl",      "value": true },
                                 { "name": "trunc",     "value": false }
                             ]
                         }
-                    }
-                },
-                {
-                    "raw_value": {
-                        "bitflags": {
-                            "repr": "u64",
-                            "members": [
+                    },
+                    {
+                        "value": {
+                            "bitflags": [
                                 { "name": "fd_datasync",             "value": true },
                                 { "name": "fd_read",                 "value": true },
                                 { "name": "fd_seek",                 "value": true },
@@ -72,13 +65,10 @@
                                 { "name": "sock_accept",             "value": false }
                             ]
                         }
-                    }
-                },
-                {
-                    "raw_value": {
-                        "bitflags": {
-                            "repr": "u64",
-                            "members": [
+                    },
+                    {
+                        "value": {
+                            "bitflags": [
                                 { "name": "fd_datasync",             "value": true },
                                 { "name": "fd_read",                 "value": true },
                                 { "name": "fd_seek",                 "value": true },
@@ -111,13 +101,10 @@
                                 { "name": "sock_accept",             "value": false }
                             ]
                         }
-                    }
-                },
-                {
-                    "raw_value": {
-                        "bitflags": {
-                            "repr": "u8",
-                            "members": [
+                    },
+                    {
+                        "value": {
+                            "bitflags": [
                                 { "name": "append",   "value": false },
                                 { "name": "dsync",    "value": false },
                                 { "name": "nonblock", "value": false },
@@ -126,84 +113,78 @@
                             ]
                         }
                     }
-                }
-            ],
-            "results": [
-                { "resource": 1 }
-            ]
+                ],
+                "results": [ { "resource": 1 } ]
+            }
         },
         {
-            "func": "fd_write",
-            "params": [
-                { "resource": 1 },
-                {
-                    "raw_value": {
-                        "array": [
-                            {
-                                "raw_value": {
+            "call": {
+                "func": "fd_write",
+                "params": [
+                    { "resource": 1 },
+                    {
+                        "value": {
+                            "list": [
+                                {
                                     "record": [
                                         {
                                             "name": "buf",
                                             "value": {
-                                                "raw_value": {
+                                                "value": {
                                                     "const_pointer": [
-                                                        { "raw_value": { "builtin": { "u8": 97 } } },
-                                                        { "raw_value": { "builtin": { "u8": 98 } } }
+                                                        { "builtin": { "u8": 97 } },
+                                                        { "builtin": { "u8": 98 } }
                                                     ]
                                                 }
                                             }
                                         },
                                         {
                                             "name": "buf_len",
-                                            "value": { "raw_value": { "builtin": { "u32": 2 } } }
+                                            "value": { "value": { "builtin": { "u32": 2 } } }
                                         }
                                     ]
                                 }
-                            }
-                        ]
+                            ]
+                        }
                     }
-                }
-            ],
-            "results": [
-                { "resource": 2 }
-            ]
+                ],
+                "results": [ { "resource": 2 } ]
+            }
         },
         {
-            "func": "fd_pwrite",
-            "params": [
-                { "resource": 1 },
-                {
-                    "raw_value": {
-                        "array": [
-                            {
-                                "raw_value": {
+            "call": {
+                "func": "fd_pwrite",
+                "params": [
+                    { "resource": 1 },
+                    {
+                        "value": {
+                            "list": [
+                                {
                                     "record": [
                                         {
                                             "name": "buf",
                                             "value": {
-                                                "raw_value": {
+                                                "value": {
                                                     "const_pointer": [
-                                                        { "raw_value": { "builtin": { "u8": 97 } } },
-                                                        { "raw_value": { "builtin": { "u8": 98 } } }
+                                                        { "builtin": { "u8": 97 } },
+                                                        { "builtin": { "u8": 98 } }
                                                     ]
                                                 }
                                             }
                                         },
                                         {
                                             "name": "buf_len",
-                                            "value": { "raw_value": { "builtin": { "u32": 2 } } }
+                                            "value": { "value": { "builtin": { "u32": 2 } } }
                                         }
                                     ]
                                 }
-                            }
-                        ]
-                    }
-                },
-                { "raw_value": { "builtin": { "u64": 0 } } }
-            ],
-            "results": [
-                { "resource": 3 }
-            ]
+                            ]
+                        }
+                    },
+                    { "value": { "builtin": { "u64": 0 } } }
+                ],
+                "results": [ { "resource": 3 } ]
+            }
         }
     ]
 }
