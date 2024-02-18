@@ -1220,6 +1220,19 @@ static void handle_call(Request__Call * call) {
 
             break;
         }
+        case WASI_FUNC__FD_SYNC: {
+            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
+            int32_t p0_fd = * (int32_t *) p0_fd_ptr;
+
+            response.errno_some = __imported_wasi_snapshot_preview1_fd_sync(p0_fd);
+
+            SET_N_ALLOC(params, 1);
+            SET_N_ALLOC(results, 0);
+
+            params[0] = value_ptr_free(call->params[0], p0_fd_ptr);
+
+            break;
+        }
         case WASI_FUNC__FD_WRITE: {
             int32_t p1_iovs_len = 0;
             void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);

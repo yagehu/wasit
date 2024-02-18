@@ -293,3 +293,11 @@ fn fd_renumber() {
 
     assert_eq!(&file_content, &[97, 98]);
 }
+
+#[test]
+fn fd_sync() {
+    let run = run_seed("22-fd_sync.json");
+    let prog = run.result.expect(&run.stderr).finish(&spec());
+
+    assert_eq!(prog.calls.last().unwrap().errno, Some(0));
+}

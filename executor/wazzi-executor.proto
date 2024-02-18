@@ -126,7 +126,8 @@ enum WasiFunc {
     FD_READ               = 20;
     FD_READDIR            = 21;
     FD_RENUMBER           = 22;
-    FD_SEEK               = 25;
+    FD_SEEK               = 23;
+    FD_SYNC               = 24;
     FD_WRITE              = 26;
     PATH_OPEN             = 31;
 }

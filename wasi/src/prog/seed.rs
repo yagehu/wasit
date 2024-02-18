@@ -261,6 +261,7 @@ impl Prog {
                         | "fd_readdir" => FD_READDIR,
                         | "fd_renumber" => FD_RENUMBER,
                         | "fd_seek" => FD_SEEK,
+                        | "fd_sync" => FD_SYNC,
                         | "fd_write" => FD_WRITE,
                         | "path_open" => PATH_OPEN,
                         | _ => panic!("{}", call.func.as_str()),
