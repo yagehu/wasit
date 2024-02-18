@@ -1097,7 +1097,6 @@ static void handle_call(Request__Call * call) {
             __wasi_size_t to_read = 0;
             __wasi_size_t n_read  = 0;
 
-
             for (int i = 0; i < p1_iovs_len; i++)
                 to_read += (* (__wasi_iovec_t **) p1_iovs_ptr + i)->buf_len;
 
@@ -1140,6 +1139,37 @@ static void handle_call(Request__Call * call) {
 
             results[0] = value_ptr_free(call->results[0], r0_size_ptr);
             params[1] = value_ptr_free(call->params[1], p1_iovs_ptr);
+            params[0] = value_ptr_free(call->params[0], p0_fd_ptr);
+
+            break;
+        }
+        case WASI_FUNC__FD_READDIR: {
+            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
+            void * p1_buf_ptr = value_ptr_new(call->params[1], NULL);
+            void * p2_buf_len_ptr = value_ptr_new(call->params[2], NULL);
+            void * p3_cookie_ptr = value_ptr_new(call->params[3], NULL);
+            void * r0_size_ptr = value_ptr_new(call->results[0], NULL);
+            int32_t p0_fd = * (int32_t *) p0_fd_ptr;
+            int32_t p1_buf = * (int32_t *) p1_buf_ptr;
+            int32_t p2_buf_len = * (int32_t *) p2_buf_len_ptr;
+            int64_t p3_cookie = * (int64_t *) p3_cookie_ptr;
+            int32_t r0_size = (int32_t) r0_size_ptr;
+
+            response.errno_some = __imported_wasi_snapshot_preview1_fd_readdir(
+                p0_fd,
+                p1_buf,
+                p2_buf_len,
+                p3_cookie,
+                r0_size
+            );
+
+            SET_N_ALLOC(params, 4);
+            SET_N_ALLOC(results, 1);
+
+            results[0] = value_ptr_free(call->results[0], r0_size_ptr);
+            params[3] = value_ptr_free(call->params[3], p3_cookie_ptr);
+            params[2] = value_ptr_free(call->params[2], p2_buf_len_ptr);
+            params[1] = value_ptr_free(call->params[1], p1_buf_ptr);
             params[0] = value_ptr_free(call->params[0], p0_fd_ptr);
 
             break;

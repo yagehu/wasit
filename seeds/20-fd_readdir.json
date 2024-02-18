@@ -1,0 +1,24 @@
+{
+    "mount_base_dir": true,
+    "actions": [
+        {
+            "decl": {
+                "resource_id": 1,
+                "type": "dirent_buf_size",
+                "value": { "builtin": { "u32": 16 } }
+            }
+        },
+        {
+            "call": {
+                "func": "fd_readdir",
+                "params": [
+                    { "resource": 0 },
+                    { "value": { "pointer": { "alloc_from_resource": 1 } } },
+                    { "resource": 1 },
+                    { "value": { "builtin": { "u64": 0 } } }
+                ],
+                "results": [ { "resource": 2 } ]
+            }
+        }
+    ]
+}

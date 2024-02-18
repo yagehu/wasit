@@ -143,7 +143,6 @@ pub(crate) fn register_resource_rec(
     let v = stateful::Value::from_pb_value(value);
 
     if let Some(resource) = tref.resource(spec) {
-        eprintln!("resource {:#?}", v);
         match resource_id {
             | Some(resource_id) => {
                 ctx.register_resource(resource.name.as_str(), v.clone(), resource_id)
@@ -224,7 +223,18 @@ impl Prog {
 
         for action in self.actions {
             match action {
-                | Action::Decl(_) => {},
+                | Action::Decl(decl) => {
+                    let resource = spec.resource(&witx::Id::new(&decl.r#type)).unwrap();
+
+                    resource_ctx.register_resource(
+                        &decl.r#type,
+                        stateful::Value::from_pb_value(
+                            decl.value
+                                .into_pb_value(&resource_ctx, resource.tref.type_().as_ref()),
+                        ),
+                        decl.resource_id,
+                    );
+                },
                 | Action::Call(call) => {
                     let func = match call.func.as_str() {
                         | "args_get" => ARGS_GET,
@@ -336,6 +346,7 @@ pub enum Action {
 #[serde(deny_unknown_fields)]
 pub struct Decl {
     pub resource_id: u64,
+    pub r#type:      String,
     pub value:       SeedValue,
 }
 
