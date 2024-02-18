@@ -113,8 +113,9 @@
         },
         {
             "call": {
-                "func": "fd_sync",
-                "params": [ { "resource": 1 } ]
+                "func": "fd_tell",
+                "params": [ { "resource": 1 } ],
+                "results": [ { "resource": 2 } ]
             }
         }
     ]

@@ -301,3 +301,11 @@ fn fd_sync() {
 
     assert_eq!(prog.calls.last().unwrap().errno, Some(0));
 }
+
+#[test]
+fn fd_tell() {
+    let run = run_seed("23-fd_tell.json");
+    let prog = run.result.expect(&run.stderr).finish(&spec());
+
+    assert_eq!(prog.calls.last().unwrap().errno, Some(0));
+}

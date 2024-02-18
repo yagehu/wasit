@@ -128,6 +128,7 @@ enum WasiFunc {
     FD_RENUMBER           = 22;
     FD_SEEK               = 23;
     FD_SYNC               = 24;
+    FD_TELL               = 25;
     FD_WRITE              = 26;
     PATH_OPEN             = 31;
 }

@@ -262,6 +262,7 @@ impl Prog {
                         | "fd_renumber" => FD_RENUMBER,
                         | "fd_seek" => FD_SEEK,
                         | "fd_sync" => FD_SYNC,
+                        | "fd_tell" => FD_TELL,
                         | "fd_write" => FD_WRITE,
                         | "path_open" => PATH_OPEN,
                         | _ => panic!("{}", call.func.as_str()),
