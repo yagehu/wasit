@@ -133,5 +133,6 @@ enum WasiFunc {
     PATH_CREATE_DIRECTORY   = 27;
     PATH_FILESTAT_GET       = 28;
     PATH_FILESTAT_SET_TIMES = 29;
+    PATH_LINK               = 30;
     PATH_OPEN               = 31;
 }
