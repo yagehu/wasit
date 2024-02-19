@@ -138,4 +138,6 @@ enum WasiFunc {
     PATH_READLINK           = 32;
     PATH_REMOVE_DIRECTORY   = 33;
     PATH_RENAME             = 34;
+    PATH_SYMLINK            = 35;
+    PATH_UNLINK_FILE        = 36;
 }

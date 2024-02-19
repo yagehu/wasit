@@ -271,6 +271,7 @@ impl Prog {
                         | "path_open" => PATH_OPEN,
                         | "path_remove_directory" => PATH_REMOVE_DIRECTORY,
                         | "path_rename" => PATH_RENAME,
+                        | "path_symlink" => PATH_SYMLINK,
                         | _ => panic!("{}", call.func.as_str()),
                     };
                     let func_spec = module_spec

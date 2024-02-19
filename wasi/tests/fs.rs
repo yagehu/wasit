@@ -361,3 +361,15 @@ fn path_rename() {
     assert!(!run.base_dir.path().join("a").exists());
     assert!(run.base_dir.path().join("b").exists());
 }
+
+#[test]
+fn path_symlink() {
+    let run = run_seed("30-path_symlink.json");
+    let prog = run.result.expect(&run.stderr).finish(&spec());
+
+    assert_eq!(prog.calls.last().unwrap().errno, Some(0));
+    assert_eq!(
+        run.base_dir.path().join("a").canonicalize().unwrap(),
+        run.base_dir.path().join("b").canonicalize().unwrap(),
+    );
+}

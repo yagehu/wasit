@@ -1526,6 +1526,33 @@ static void handle_call(Request__Call * call) {
 
             break;
         }
+        case WASI_FUNC__PATH_SYMLINK: {
+            int32_t p0_old_path_len = 0;
+            int32_t p2_new_path_len = 0;
+            void * p0_old_path_ptr = value_ptr_new(call->params[0], &p0_old_path_len);
+            void * p1_fd_ptr = value_ptr_new(call->params[1], NULL);
+            void * p2_new_path_ptr = value_ptr_new(call->params[2], &p2_new_path_len);
+            int32_t p0_old_path = * (int32_t *) p0_old_path_ptr;
+            int32_t p1_fd = * (int32_t *) p1_fd_ptr;
+            int32_t p2_new_path = * (int32_t *) p2_new_path_ptr;
+
+            response.errno_some = __imported_wasi_snapshot_preview1_path_symlink(
+                p0_old_path,
+                p0_old_path_len,
+                p1_fd,
+                p2_new_path,
+                p2_new_path_len
+            );
+
+            SET_N_ALLOC(params, 3);
+            SET_N_ALLOC(results, 0);
+
+            params[2] = value_ptr_free(call->params[2], p2_new_path_ptr);
+            params[1] = value_ptr_free(call->params[1], p1_fd_ptr);
+            params[0] = value_ptr_free(call->params[0], p0_old_path_ptr);
+
+            break;
+        }
         default: fail("func unimplemented");
     }
     
