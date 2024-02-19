@@ -351,3 +351,13 @@ fn path_remove_directory() {
     assert_eq!(prog.calls.last().unwrap().errno, Some(0));
     assert!(!run.base_dir.path().join("a").exists());
 }
+
+#[test]
+fn path_rename() {
+    let run = run_seed("29-path_rename.json");
+    let prog = run.result.expect(&run.stderr).finish(&spec());
+
+    assert_eq!(prog.calls.last().unwrap().errno, Some(0));
+    assert!(!run.base_dir.path().join("a").exists());
+    assert!(run.base_dir.path().join("b").exists());
+}
