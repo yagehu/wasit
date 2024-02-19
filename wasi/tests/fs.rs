@@ -326,3 +326,11 @@ fn path_filestat_get() {
 
     assert_eq!(prog.calls.last().unwrap().errno, Some(0));
 }
+
+#[test]
+fn path_filestat_set_times() {
+    let run = run_seed("26-path_filestat_set_times.json");
+    let prog = run.result.expect(&run.stderr).finish(&spec());
+
+    assert_eq!(prog.calls.last().unwrap().errno, Some(0));
+}

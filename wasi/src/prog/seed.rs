@@ -266,6 +266,7 @@ impl Prog {
                         | "fd_write" => FD_WRITE,
                         | "path_create_directory" => PATH_CREATE_DIRECTORY,
                         | "path_filestat_get" => PATH_FILESTAT_GET,
+                        | "path_filestat_set_times" => PATH_FILESTAT_SET_TIMES,
                         | "path_open" => PATH_OPEN,
                         | _ => panic!("{}", call.func.as_str()),
                     };

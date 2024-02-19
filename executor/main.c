@@ -1356,6 +1356,43 @@ static void handle_call(Request__Call * call) {
 
             break;
         }
+        case WASI_FUNC__PATH_FILESTAT_SET_TIMES: {
+            int32_t p2_path_len = 0;
+            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
+            void * p1_flags_ptr = value_ptr_new(call->params[1], NULL);
+            void * p2_path_ptr = value_ptr_new(call->params[2], &p2_path_len);
+            void * p3_atim_ptr = value_ptr_new(call->params[3], NULL);
+            void * p4_mtim_ptr = value_ptr_new(call->params[4], NULL);
+            void * p5_fst_flags_ptr = value_ptr_new(call->params[5], NULL);
+            int32_t p0_fd = * (int32_t *) p0_fd_ptr;
+            int32_t p1_flags = * (int32_t *) p1_flags_ptr;
+            int32_t p2_path = * (int32_t *) p2_path_ptr;
+            int64_t p3_atim = * (int64_t *) p3_atim_ptr;
+            int64_t p4_mtim = * (int64_t *) p4_mtim_ptr;
+            int32_t p5_fst_flags = * (uint16_t *) p5_fst_flags_ptr;
+
+            response.errno_some = __imported_wasi_snapshot_preview1_path_filestat_set_times(
+                p0_fd,
+                p1_flags,
+                p2_path,
+                p2_path_len,
+                p3_atim,
+                p4_mtim,
+                p5_fst_flags
+            );
+
+            SET_N_ALLOC(params, 6);
+            SET_N_ALLOC(results, 0);
+
+            params[5] = value_ptr_free(call->params[5], p5_fst_flags_ptr);
+            params[4] = value_ptr_free(call->params[4], p4_mtim_ptr);
+            params[3] = value_ptr_free(call->params[3], p3_atim_ptr);
+            params[2] = value_ptr_free(call->params[2], p2_path_ptr);
+            params[1] = value_ptr_free(call->params[1], p1_flags_ptr);
+            params[0] = value_ptr_free(call->params[0], p0_fd_ptr);
+
+            break;
+        }
         case WASI_FUNC__PATH_OPEN: {
             int32_t p2_path_len = 0;
             void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
