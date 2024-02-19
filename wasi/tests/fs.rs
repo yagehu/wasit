@@ -309,3 +309,12 @@ fn fd_tell() {
 
     assert_eq!(prog.calls.last().unwrap().errno, Some(0));
 }
+
+#[test]
+fn path_create_directory() {
+    let run = run_seed("24-path_create_directory.json");
+    let prog = run.result.expect(&run.stderr).finish(&spec());
+
+    assert_eq!(prog.calls.last().unwrap().errno, Some(0));
+    assert!(run.base_dir.path().join("a").is_dir());
+}
