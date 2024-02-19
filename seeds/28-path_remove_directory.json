@@ -1,0 +1,23 @@
+{
+    "mount_base_dir": true,
+    "actions": [
+        {
+            "call": {
+                "func": "path_create_directory",
+                "params": [
+                    { "resource": 0 },
+                    { "value": { "string": { "utf8": "a" } } }
+                ]
+            }
+        },
+        {
+            "call": {
+                "func": "path_remove_directory",
+                "params": [
+                    { "resource": 0 },
+                    { "value": { "string": { "utf8": "a" } } }
+                ]
+            }
+        }
+    ]
+}

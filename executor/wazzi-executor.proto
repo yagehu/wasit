@@ -135,4 +135,6 @@ enum WasiFunc {
     PATH_FILESTAT_SET_TIMES = 29;
     PATH_LINK               = 30;
     PATH_OPEN               = 31;
+    PATH_READLINK           = 32;
+    PATH_REMOVE_DIRECTORY   = 33;
 }

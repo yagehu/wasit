@@ -269,6 +269,7 @@ impl Prog {
                         | "path_filestat_set_times" => PATH_FILESTAT_SET_TIMES,
                         | "path_link" => PATH_LINK,
                         | "path_open" => PATH_OPEN,
+                        | "path_remove_directory" => PATH_REMOVE_DIRECTORY,
                         | _ => panic!("{}", call.func.as_str()),
                     };
                     let func_spec = module_spec

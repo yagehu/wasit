@@ -342,3 +342,12 @@ fn path_link() {
 
     assert_eq!(prog.calls.last().unwrap().errno, Some(0));
 }
+
+#[test]
+fn path_remove_directory() {
+    let run = run_seed("28-path_remove_directory.json");
+    let prog = run.result.expect(&run.stderr).finish(&spec());
+
+    assert_eq!(prog.calls.last().unwrap().errno, Some(0));
+    assert!(!run.base_dir.path().join("a").exists());
+}
