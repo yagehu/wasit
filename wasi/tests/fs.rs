@@ -318,3 +318,11 @@ fn path_create_directory() {
     assert_eq!(prog.calls.last().unwrap().errno, Some(0));
     assert!(run.base_dir.path().join("a").is_dir());
 }
+
+#[test]
+fn path_filestat_get() {
+    let run = run_seed("25-path_filestat_get.json");
+    let prog = run.result.expect(&run.stderr).finish(&spec());
+
+    assert_eq!(prog.calls.last().unwrap().errno, Some(0));
+}
