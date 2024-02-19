@@ -373,3 +373,12 @@ fn path_symlink() {
         run.base_dir.path().join("b").canonicalize().unwrap(),
     );
 }
+
+#[test]
+fn path_unlink_file() {
+    let run = run_seed("31-path_unlink_file.json");
+    let prog = run.result.expect(&run.stderr).finish(&spec());
+
+    assert_eq!(prog.calls.last().unwrap().errno, Some(0));
+    assert!(!run.base_dir.path().join("a").exists());
+}
