@@ -10,6 +10,7 @@ fn document() -> wazzi_witx::Document {
 
 #[test]
 fn resource_relations() {
+    #[derive(Debug)]
     struct Case<'a> {
         from:     &'a str,
         to:       &'a str,
@@ -19,7 +20,7 @@ fn resource_relations() {
     let doc = document();
     let cases = vec![
         Case {
-            from:     "newfd",
+            from:     "fd_reg",
             to:       "fd",
             expected: ResourceRelation::Subtype,
         },
@@ -31,6 +32,7 @@ fn resource_relations() {
     ];
 
     for case in cases {
+        eprintln!("{:?}", case);
         let rel = doc.resource_relation(&Id::new(case.from), &Id::new(case.to));
 
         assert_eq!(rel, case.expected);
@@ -50,7 +52,7 @@ fn resources_exist() {
         "environ_buf",
         "environ_buf_size",
         "fd",
-        "newfd",
+        "fd_reg",
     ];
 
     for case in &cases {

@@ -299,7 +299,7 @@
 )
 (resource $read_buf     (type $read_buf))
 (resource $read_buf_len (type $read_buf_len) (@alloc $read_buf))
-;;(resource $iovec        (type $iovec))
+(resource $iovec        (type $iovec))
 
 ;;; A region of memory for scatter/gather writes.
 (typename $write_buf (@witx const_pointer u8))

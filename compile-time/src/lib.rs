@@ -7,3 +7,5 @@ pub fn root() -> PathBuf {
         .canonicalize()
         .unwrap()
 }
+
+pub const GIT_HASH: &str = env!("GIT_HASH");

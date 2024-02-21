@@ -1,14 +1,122 @@
+use std::{collections::HashSet, rc::Rc};
+
+use arbitrary::Unstructured;
+use color_eyre::eyre::{self, Context};
+use wazzi_executor::RunningExecutor;
 use witx::{IntRepr, Layout};
 
-use super::seed;
-use crate::{prog::r#final, FinalProg};
+use super::{
+    pb_func,
+    seed::{self, prepare_result},
+};
+use crate::{prog::r#final, resource_ctx::ResourceContext, FinalProg, SnapshotStore, WasiSnapshot};
 
 #[derive(Debug)]
-pub struct Prog {
-    pub(crate) calls: Vec<Call>,
+pub struct Prog<S> {
+    pub(crate) store:        S,
+    pub(crate) executor:     RunningExecutor,
+    pub(crate) resource_ctx: ResourceContext,
+    pub(crate) calls:        Vec<Call>,
 }
 
-impl Prog {
+static FUNC_BLACKLIST: once_cell::sync::Lazy<HashSet<&'static str>> =
+    once_cell::sync::Lazy::new(|| {
+        vec![
+            "proc_exit",
+            "poll_oneoff",
+            "proc_raise",
+            "sock_accept",
+            "sock_recv",
+            "sock_send",
+            "sock_shutdown",
+        ]
+        .into_iter()
+        .collect::<HashSet<_>>()
+    });
+
+impl<S> Prog<S>
+where
+    S: SnapshotStore<Snapshot = WasiSnapshot>,
+{
+    pub fn arbitrary_grow(
+        &mut self,
+        u: &mut Unstructured,
+        spec: &witx::Document,
+    ) -> Result<(), eyre::Error> {
+        let func_pool = self.get_func_pool(spec);
+        let func_spec = u.choose(&func_pool)?;
+
+        for (i, param_spec) in func_spec.params.iter().enumerate() {
+            match &param_spec.tref {
+                | witx::TypeRef::Name(_) => todo!(),
+                | witx::TypeRef::Value(ty) => match ty.as_ref() {
+                    | witx::Type::Record(_) => unimplemented!(),
+                    | witx::Type::Variant(_) => todo!(),
+                    | witx::Type::Handle(_) => unimplemented!(),
+                    | witx::Type::List(_) => todo!(),
+                    | witx::Type::Pointer(_) => todo!(),
+                    | witx::Type::ConstPointer(_) => todo!(),
+                    | witx::Type::Builtin(_) => todo!(),
+                },
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn grow(
+        &mut self,
+        spec: &witx::Document,
+        func_spec: &witx::InterfaceFunc,
+        params: Vec<Value>,
+    ) -> Result<(), eyre::Error> {
+        let result_trefs = func_spec.unpack_expected_result();
+        let call_response = self
+            .executor
+            .call(executor_pb::request::Call {
+                func:           protobuf::EnumOrUnknown::new(pb_func(func_spec.name.as_str())),
+                params:         params
+                    .into_iter()
+                    .zip(func_spec.params.iter())
+                    .map(|(p, param_type)| p.into_pb_value(param_type.tref.type_().as_ref()))
+                    .collect(),
+                results:        result_trefs
+                    .iter()
+                    .map(|tref| prepare_result(tref))
+                    .collect(),
+                special_fields: Default::default(),
+            })
+            .wrap_err("failed to call executor")?;
+
+        let register_results = || {
+            for (result_tref, result_value) in result_trefs.iter().zip(call_response.results) {
+                self.register_result_resource(
+                    spec,
+                    result_tref,
+                    Value::from_pb_value(result_value),
+                );
+            }
+        };
+        let errno = match call_response.errno_option.unwrap() {
+            | executor_pb::response::call::Errno_option::ErrnoSome(i) if i == 0 => {
+                register_results();
+
+                Some(i)
+            },
+            | executor_pb::response::call::Errno_option::ErrnoNone(_) => {
+                register_results();
+
+                None
+            }
+            | executor_pb::response::call::Errno_option::ErrnoSome(_) => {},
+            | _ => todo!(),
+        }
+
+        self.store.push_snapshot(WasiSnapshot { errno });
+
+        Ok(())
+    }
+
     pub fn finish(self, spec: &witx::Document) -> FinalProg {
         let mut calls = Vec::new();
         let module_spec = spec
@@ -41,10 +149,62 @@ impl Prog {
 
         FinalProg { calls }
     }
+
+    fn get_func_pool(&self, spec: &witx::Document) -> Vec<Rc<witx::InterfaceFunc>> {
+        let module = spec
+            .module(&witx::Id::new("wasi_snapshot_preview1"))
+            .unwrap();
+        let mut func_pool = vec![];
+
+        for func in module.funcs() {
+            if FUNC_BLACKLIST.contains(func.name.as_str()) {
+                continue;
+            }
+
+            func_pool.push(func);
+        }
+
+        func_pool
+    }
+
+    fn register_result_resource(
+        &mut self,
+        spec: &witx::Document,
+        tref: &witx::TypeRef,
+        value: Value,
+    ) {
+        if let Some(resource) = tref.resource(spec) {
+            self.resource_ctx
+                .new_resource(resource.name.as_str(), value.clone());
+        }
+
+        match (tref.type_().as_ref(), value) {
+            | (witx::Type::Record(ty), Value::Record(value)) => {
+                for (ty, value) in ty.members.iter().zip(value.0) {
+                    self.register_result_resource(spec, &ty.tref, value);
+                }
+            },
+            | (witx::Type::Record(_), Value::Bitflags(_)) => (),
+            | (witx::Type::Variant(ty), Value::Variant(value)) => {
+                let case = ty.cases.get(value.case_idx as usize).unwrap();
+
+                if let (Some(payload_tref), Some(payload_value)) = (&case.tref, value.payload) {
+                    self.register_result_resource(spec, payload_tref, *payload_value)
+                }
+            },
+            | (witx::Type::Record(_), _) => unreachable!(),
+            | (witx::Type::Variant(_), _) => unreachable!(),
+            | (witx::Type::List(_), _) => unreachable!("result cannot be list"),
+            | (witx::Type::Pointer(_), _) => unreachable!("result cannot be pointer"),
+            | (witx::Type::ConstPointer(_), _) => unreachable!("result cannot be const pointer"),
+            | (witx::Type::Handle(_), _) => (),
+            | (witx::Type::Builtin(_), _) => (),
+        }
+    }
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub(crate) enum Value {
+pub enum Value {
     Builtin(seed::BuiltinValue),
     Handle(u32),
     String(Vec<u8>),

@@ -51,7 +51,7 @@ where
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct RunningExecutor {
     child:              Arc<Mutex<process::Child>>,
     stdin:              Arc<Mutex<process::ChildStdin>>,

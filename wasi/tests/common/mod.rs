@@ -3,7 +3,7 @@ extern crate wazzi_witx as witx;
 use color_eyre::eyre;
 use std::{
     fs,
-    ops::{Deref, DerefMut},
+    ops::Deref,
     path::PathBuf,
     sync::{mpsc, Arc, Mutex},
     thread,
@@ -48,7 +48,7 @@ fn executor_bin() -> PathBuf {
 pub struct RunInstance<S, E> {
     pub base_dir: TempDir,
     pub store:    S,
-    pub result:   Result<Prog, E>,
+    pub result:   Result<Prog<S>, E>,
     pub stderr:   String,
 }
 
@@ -62,21 +62,21 @@ pub fn run(seed: seed::Prog) -> RunInstance<InMemorySnapshotStore<WasiSnapshot>,
     let base_dir = tempdir().unwrap();
     let wasmtime = wazzi_runners::Wasmtime::new("wasmtime");
     let stderr = Arc::new(Mutex::new(Vec::new()));
-    let executor = Arc::new(
-        ExecutorRunner::new(wasmtime, executor_bin(), Some(base_dir.path().to_owned()))
-            .run(stderr.clone())
-            .expect("failed to run executor"),
-    );
-    let store = Arc::new(Mutex::new(InMemorySnapshotStore::default()));
+    let executor = ExecutorRunner::new(wasmtime, executor_bin(), Some(base_dir.path().to_owned()))
+        .run(stderr.clone())
+        .expect("failed to run executor");
+    let store = InMemorySnapshotStore::default();
     let (tx, rx) = mpsc::channel();
 
-    let executor_ = executor.clone();
-    let store_ = store.clone();
+    thread::spawn({
+        let executor = executor.clone();
+        let store = store.clone();
 
-    thread::spawn(move || {
-        let result = seed.execute(&executor_, &spec(), store_.lock().unwrap().deref_mut());
+        move || {
+            let result = seed.execute(executor, &spec(), store);
 
-        tx.send(result).unwrap();
+            tx.send(result).unwrap();
+        }
     });
 
     let result = rx.recv_timeout(Duration::from_millis(6000));
@@ -91,7 +91,7 @@ pub fn run(seed: seed::Prog) -> RunInstance<InMemorySnapshotStore<WasiSnapshot>,
 
     RunInstance {
         base_dir,
-        store: Arc::into_inner(store).unwrap().into_inner().unwrap(),
+        store,
         result,
         stderr,
     }

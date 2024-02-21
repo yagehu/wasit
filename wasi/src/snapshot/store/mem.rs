@@ -1,10 +1,13 @@
-use std::convert::Infallible;
+use std::{
+    convert::Infallible,
+    sync::{Arc, Mutex},
+};
 
 use super::SnapshotStore;
 
 #[derive(Debug, Clone)]
 pub struct InMemorySnapshotStore<S> {
-    snapshots: Vec<S>,
+    snapshots: Arc<Mutex<Vec<S>>>,
 }
 
 impl<S> Default for InMemorySnapshotStore<S> {
@@ -22,17 +25,17 @@ where
     type Snapshot = S;
     type Error = Infallible;
 
-    fn push_snapshot(&mut self, snapshot: Self::Snapshot) -> Result<(), Self::Error> {
-        self.snapshots.push(snapshot);
+    fn push_snapshot(&self, snapshot: Self::Snapshot) -> Result<(), Self::Error> {
+        self.snapshots.lock().unwrap().push(snapshot);
 
         Ok(())
     }
 
     fn snapshot_count(&self) -> usize {
-        self.snapshots.len()
+        self.snapshots.lock().unwrap().len()
     }
 
     fn get_snapshot(&self, idx: usize) -> Result<Option<Self::Snapshot>, Self::Error> {
-        Ok(self.snapshots.get(idx).cloned())
+        Ok(self.snapshots.lock().unwrap().get(idx).cloned())
     }
 }

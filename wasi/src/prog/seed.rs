@@ -1,10 +1,9 @@
 use color_eyre::{eyre, eyre::WrapErr};
-use executor_pb::WasiFunc::*;
 use serde::{Deserialize, Serialize};
 use wazzi_executor::RunningExecutor;
 use witx::{BuiltinType, Layout};
 
-use super::stateful;
+use super::{pb_func, stateful};
 use crate::{
     resource_ctx::{ResourceContext, ResourceId},
     snapshot::{SnapshotStore, WasiSnapshot},
@@ -33,7 +32,7 @@ fn prepare_param(
     }
 }
 
-fn prepare_result(tref: &witx::TypeRef) -> executor_pb::Value {
+pub(crate) fn prepare_result(tref: &witx::TypeRef) -> executor_pb::Value {
     let which = match tref.type_().as_ref() {
         | witx::Type::Record(record) if record.bitflags_repr().is_some() => {
             let mut members = Vec::with_capacity(record.members.len());
@@ -198,12 +197,13 @@ pub(crate) fn register_resource_rec(
 impl Prog {
     pub fn execute<S>(
         self,
-        executor: &RunningExecutor,
+        executor: RunningExecutor,
         spec: &witx::Document,
-        snapshot_store: &mut S,
-    ) -> Result<stateful::Prog, eyre::Error>
+        store: S,
+    ) -> Result<stateful::Prog<S>, eyre::Error>
     where
         S: SnapshotStore<Snapshot = WasiSnapshot>,
+        S::Error: std::error::Error + Send + Sync + 'static,
     {
         let mut resource_ctx = ResourceContext::new();
         let module_spec = spec
@@ -236,45 +236,7 @@ impl Prog {
                     );
                 },
                 | Action::Call(call) => {
-                    let func = match call.func.as_str() {
-                        | "args_get" => ARGS_GET,
-                        | "args_sizes_get" => ARGS_SIZES_GET,
-                        | "environ_get" => ENVIRON_GET,
-                        | "environ_sizes_get" => ENVIRON_SIZES_GET,
-                        | "clock_res_get" => CLOCK_RES_GET,
-                        | "clock_time_get" => CLOCK_TIME_GET,
-                        | "fd_advise" => FD_ADVISE,
-                        | "fd_allocate" => FD_ALLOCATE,
-                        | "fd_close" => FD_CLOSE,
-                        | "fd_datasync" => FD_DATASYNC,
-                        | "fd_fdstat_get" => FD_FDSTAT_GET,
-                        | "fd_fdstat_set_flags" => FD_FDSTAT_SET_FLAGS,
-                        | "fd_fdstat_set_rights" => FD_FDSTAT_SET_RIGHTS,
-                        | "fd_filestat_get" => FD_FILESTAT_GET,
-                        | "fd_filestat_set_size" => FD_FILESTAT_SET_SIZE,
-                        | "fd_filestat_set_times" => FD_FILESTAT_SET_TIMES,
-                        | "fd_pread" => FD_PREAD,
-                        | "fd_prestat_get" => FD_PRESTAT_GET,
-                        | "fd_prestat_dir_name" => FD_PRESTAT_DIR_NAME,
-                        | "fd_pwrite" => FD_PWRITE,
-                        | "fd_read" => FD_READ,
-                        | "fd_readdir" => FD_READDIR,
-                        | "fd_renumber" => FD_RENUMBER,
-                        | "fd_seek" => FD_SEEK,
-                        | "fd_sync" => FD_SYNC,
-                        | "fd_tell" => FD_TELL,
-                        | "fd_write" => FD_WRITE,
-                        | "path_create_directory" => PATH_CREATE_DIRECTORY,
-                        | "path_filestat_get" => PATH_FILESTAT_GET,
-                        | "path_filestat_set_times" => PATH_FILESTAT_SET_TIMES,
-                        | "path_link" => PATH_LINK,
-                        | "path_open" => PATH_OPEN,
-                        | "path_remove_directory" => PATH_REMOVE_DIRECTORY,
-                        | "path_rename" => PATH_RENAME,
-                        | "path_symlink" => PATH_SYMLINK,
-                        | "path_unlink_file" => PATH_UNLINK_FILE,
-                        | _ => panic!("{}", call.func.as_str()),
-                    };
+                    let func = pb_func(call.func.as_str());
                     let func_spec = module_spec
                         .func(&witx::Id::new(call.func.as_str()))
                         .unwrap();
@@ -324,6 +286,9 @@ impl Prog {
                         | _ => unreachable!(),
                     };
 
+                    store
+                        .push_snapshot(WasiSnapshot { errno })
+                        .wrap_err("failed to record snapshot")?;
                     calls.push(stateful::Call {
                         func: func_spec.name.as_str().to_owned(),
                         errno,
@@ -342,7 +307,12 @@ impl Prog {
             }
         }
 
-        Ok(stateful::Prog { calls })
+        Ok(stateful::Prog {
+            store,
+            executor,
+            resource_ctx,
+            calls,
+        })
     }
 }
 

@@ -1,12 +1,17 @@
-use std::{fs, io, path::PathBuf};
+use std::{
+    fs,
+    io,
+    path::PathBuf,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 use super::SnapshotStore;
 use crate::snapshot::WasiSnapshot;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct FsSnapshotStore {
     root:  PathBuf,
-    count: usize,
+    count: AtomicUsize,
 }
 
 impl FsSnapshotStore {
@@ -15,7 +20,7 @@ impl FsSnapshotStore {
     pub fn new(dir: PathBuf) -> Self {
         Self {
             root:  dir,
-            count: 0,
+            count: AtomicUsize::new(0),
         }
     }
 
@@ -28,8 +33,8 @@ impl SnapshotStore for FsSnapshotStore {
     type Snapshot = WasiSnapshot;
     type Error = io::Error;
 
-    fn push_snapshot(&mut self, snapshot: WasiSnapshot) -> Result<(), Self::Error> {
-        let idx = self.count;
+    fn push_snapshot(&self, snapshot: WasiSnapshot) -> Result<(), Self::Error> {
+        let idx = self.count.fetch_add(1, Ordering::SeqCst);
         let dir = self.root.join(Self::idx_string(idx));
 
         fs::create_dir(&dir)?;
@@ -40,8 +45,6 @@ impl SnapshotStore for FsSnapshotStore {
             .open(dir.join(Self::CALL_FILE_NAME))?;
 
         serde_json::to_writer_pretty(file, &snapshot)?;
-
-        self.count += 1;
 
         Ok(())
     }
@@ -74,7 +77,7 @@ mod tests {
     #[test]
     fn ok() {
         let root = tempdir().unwrap();
-        let mut store = FsSnapshotStore::new(root.path().to_path_buf());
+        let store = FsSnapshotStore::new(root.path().to_path_buf());
         let snapshot = WasiSnapshot { errno: Some(21) };
 
         store.push_snapshot(snapshot.clone()).unwrap();
