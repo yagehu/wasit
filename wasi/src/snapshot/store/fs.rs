@@ -33,7 +33,7 @@ impl SnapshotStore for FsSnapshotStore {
     type Snapshot = WasiSnapshot;
     type Error = io::Error;
 
-    fn push_snapshot(&self, snapshot: WasiSnapshot) -> Result<(), Self::Error> {
+    fn save_snapshot(&self, snapshot: WasiSnapshot) -> Result<(), Self::Error> {
         let idx = self.count.fetch_add(1, Ordering::SeqCst);
         let dir = self.root.join(Self::idx_string(idx));
 
@@ -80,7 +80,7 @@ mod tests {
         let store = FsSnapshotStore::new(root.path().to_path_buf());
         let snapshot = WasiSnapshot { errno: Some(21) };
 
-        store.push_snapshot(snapshot.clone()).unwrap();
+        store.save_snapshot(snapshot.clone()).unwrap();
 
         assert_eq!(store.snapshot_count(), 1);
 

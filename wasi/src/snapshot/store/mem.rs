@@ -25,7 +25,7 @@ where
     type Snapshot = S;
     type Error = Infallible;
 
-    fn push_snapshot(&self, snapshot: Self::Snapshot) -> Result<(), Self::Error> {
+    fn save_snapshot(&self, snapshot: Self::Snapshot) -> Result<(), Self::Error> {
         self.snapshots.lock().unwrap().push(snapshot);
 
         Ok(())

@@ -1,11 +1,8 @@
-pub mod seed;
+pub mod action;
 
-pub(crate) mod stateful;
+use serde::{Deserialize, Serialize};
 
-mod r#final;
-
-pub use r#final::{FinalProg, Value};
-pub use stateful::Prog;
+use self::action::ActionStore;
 
 fn pb_func(name: &str) -> executor_pb::WasiFunc {
     use executor_pb::WasiFunc::*;
@@ -50,3 +47,16 @@ fn pb_func(name: &str) -> executor_pb::WasiFunc {
         | _ => panic!("{name}"),
     }
 }
+
+#[derive(Clone, Debug)]
+pub struct Prog<AS> {
+    action_store: AS,
+}
+
+impl<AS> Prog<AS> where AS: ActionStore
+{
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum Value {}

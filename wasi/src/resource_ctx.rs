@@ -1,9 +1,11 @@
 use std::collections::{BTreeSet, HashMap};
 
-use crate::prog::stateful::Value;
+use serde::{Deserialize, Serialize};
 
-pub(crate) type ResourceId = u64;
-pub(crate) type ResourceType = String;
+use crate::prog::Value;
+
+type ResourceId = u64;
+type ResourceType = String;
 
 #[derive(Debug, Clone)]
 pub struct ResourceContext {
@@ -39,7 +41,27 @@ impl ResourceContext {
         resources.insert(id);
     }
 
-    pub fn get_resource(&self, id: ResourceId) -> Option<Value> {
-        self.map.get(&id).cloned()
+    pub fn get_resource(&self, id: ResourceId) -> Option<Resource> {
+        self.map.get(&id).cloned().map(|value| {
+            for (ty, resources) in &self.by_types {
+                if resources.contains(&id) {
+                    return Resource {
+                        id,
+                        r#type: ty.to_owned(),
+                        value,
+                    };
+                }
+            }
+
+            unreachable!()
+        })
     }
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct Resource {
+    pub id:     u64,
+    pub r#type: ResourceType,
+    pub value:  Value,
 }

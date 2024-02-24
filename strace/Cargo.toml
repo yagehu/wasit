@@ -1,10 +1,11 @@
 [package]
-name = "wazzi-executor-pb-c"
+name = "strace"
 version = "0.1.0"
 edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+nom.workspace = true
 
-[build-dependencies]
-wasi-sdk.workspace = true
+[dev-dependencies]
+tempfile.workspace = true
