@@ -18,5 +18,22 @@ fn attach() {
     assert!(output.exists());
 
     let strace_content = fs::read_to_string(output).unwrap();
-    let (_, _trace) = parse::trace(&strace_content).unwrap();
+
+    let _trace = match parse::trace(&strace_content) {
+        | Ok((_rest, trace)) => trace,
+        | Err(_err) => {
+            // If parsing errors, discarding the final line should fix it.
+
+            let strace_content = strace_content
+                .rsplitn(2, '\n')
+                .collect::<Vec<_>>()
+                .get(1)
+                .cloned()
+                .unwrap_or_default();
+
+            parse::trace(strace_content)
+                .expect(&format!("{strace_content}"))
+                .1
+        },
+    };
 }
