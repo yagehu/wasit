@@ -7,6 +7,7 @@ use nom::{
     combinator::{map_res, opt},
     multi::many0,
     sequence::{self, delimited, terminated, tuple},
+    AsChar,
 };
 
 #[derive(PartialEq, Eq, Debug, Clone)]
@@ -18,7 +19,7 @@ pub struct Trace<'a> {
 pub struct Syscall<'a> {
     name:      &'a str,
     arguments: &'a str,
-    errno:     u32,
+    result:    CallResult<'a>,
 }
 
 pub fn trace(input: &str) -> nom::IResult<&str, Trace> {
@@ -32,15 +33,13 @@ pub fn trace(input: &str) -> nom::IResult<&str, Trace> {
 }
 
 fn syscall(input: &str) -> nom::IResult<&str, Syscall> {
-    let (input, (name, arguments, _, _, _, errno)) = tuple((
+    let (input, (name, arguments, _, _, _, call_result)) = tuple((
         syscall_name,
         parens,
         multispace0,
         char('='),
         multispace0,
-        map_res(take_while1(|c: char| c.is_digit(10)), |s| {
-            u32::from_str_radix(s, 10)
-        }),
+        call_result,
     ))(input)?;
 
     Ok((
@@ -48,9 +47,43 @@ fn syscall(input: &str) -> nom::IResult<&str, Syscall> {
         Syscall {
             name,
             arguments,
-            errno,
+            result: call_result,
         },
     ))
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub enum CallResult<'a> {
+    Ok(i32),
+    Err { ret: i32, errno: Errno<'a> },
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct Errno<'a>(&'a str);
+
+pub const ENOENT: Errno<'static> = Errno("ENOENT");
+
+fn call_result(input: &str) -> nom::IResult<&str, CallResult> {
+    let (input, (neg, ret, _)) = tuple((
+        opt(char('-')),
+        map_res(take_while1(|c: char| c.is_dec_digit()), |s| {
+            i32::from_str_radix(s, 10)
+        }),
+        multispace0,
+    ))(input)?;
+    let ret = if neg.is_some() { -ret } else { ret };
+
+    match errno(input) {
+        | Ok((input, errno)) => Ok((input, CallResult::Err { ret, errno })),
+        | Err(_err) => Ok((input, CallResult::Ok(ret))),
+    }
+}
+
+fn errno(input: &str) -> nom::IResult<&str, Errno> {
+    let (input, (errno, _, _)) =
+        tuple((take_while1(|c: char| c.is_uppercase()), multispace1, parens))(input)?;
+
+    Ok((input, Errno(errno)))
 }
 
 fn parens(input: &str) -> nom::IResult<&str, &str> {
@@ -79,12 +112,32 @@ mod tests {
     fn ok() {
         let (rest, trace) = trace(
             r#"
-execve("/usr/bin/sleep", ["sleep", "1"], 0x7ffc8a0ec998 /* 54 vars */) = 0
+access("/etc/ld.so.preload", R_OK)      = -1 ENOENT (No such file or directory)
+access("/etc/ld.so.preload", R_OK)      = 0
 +++ exited with 0 +++
             "#,
         )
         .unwrap();
 
         assert!(rest.trim().is_empty(), "{rest}");
+        assert!(matches!(
+            &trace.calls[0],
+            Syscall {
+                name:      "access",
+                arguments: _arguments,
+                result:    CallResult::Err {
+                    ret:   -1,
+                    errno,
+                },
+            } if errno == &ENOENT,
+        ));
+        assert!(matches!(
+            &trace.calls[1],
+            Syscall {
+                name:      "access",
+                arguments: _arguments,
+                result:    CallResult::Ok(0),
+            },
+        ));
     }
 }
