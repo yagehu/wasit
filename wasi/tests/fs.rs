@@ -1,7 +1,5 @@
 mod common;
 
-use std::fs;
-
 // use crate::common::{get_seed, run, run_seed, spec};
 
 // #[test]

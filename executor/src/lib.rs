@@ -90,6 +90,10 @@ impl RunningExecutor {
             .unwrap();
     }
 
+    pub fn pid(&self) -> u32 {
+        self.child.lock().unwrap().id()
+    }
+
     pub fn call(&self, call: pb::request::Call) -> Result<pb::response::Call, protobuf::Error> {
         let mut stdin = self.stdin.lock().unwrap();
         let mut stdout = self.stdout.lock().unwrap();

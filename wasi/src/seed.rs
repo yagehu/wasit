@@ -1,10 +1,91 @@
+use std::path::PathBuf;
+
+use color_eyre::eyre::{self, ContextCompat};
 use serde::{Deserialize, Serialize};
+use wazzi_executor::RunningExecutor;
+
+use crate::{
+    prog::{self, Prog},
+    resource_ctx::ResourceContext,
+};
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct Seed {
     pub mount_base_dir: bool,
     pub actions:        Vec<Action>,
+}
+
+impl Seed {
+    pub fn execute(
+        self,
+        spec: &witx::Document,
+        path: PathBuf,
+        executor: RunningExecutor,
+    ) -> Result<Prog, eyre::Error> {
+        let base_dir_fd = executor.base_dir_fd();
+        let mut prog = Prog::with_existing_directory(path, executor)?;
+        let module_spec = spec
+            .module(&witx::Id::new("wasi_snapshot_preview1"))
+            .unwrap();
+
+        if self.mount_base_dir {
+            prog.resource_ctx_mut().register_resource(
+                "fd_base",
+                prog::Value::Handle(base_dir_fd),
+                0,
+            );
+        }
+
+        for action in self.actions {
+            match action {
+                | Action::Decl(_decl) => todo!(),
+                | Action::Call(call) => {
+                    let func_spec = module_spec
+                        .func(&witx::Id::new(&call.func))
+                        .wrap_err("func not found")?;
+                    let result_trefs = func_spec.unpack_expected_result();
+                    let params = func_spec
+                        .params
+                        .iter()
+                        .zip(call.params)
+                        .map(|(param_type, rv)| {
+                            rv.into_prog_value(
+                                param_type.tref.type_().as_ref(),
+                                prog.resource_ctx(),
+                            )
+                        })
+                        .collect();
+                    let completion = prog.call(
+                        &func_spec,
+                        params,
+                        result_trefs
+                            .iter()
+                            .map(prog::Value::zero_value_from_spec)
+                            .collect(),
+                    )?;
+
+                    for ((result_tref, result), result_spec) in result_trefs
+                        .iter()
+                        .zip(completion.results)
+                        .zip(call.results)
+                    {
+                        if let ResultSpec::Resource(id) = result_spec {
+                            prog::register_resource_rec(
+                                prog.resource_ctx_mut(),
+                                spec,
+                                result_tref,
+                                result,
+                                Some(id),
+                            )
+                        }
+                    }
+                },
+            }
+        }
+
+        Ok(prog)
+    }
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
@@ -48,6 +129,15 @@ pub enum ResourceOrValue {
     Value(Value),
 }
 
+impl ResourceOrValue {
+    fn into_prog_value(self, ty: &witx::Type, resource_ctx: &ResourceContext) -> prog::Value {
+        match self {
+            | Self::Resource(id) => resource_ctx.get_resource(id).unwrap().value,
+            | Self::Value(value) => value.into_prog_value(ty, resource_ctx),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum Value {
@@ -61,6 +151,42 @@ pub enum Value {
     Variant(VariantValue),
 }
 
+impl Value {
+    fn into_prog_value(self, ty: &witx::Type, resource_ctx: &ResourceContext) -> prog::Value {
+        match (ty, self) {
+            | (_, Value::Builtin(builtin)) => prog::Value::Builtin(builtin.into()),
+            | (_, Value::String(_)) => todo!(),
+            | (_, Value::Bitflags(_)) => todo!(),
+            | (_, Value::Record(_)) => todo!(),
+            | (_, Value::List(_)) => todo!(),
+            | (_, Value::ConstPointer(_)) => todo!(),
+            | (_, Value::Pointer(_)) => todo!(),
+            | (witx::Type::Variant(variant_type), Value::Variant(variant)) => {
+                let (case_idx, case) = variant_type
+                    .cases
+                    .iter()
+                    .enumerate()
+                    .filter(|(_i, case)| case.name.as_str() == variant.name)
+                    .next()
+                    .unwrap();
+
+                prog::Value::Variant(prog::VariantValue {
+                    idx:     case_idx as u64,
+                    name:    variant.name,
+                    payload: case
+                        .tref
+                        .as_ref()
+                        .zip(variant.payload)
+                        .map(|(tref, payload)| {
+                            Box::new(payload.into_prog_value(tref.type_().as_ref(), resource_ctx))
+                        }),
+                })
+            },
+            | (_, Value::Variant(_)) => panic!(),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum BuiltinValue {
@@ -68,6 +194,34 @@ pub enum BuiltinValue {
     U32(u32),
     U64(u64),
     S64(i64),
+}
+
+impl From<BuiltinValue> for executor_pb::value::Builtin {
+    fn from(x: BuiltinValue) -> Self {
+        let which = match x {
+            | BuiltinValue::U8(i) => executor_pb::value::builtin::Which::U8(i.into()),
+            | BuiltinValue::U32(i) => executor_pb::value::builtin::Which::U32(i),
+            | BuiltinValue::U64(i) => executor_pb::value::builtin::Which::U64(i),
+            | BuiltinValue::S64(i) => executor_pb::value::builtin::Which::S64(i),
+        };
+
+        Self {
+            which:          Some(which),
+            special_fields: Default::default(),
+        }
+    }
+}
+
+impl From<executor_pb::value::Builtin> for BuiltinValue {
+    fn from(x: executor_pb::value::Builtin) -> Self {
+        match x.which.unwrap() {
+            | executor_pb::value::builtin::Which::U8(i) => Self::U8(i as u8),
+            | executor_pb::value::builtin::Which::U32(i) => Self::U32(i),
+            | executor_pb::value::builtin::Which::U64(i) => Self::U64(i),
+            | executor_pb::value::builtin::Which::S64(i) => Self::S64(i),
+            | _ => panic!(),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]

@@ -1,8 +1,14 @@
 pub mod action;
 
-use serde::{Deserialize, Serialize};
+use std::{fs, io, path::PathBuf};
 
-use self::action::ActionStore;
+use color_eyre::eyre;
+use serde::{Deserialize, Serialize};
+use wazzi_executor::RunningExecutor;
+use witx::Layout;
+
+use self::action::{ActionCompletion, ActionStore, CallCompletion};
+use crate::{resource_ctx::ResourceContext, seed};
 
 fn pb_func(name: &str) -> executor_pb::WasiFunc {
     use executor_pb::WasiFunc::*;
@@ -48,15 +54,261 @@ fn pb_func(name: &str) -> executor_pb::WasiFunc {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct Prog<AS> {
-    action_store: AS,
+#[derive(Debug)]
+pub struct Prog {
+    root:         PathBuf,
+    action_store: ActionStore,
+    executor:     RunningExecutor,
+    resource_ctx: ResourceContext,
 }
 
-impl<AS> Prog<AS> where AS: ActionStore
-{
+impl Prog {
+    pub fn with_existing_directory(
+        path: PathBuf,
+        executor: RunningExecutor,
+    ) -> Result<Self, io::Error> {
+        let actions_store_dir = path.join("actions");
+
+        fs::create_dir(&actions_store_dir)?;
+
+        Ok(Self {
+            root: path.canonicalize()?,
+            action_store: ActionStore::with_existing_directory(actions_store_dir, executor.pid())?,
+            executor,
+            resource_ctx: ResourceContext::new(),
+        })
+    }
+
+    pub fn call(
+        &mut self,
+        func: &witx::InterfaceFunc,
+        params: Vec<Value>,
+        results: Vec<Value>,
+    ) -> Result<CallCompletion, eyre::Error> {
+        self.action_store.begin_action()?;
+
+        let result_trefs = func.unpack_expected_result();
+        let response = self.executor.call(executor_pb::request::Call {
+            func:           protobuf::EnumOrUnknown::new(pb_func(func.name.as_str())),
+            params:         func
+                .params
+                .iter()
+                .zip(params)
+                .map(|(param, v)| v.into_pb_value(param.tref.type_().as_ref()))
+                .collect(),
+            results:        result_trefs
+                .iter()
+                .zip(results)
+                .map(|(result_tref, v)| v.into_pb_value(result_tref.type_().as_ref()))
+                .collect(),
+            special_fields: Default::default(),
+        })?;
+        let errno = match response.errno_option.unwrap() {
+            | executor_pb::response::call::Errno_option::ErrnoSome(i) => Some(i),
+            | executor_pb::response::call::Errno_option::ErrnoNone(_) => None,
+            | _ => panic!(),
+        };
+        let event = CallCompletion {
+            errno,
+            results: result_trefs
+                .iter()
+                .zip(response.results)
+                .map(|(result_tref, result)| {
+                    Value::from_pb_value(result, result_tref.type_().as_ref())
+                })
+                .collect(),
+        };
+
+        self.action_store
+            .end_action(ActionCompletion::Call(event.clone()))?;
+
+        Ok(event)
+    }
+
+    pub fn resource_ctx(&mut self) -> &ResourceContext {
+        &self.resource_ctx
+    }
+
+    pub fn resource_ctx_mut(&mut self) -> &mut ResourceContext {
+        &mut self.resource_ctx
+    }
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(rename_all = "snake_case")]
-pub enum Value {}
+pub enum Value {
+    Builtin(seed::BuiltinValue),
+    Handle(u32),
+    Variant(VariantValue),
+}
+
+impl Value {
+    pub fn zero_value_from_spec(tref: &witx::TypeRef) -> Self {
+        match tref.type_().as_ref() {
+            | witx::Type::Record(_) => todo!(),
+            | witx::Type::Variant(_) => todo!(),
+            | witx::Type::Handle(_) => todo!(),
+            | witx::Type::List(_) => todo!(),
+            | witx::Type::Pointer(_) => todo!(),
+            | witx::Type::ConstPointer(_) => todo!(),
+            | witx::Type::Builtin(builtin) => Self::Builtin(match builtin {
+                | witx::BuiltinType::Char => todo!(),
+                | witx::BuiltinType::U8 { .. } => seed::BuiltinValue::U8(0),
+                | witx::BuiltinType::U16 => todo!(),
+                | witx::BuiltinType::U32 { .. } => seed::BuiltinValue::U32(0),
+                | witx::BuiltinType::U64 => seed::BuiltinValue::U64(0),
+                | witx::BuiltinType::S8 => todo!(),
+                | witx::BuiltinType::S16 => todo!(),
+                | witx::BuiltinType::S32 => todo!(),
+                | witx::BuiltinType::S64 => seed::BuiltinValue::S64(0),
+                | witx::BuiltinType::F32 => todo!(),
+                | witx::BuiltinType::F64 => todo!(),
+            }),
+        }
+    }
+
+    pub fn into_pb_value(self, ty: &witx::Type) -> executor_pb::Value {
+        let which = match (ty, self) {
+            | (_, Value::Builtin(builtin)) => executor_pb::value::Which::Builtin(builtin.into()),
+            | (_, Value::Handle(handle)) => executor_pb::value::Which::Handle(handle),
+            | (witx::Type::Variant(variant_type), Value::Variant(variant)) => {
+                let (case_idx, case) = variant_type
+                    .cases
+                    .iter()
+                    .enumerate()
+                    .filter(|(_i, case)| case.name.as_str() == variant.name)
+                    .next()
+                    .unwrap();
+                let payload = match variant.payload {
+                    | Some(payload) => {
+                        executor_pb::value::variant::Payload_option::PayloadSome(Box::new(
+                            payload.into_pb_value(case.tref.as_ref().unwrap().type_().as_ref()),
+                        ))
+                    },
+                    | None => {
+                        executor_pb::value::variant::Payload_option::PayloadNone(Default::default())
+                    },
+                };
+
+                executor_pb::value::Which::Variant(Box::new(executor_pb::value::Variant {
+                    case_idx:       case_idx as u64,
+                    size:           variant_type.mem_size() as u32,
+                    tag_repr:       match variant_type.tag_repr {
+                        | witx::IntRepr::U8 => executor_pb::IntRepr::U8,
+                        | witx::IntRepr::U16 => executor_pb::IntRepr::U16,
+                        | witx::IntRepr::U32 => executor_pb::IntRepr::U32,
+                        | witx::IntRepr::U64 => executor_pb::IntRepr::U64,
+                    }
+                    .into(),
+                    payload_offset: variant_type.payload_offset() as u32,
+                    payload_option: Some(payload),
+                    special_fields: Default::default(),
+                }))
+            },
+            | (_, Value::Variant(_)) => panic!(),
+        };
+
+        executor_pb::Value {
+            which:          Some(which),
+            special_fields: Default::default(),
+        }
+    }
+
+    fn from_pb_value(x: executor_pb::Value, ty: &witx::Type) -> Self {
+        match (ty, x.which.unwrap()) {
+            | (_, executor_pb::value::Which::Builtin(builtin)) => Self::Builtin(builtin.into()),
+            | (_, executor_pb::value::Which::String(_)) => todo!(),
+            | (_, executor_pb::value::Which::Bitflags(_)) => todo!(),
+            | (_, executor_pb::value::Which::Handle(handle)) => Self::Handle(handle),
+            | (_, executor_pb::value::Which::Array(_)) => todo!(),
+            | (_, executor_pb::value::Which::Record(_)) => todo!(),
+            | (_, executor_pb::value::Which::ConstPointer(_)) => todo!(),
+            | (_, executor_pb::value::Which::Pointer(_)) => todo!(),
+            | (witx::Type::Variant(variant_type), executor_pb::value::Which::Variant(variant)) => {
+                let case = &variant_type.cases[variant.case_idx as usize];
+
+                Self::Variant(VariantValue {
+                    idx:     variant.case_idx,
+                    name:    case.name.as_str().to_owned(),
+                    payload: match variant.payload_option.unwrap() {
+                        | executor_pb::value::variant::Payload_option::PayloadSome(payload) => {
+                            Some(Box::new(Self::from_pb_value(
+                                *payload,
+                                case.tref.as_ref().unwrap().type_().as_ref(),
+                            )))
+                        },
+                        | executor_pb::value::variant::Payload_option::PayloadNone(_) => None,
+                        | _ => todo!(),
+                    },
+                })
+            },
+            | (_, executor_pb::value::Which::Variant(_)) => panic!(),
+            | (witx::Type::Builtin(_), _)
+            | (witx::Type::Record(_), _)
+            | (witx::Type::Handle(_), _)
+            | (witx::Type::Pointer(_), _)
+            | (witx::Type::ConstPointer(_), _)
+            | (witx::Type::List(_), _)
+            | (witx::Type::Variant(_), _) => panic!(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
+pub struct VariantValue {
+    pub idx:     u64,
+    pub name:    String,
+    pub payload: Option<Box<Value>>,
+}
+
+pub(crate) fn register_resource_rec(
+    ctx: &mut ResourceContext,
+    spec: &witx::Document,
+    tref: &witx::TypeRef,
+    value: Value,
+    resource_id: Option<u64>,
+) {
+    if let Some(resource) = tref.resource(spec) {
+        match resource_id {
+            | Some(resource_id) => {
+                ctx.register_resource(resource.name.as_str(), value.clone(), resource_id)
+            },
+            | None => ctx.new_resource(resource.name.as_str(), value.clone()),
+        }
+    }
+
+    match (tref.type_().as_ref(), value) {
+        | (_, Value::Builtin(_)) => (),
+        | (_, Value::Handle(_)) => (),
+        // | (_, Value::String(_)) => (),
+        // | (_, Value::Bitflags(_)) => (),
+        // | (witx::Type::Record(record_type), Value::Record(record)) => {
+        //     for (member_type, member) in record_type.members.iter().zip(record.0.iter()) {
+        //         register_resource_rec(
+        //             ctx,
+        //             spec,
+        //             &member_type.tref,
+        //             member
+        //                 .to_owned()
+        //                 .into_pb_value(member_type.tref.type_().as_ref()),
+        //             None,
+        //         );
+        //     }
+        // },
+        // | (_, Value::Record(_)) => unreachable!(),
+        // | (_, Value::Pointer(_)) => todo!(),
+        // | (_, Value::ConstPointer(_)) => todo!(),
+        // | (_, Value::List(_)) => todo!(),
+        | (witx::Type::Variant(variant_type), Value::Variant(variant)) => {
+            let case_type = variant_type.cases.get(variant.idx as usize).unwrap();
+
+            if let Some(case_tref) = &case_type.tref {
+                register_resource_rec(ctx, spec, case_tref, *variant.payload.unwrap(), None);
+            }
+        },
+        | (_, Value::Variant(_)) => unreachable!(),
+    }
+}
+
+#[cfg(test)]
+mod tests {}

@@ -1,6 +1,6 @@
 pub mod parse;
 
-use std::{io, path::Path, process};
+use std::{fs, io, path::Path, process};
 
 pub struct Strace {
     process: process::Child,
@@ -8,6 +8,11 @@ pub struct Strace {
 
 impl Strace {
     pub fn attach(pid: u32, output_file_path: &Path) -> Result<Self, io::Error> {
+        fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(output_file_path)?;
+
         let child = process::Command::new("strace")
             .args(["--no-abbrev", "--string-limit", "1024"])
             .arg("--attach")

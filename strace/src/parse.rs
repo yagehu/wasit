@@ -9,13 +9,15 @@ use nom::{
     sequence::{self, delimited, terminated, tuple},
     AsChar,
 };
+use serde::{Deserialize, Serialize};
 
-#[derive(PartialEq, Eq, Debug, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub struct Trace<'a> {
+    #[serde(borrow)]
     pub calls: Vec<Syscall<'a>>,
 }
 
-#[derive(PartialEq, Eq, Debug, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub struct Syscall<'a> {
     name:      &'a str,
     arguments: &'a str,
@@ -52,13 +54,19 @@ fn syscall(input: &str) -> nom::IResult<&str, Syscall> {
     ))
 }
 
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
+#[serde(rename_all = "snake_case")]
 pub enum CallResult<'a> {
     Ok(i32),
-    Err { ret: i32, errno: Errno<'a> },
+    Err {
+        ret: i32,
+
+        #[serde(borrow)]
+        errno: Errno<'a>,
+    },
 }
 
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 pub struct Errno<'a>(&'a str);
 
 pub const ENOENT: Errno<'static> = Errno("ENOENT");
