@@ -14,7 +14,13 @@
             "call": {
                 "func": "args_get",
                 "params": [
-                    { "value": { "pointer": { "alloc_from_resource": 0 } } },
+                    {
+                        "value": {
+                            "pointer": {
+                                "alloc_from_resource": 0
+                            }
+                        }
+                    },
                     { "value": { "pointer": { "alloc_from_resource": 1 } } }
                 ]
             }

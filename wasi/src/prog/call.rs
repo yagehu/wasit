@@ -2,20 +2,20 @@ use std::{fmt, fs, io, path::PathBuf};
 
 use color_eyre::eyre::{self, eyre as err, Context, ContextCompat};
 use serde::{Deserialize, Serialize};
-use strace::Strace;
+use strace::{parse::Trace, Strace};
 
 use super::Value;
 
-pub struct ActionStore {
+pub struct CallStore {
     executor_pid: u32,
     root:         PathBuf,
     next_idx:     usize,
     recording:    Option<(usize, Strace)>,
 }
 
-impl fmt::Debug for ActionStore {
+impl fmt::Debug for CallStore {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ActionStore")
+        f.debug_struct("CallStore")
             .field("executor_pid", &self.executor_pid)
             .field("root", &self.root)
             .field("next_idx", &self.next_idx)
@@ -24,11 +24,11 @@ impl fmt::Debug for ActionStore {
     }
 }
 
-impl ActionStore {
+impl CallStore {
     pub fn with_existing_directory(
         path: PathBuf,
         executor_pid: u32,
-    ) -> Result<ActionStore, io::Error> {
+    ) -> Result<CallStore, io::Error> {
         Ok(Self {
             executor_pid,
             root: path.canonicalize()?,
@@ -38,29 +38,28 @@ impl ActionStore {
     }
 }
 
-impl ActionStore {
-    pub fn begin_action(&mut self) -> Result<(), io::Error> {
+impl CallStore {
+    pub fn begin_call(&mut self) -> Result<(), io::Error> {
         let idx = self.next_idx;
-        let action_dir = self.root.join(format!("{idx}"));
+        let dir = self.root.join(format!("{idx}"));
 
-        fs::create_dir(&action_dir)?;
+        fs::create_dir(&dir)?;
 
-        let strace_output = action_dir.join(OnDiskAction::STRACE_PATH);
+        let strace_output = dir.join(OnDiskCall::STRACE_PATH);
         let strace = Strace::attach(self.executor_pid, &strace_output)?;
 
         self.recording = Some((idx, strace));
-        self.next_idx += 1;
 
         Ok(())
     }
 
-    pub fn end_action(&mut self, event: ActionCompletion) -> Result<(), eyre::Error> {
+    pub fn end_call(&mut self, result: CallResult) -> Result<(), eyre::Error> {
         let action_dir = self.recording_action_dir().unwrap();
         let (_idx, strace_inst) = self.recording.take().wrap_err("not recording action")?;
 
         strace_inst.stop()?;
 
-        let trace_content = fs::read_to_string(action_dir.join(OnDiskAction::STRACE_PATH))
+        let trace_content = fs::read_to_string(action_dir.join(OnDiskCall::STRACE_PATH))
             .wrap_err("failed to read trace file")?;
         let trace = match strace::parse::trace(&trace_content) {
             | Ok((_rest, trace)) => trace,
@@ -77,18 +76,31 @@ impl ActionStore {
             fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
-                .open(action_dir.join(OnDiskAction::STRACE_JSON_PATH))?,
-            &trace,
-        )?;
-        serde_json::to_writer_pretty(
-            fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(action_dir.join(OnDiskAction::EVENT_PATH))?,
-            &event,
+                .open(action_dir.join(OnDiskCall::MAIN_JSON_PATH))?,
+            &Call {
+                errno:   result.errno,
+                params:  result.params,
+                results: result.results,
+                trace:   trace,
+            },
         )?;
 
+        self.next_idx += 1;
+
         Ok(())
+    }
+
+    pub fn last(&self) -> Result<Option<OnDiskCall>, io::Error> {
+        if self.next_idx == 0 {
+            return Ok(None);
+        }
+
+        let path = self
+            .root
+            .join(format!("{}", self.next_idx - 1))
+            .canonicalize()?;
+
+        Ok(Some(OnDiskCall::with_existing_directory(path)?))
     }
 
     fn recording_action_dir(&self) -> Option<PathBuf> {
@@ -96,33 +108,46 @@ impl ActionStore {
             .as_ref()
             .map(|(idx, _)| self.root.join(format!("{idx}")))
     }
+}
 
-    fn num_actions(&self) -> usize {
-        match self.recording {
-            | Some(_) => self.next_idx - 1,
-            | None => self.next_idx,
-        }
+#[derive(Debug)]
+pub struct OnDiskCall {
+    path: PathBuf,
+}
+
+impl OnDiskCall {
+    pub(crate) const MAIN_JSON_PATH: &'static str = "main.json";
+    pub(crate) const STRACE_PATH: &'static str = "strace";
+
+    pub fn with_existing_directory(path: PathBuf) -> Result<Self, io::Error> {
+        Ok(Self {
+            path: path.canonicalize()?,
+        })
     }
-}
 
-pub struct OnDiskAction {}
+    pub fn read(&self) -> Result<Call, io::Error> {
+        let f = fs::OpenOptions::new()
+            .read(true)
+            .open(&self.path.join(Self::MAIN_JSON_PATH))?;
+        let call = serde_json::from_reader(f)?;
 
-impl OnDiskAction {
-    pub const EVENT_PATH: &'static str = "event.json";
-    pub const STRACE_PATH: &'static str = "strace";
-    pub const STRACE_JSON_PATH: &'static str = "strace.json";
-}
-
-#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
-#[serde(rename_all = "snake_case")]
-pub enum ActionCompletion {
-    Decl,
-    Call(CallCompletion),
+        Ok(call)
+    }
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
-pub struct CallCompletion {
+pub struct CallResult {
     pub errno:   Option<i32>,
+    pub params:  Vec<Value>,
     pub results: Vec<Value>,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct Call {
+    pub errno:   Option<i32>,
+    pub params:  Vec<Value>,
+    pub results: Vec<Value>,
+    pub trace:   Trace,
 }

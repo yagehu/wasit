@@ -1,4 +1,4 @@
-pub mod action;
+pub mod call;
 
 use std::{fs, io, path::PathBuf};
 
@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use wazzi_executor::RunningExecutor;
 use witx::Layout;
 
-use self::action::{ActionCompletion, ActionStore, CallCompletion};
+use self::call::{CallResult, CallStore};
 use crate::{resource_ctx::ResourceContext, seed};
 
 fn pb_func(name: &str) -> executor_pb::WasiFunc {
@@ -57,7 +57,7 @@ fn pb_func(name: &str) -> executor_pb::WasiFunc {
 #[derive(Debug)]
 pub struct Prog {
     root:         PathBuf,
-    action_store: ActionStore,
+    call_store:   CallStore,
     executor:     RunningExecutor,
     resource_ctx: ResourceContext,
 }
@@ -73,7 +73,7 @@ impl Prog {
 
         Ok(Self {
             root: path.canonicalize()?,
-            action_store: ActionStore::with_existing_directory(actions_store_dir, executor.pid())?,
+            call_store: CallStore::with_existing_directory(actions_store_dir, executor.pid())?,
             executor,
             resource_ctx: ResourceContext::new(),
         })
@@ -84,8 +84,8 @@ impl Prog {
         func: &witx::InterfaceFunc,
         params: Vec<Value>,
         results: Vec<Value>,
-    ) -> Result<CallCompletion, eyre::Error> {
-        self.action_store.begin_action()?;
+    ) -> Result<(), eyre::Error> {
+        self.call_store.begin_call()?;
 
         let result_trefs = func.unpack_expected_result();
         let response = self.executor.call(executor_pb::request::Call {
@@ -108,8 +108,15 @@ impl Prog {
             | executor_pb::response::call::Errno_option::ErrnoNone(_) => None,
             | _ => panic!(),
         };
-        let event = CallCompletion {
+
+        self.call_store.end_call(CallResult {
             errno,
+            params: func
+                .params
+                .iter()
+                .zip(response.params)
+                .map(|(param, value)| Value::from_pb_value(value, param.tref.type_().as_ref()))
+                .collect(),
             results: result_trefs
                 .iter()
                 .zip(response.results)
@@ -117,12 +124,13 @@ impl Prog {
                     Value::from_pb_value(result, result_tref.type_().as_ref())
                 })
                 .collect(),
-        };
+        })?;
 
-        self.action_store
-            .end_action(ActionCompletion::Call(event.clone()))?;
+        Ok(())
+    }
 
-        Ok(event)
+    pub fn call_store(&self) -> &CallStore {
+        &self.call_store
     }
 
     pub fn resource_ctx(&mut self) -> &ResourceContext {
@@ -137,9 +145,10 @@ impl Prog {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum Value {
-    Builtin(seed::BuiltinValue),
-    Handle(u32),
     Variant(VariantValue),
+    Handle(u32),
+    Pointer(Vec<Value>),
+    Builtin(seed::BuiltinValue),
 }
 
 impl Value {
@@ -149,7 +158,7 @@ impl Value {
             | witx::Type::Variant(_) => todo!(),
             | witx::Type::Handle(_) => todo!(),
             | witx::Type::List(_) => todo!(),
-            | witx::Type::Pointer(_) => todo!(),
+            | witx::Type::Pointer(tref) => Self::Pointer(vec![]),
             | witx::Type::ConstPointer(_) => todo!(),
             | witx::Type::Builtin(builtin) => Self::Builtin(match builtin {
                 | witx::BuiltinType::Char => todo!(),
@@ -169,8 +178,6 @@ impl Value {
 
     pub fn into_pb_value(self, ty: &witx::Type) -> executor_pb::Value {
         let which = match (ty, self) {
-            | (_, Value::Builtin(builtin)) => executor_pb::value::Which::Builtin(builtin.into()),
-            | (_, Value::Handle(handle)) => executor_pb::value::Which::Handle(handle),
             | (witx::Type::Variant(variant_type), Value::Variant(variant)) => {
                 let (case_idx, case) = variant_type
                     .cases
@@ -205,7 +212,20 @@ impl Value {
                     special_fields: Default::default(),
                 }))
             },
+            | (_, Value::Handle(handle)) => executor_pb::value::Which::Handle(handle),
+            | (witx::Type::Pointer(tref), Value::Pointer(values)) => {
+                executor_pb::value::Which::Pointer(executor_pb::value::Array {
+                    items:          values
+                        .into_iter()
+                        .map(|v| v.into_pb_value(tref.type_().as_ref()))
+                        .collect(),
+                    item_size:      tref.mem_size() as u32,
+                    special_fields: Default::default(),
+                })
+            },
+            | (_, Value::Builtin(builtin)) => executor_pb::value::Which::Builtin(builtin.into()),
             | (_, Value::Variant(_)) => panic!(),
+            | (_, Value::Pointer(_)) => panic!(),
         };
 
         executor_pb::Value {
@@ -223,7 +243,15 @@ impl Value {
             | (_, executor_pb::value::Which::Array(_)) => todo!(),
             | (_, executor_pb::value::Which::Record(_)) => todo!(),
             | (_, executor_pb::value::Which::ConstPointer(_)) => todo!(),
-            | (_, executor_pb::value::Which::Pointer(_)) => todo!(),
+            | (witx::Type::Pointer(tref), executor_pb::value::Which::Pointer(list)) => {
+                let mut items = Vec::with_capacity(list.items.len());
+
+                for value in list.items {
+                    items.push(Self::from_pb_value(value, tref.type_().as_ref()));
+                }
+
+                Self::Pointer(items)
+            },
             | (witx::Type::Variant(variant_type), executor_pb::value::Which::Variant(variant)) => {
                 let case = &variant_type.cases[variant.case_idx as usize];
 
@@ -278,8 +306,6 @@ pub(crate) fn register_resource_rec(
     }
 
     match (tref.type_().as_ref(), value) {
-        | (_, Value::Builtin(_)) => (),
-        | (_, Value::Handle(_)) => (),
         // | (_, Value::String(_)) => (),
         // | (_, Value::Bitflags(_)) => (),
         // | (witx::Type::Record(record_type), Value::Record(record)) => {
@@ -296,7 +322,6 @@ pub(crate) fn register_resource_rec(
         //     }
         // },
         // | (_, Value::Record(_)) => unreachable!(),
-        // | (_, Value::Pointer(_)) => todo!(),
         // | (_, Value::ConstPointer(_)) => todo!(),
         // | (_, Value::List(_)) => todo!(),
         | (witx::Type::Variant(variant_type), Value::Variant(variant)) => {
@@ -306,7 +331,10 @@ pub(crate) fn register_resource_rec(
                 register_resource_rec(ctx, spec, case_tref, *variant.payload.unwrap(), None);
             }
         },
-        | (_, Value::Variant(_)) => unreachable!(),
+        | (_, Value::Handle(_)) => (),
+        | (_, Value::Pointer(_)) => unimplemented!(),
+        | (_, Value::Builtin(_)) => (),
+        | (_, Value::Variant(_)) => panic!(),
     }
 }
 

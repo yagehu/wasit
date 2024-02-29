@@ -12,16 +12,15 @@ use nom::{
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
-pub struct Trace<'a> {
-    #[serde(borrow)]
-    pub calls: Vec<Syscall<'a>>,
+pub struct Trace {
+    pub calls: Vec<Syscall>,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
-pub struct Syscall<'a> {
-    name:      &'a str,
-    arguments: &'a str,
-    result:    CallResult<'a>,
+pub struct Syscall {
+    name:      String,
+    arguments: String,
+    result:    CallResult,
 }
 
 pub fn trace(input: &str) -> nom::IResult<&str, Trace> {
@@ -47,29 +46,22 @@ fn syscall(input: &str) -> nom::IResult<&str, Syscall> {
     Ok((
         input,
         Syscall {
-            name,
-            arguments,
-            result: call_result,
+            name:      name.to_owned(),
+            arguments: arguments.to_owned(),
+            result:    call_result,
         },
     ))
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(rename_all = "snake_case")]
-pub enum CallResult<'a> {
+pub enum CallResult {
     Ok(i32),
-    Err {
-        ret: i32,
-
-        #[serde(borrow)]
-        errno: Errno<'a>,
-    },
+    Err { ret: i32, errno: Errno },
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
-pub struct Errno<'a>(&'a str);
-
-pub const ENOENT: Errno<'static> = Errno("ENOENT");
+pub struct Errno(String);
 
 fn call_result(input: &str) -> nom::IResult<&str, CallResult> {
     let (input, (neg, ret, _)) = tuple((
@@ -91,7 +83,7 @@ fn errno(input: &str) -> nom::IResult<&str, Errno> {
     let (input, (errno, _, _)) =
         tuple((take_while1(|c: char| c.is_uppercase()), multispace1, parens))(input)?;
 
-    Ok((input, Errno(errno)))
+    Ok((input, Errno(errno.to_owned())))
 }
 
 fn parens(input: &str) -> nom::IResult<&str, &str> {
@@ -131,21 +123,21 @@ access("/etc/ld.so.preload", R_OK)      = 0
         assert!(matches!(
             &trace.calls[0],
             Syscall {
-                name:      "access",
+                name,
                 arguments: _arguments,
                 result:    CallResult::Err {
                     ret:   -1,
                     errno,
                 },
-            } if errno == &ENOENT,
+            } if errno.0 == "ENOENT" && name == "access",
         ));
         assert!(matches!(
             &trace.calls[1],
             Syscall {
-                name:      "access",
+                name,
                 arguments: _arguments,
                 result:    CallResult::Ok(0),
-            },
+            } if name == "access",
         ));
     }
 }

@@ -56,7 +56,8 @@ impl Seed {
                             )
                         })
                         .collect();
-                    let completion = prog.call(
+
+                    prog.call(
                         &func_spec,
                         params,
                         result_trefs
@@ -65,10 +66,10 @@ impl Seed {
                             .collect(),
                     )?;
 
-                    for ((result_tref, result), result_spec) in result_trefs
-                        .iter()
-                        .zip(completion.results)
-                        .zip(call.results)
+                    let call_data = prog.call_store().last()?.unwrap().read()?;
+
+                    for ((result_tref, result), result_spec) in
+                        result_trefs.iter().zip(call_data.results).zip(call.results)
                     {
                         if let ResultSpec::Resource(id) = result_spec {
                             prog::register_resource_rec(
@@ -160,7 +161,21 @@ impl Value {
             | (_, Value::Record(_)) => todo!(),
             | (_, Value::List(_)) => todo!(),
             | (_, Value::ConstPointer(_)) => todo!(),
-            | (_, Value::Pointer(_)) => todo!(),
+            | (witx::Type::Pointer(tref), Value::Pointer(pointer)) => {
+                let value = match pointer.default_value {
+                    | Some(value) => value.into_prog_value(ty, resource_ctx),
+                    | None => prog::Value::zero_value_from_spec(tref),
+                };
+                let resource = resource_ctx
+                    .get_resource(pointer.alloc_from_resource)
+                    .unwrap();
+                let len = match resource.value {
+                    | prog::Value::Builtin(BuiltinValue::U32(i)) => i,
+                    | _ => panic!(),
+                };
+
+                prog::Value::Pointer(vec![value; len as usize])
+            },
             | (witx::Type::Variant(variant_type), Value::Variant(variant)) => {
                 let (case_idx, case) = variant_type
                     .cases
@@ -182,6 +197,7 @@ impl Value {
                         }),
                 })
             },
+            | (_, Value::Pointer(_)) => panic!(),
             | (_, Value::Variant(_)) => panic!(),
         }
     }
