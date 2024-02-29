@@ -110,6 +110,7 @@ impl Prog {
         };
 
         self.call_store.end_call(CallResult {
+            func: func.name.as_str().to_owned(),
             errno,
             params: func
                 .params

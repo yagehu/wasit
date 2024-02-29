@@ -673,6 +673,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "wazzi"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "wazzi-executor",
+ "wazzi-runners",
+ "wazzi-wasi",
+ "wazzi-witx",
+]
+
+[[package]]
 name = "wazzi-compile-time"
 version = "0.1.0"
 

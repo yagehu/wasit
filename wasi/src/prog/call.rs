@@ -78,6 +78,7 @@ impl CallStore {
                 .create_new(true)
                 .open(action_dir.join(OnDiskCall::MAIN_JSON_PATH))?,
             &Call {
+                func:    result.func,
                 errno:   result.errno,
                 params:  result.params,
                 results: result.results,
@@ -138,6 +139,7 @@ impl OnDiskCall {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct CallResult {
+    pub func:    String,
     pub errno:   Option<i32>,
     pub params:  Vec<Value>,
     pub results: Vec<Value>,
@@ -146,6 +148,7 @@ pub struct CallResult {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct Call {
+    pub func:    String,
     pub errno:   Option<i32>,
     pub params:  Vec<Value>,
     pub results: Vec<Value>,
