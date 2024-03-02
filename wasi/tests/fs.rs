@@ -1,15 +1,16 @@
 mod common;
 
-// use crate::common::{get_seed, run, run_seed, spec};
+use crate::common::{get_seed, run, run_seed, spec};
 
-// #[test]
-// fn creat() {
-//     let run = run_seed("00-creat.json");
-//     let prog = run.result.expect(&run.stderr).finish(&spec());
+#[test]
+fn creat() {
+    let run = run_seed("00-creat.json");
+    let prog = run.result.expect(&run.stderr);
+    let call = prog.call_store().last().unwrap().unwrap().read().unwrap();
 
-//     assert_eq!(prog.calls.last().unwrap().errno, Some(0));
-//     assert!(run.base_dir.path().join("a").exists());
-// }
+    assert_eq!(call.errno, Some(0));
+    assert!(run.base_dir.path().join("a").exists());
+}
 
 // #[test]
 // fn write() {

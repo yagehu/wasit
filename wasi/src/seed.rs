@@ -156,8 +156,12 @@ impl Value {
     fn into_prog_value(self, ty: &witx::Type, resource_ctx: &ResourceContext) -> prog::Value {
         match (ty, self) {
             | (_, Value::Builtin(builtin)) => prog::Value::Builtin(builtin.into()),
-            | (_, Value::String(_)) => todo!(),
-            | (_, Value::Bitflags(_)) => todo!(),
+            | (_, Value::String(string)) => prog::Value::String(string),
+            | (witx::Type::Record(record_type), Value::Bitflags(bitflags))
+                if record_type.bitflags_repr().is_some() =>
+            {
+                prog::Value::Bitflags(bitflags)
+            },
             | (_, Value::Record(_)) => todo!(),
             | (_, Value::List(_)) => todo!(),
             | (_, Value::ConstPointer(_)) => todo!(),
@@ -197,6 +201,7 @@ impl Value {
                         }),
                 })
             },
+            | (_, Value::Bitflags(_)) => panic!(),
             | (_, Value::Pointer(_)) => panic!(),
             | (_, Value::Variant(_)) => panic!(),
         }
@@ -247,6 +252,15 @@ pub enum StringValue {
     Bytes(Vec<u8>),
 }
 
+impl From<StringValue> for Vec<u8> {
+    fn from(x: StringValue) -> Self {
+        match x {
+            | StringValue::Utf8(string) => string.into_bytes(),
+            | StringValue::Bytes(bytes) => bytes,
+        }
+    }
+}
+
 impl From<Vec<u8>> for StringValue {
     fn from(x: Vec<u8>) -> Self {
         match String::from_utf8(x) {
@@ -265,6 +279,15 @@ pub struct BitflagsValue(pub Vec<BitflagsMemberValue>);
 pub struct BitflagsMemberValue {
     pub name:  String,
     pub value: bool,
+}
+
+impl From<executor_pb::value::bitflags::Member> for BitflagsMemberValue {
+    fn from(x: executor_pb::value::bitflags::Member) -> Self {
+        Self {
+            name:  x.name,
+            value: x.value,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]

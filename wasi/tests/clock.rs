@@ -1,6 +1,6 @@
 mod common;
 
-use crate::common::{run_seed, spec};
+use crate::common::run_seed;
 
 #[test]
 fn clock() {

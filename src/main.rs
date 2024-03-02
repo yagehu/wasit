@@ -43,7 +43,7 @@ fn main() {
     let base_dir = PathBuf::from("abc");
     let wasmtime = wazzi_runners::Wasmtime::new("wasmtime");
     let stderr = Arc::new(Mutex::new(Vec::new()));
-    let executor = ExecutorRunner::new(wasmtime, executor_bin(), None)
+    let executor = ExecutorRunner::new(wasmtime, executor_bin(), Some(PathBuf::from("abc")))
         .run(stderr.clone())
         .expect("failed to run executor");
 

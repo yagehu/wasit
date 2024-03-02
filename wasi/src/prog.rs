@@ -109,6 +109,8 @@ impl Prog {
             | _ => panic!(),
         };
 
+        std::thread::sleep(std::time::Duration::from_secs(1));
+
         self.call_store.end_call(CallResult {
             func: func.name.as_str().to_owned(),
             errno,
@@ -146,8 +148,10 @@ impl Prog {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum Value {
+    Bitflags(seed::BitflagsValue),
     Variant(VariantValue),
     Handle(u32),
+    String(seed::StringValue),
     Pointer(Vec<Value>),
     Builtin(seed::BuiltinValue),
 }
@@ -157,9 +161,9 @@ impl Value {
         match tref.type_().as_ref() {
             | witx::Type::Record(_) => todo!(),
             | witx::Type::Variant(_) => todo!(),
-            | witx::Type::Handle(_) => todo!(),
+            | witx::Type::Handle(_) => Self::Handle(0),
             | witx::Type::List(_) => todo!(),
-            | witx::Type::Pointer(tref) => Self::Pointer(vec![]),
+            | witx::Type::Pointer(_tref) => Self::Pointer(vec![]),
             | witx::Type::ConstPointer(_) => todo!(),
             | witx::Type::Builtin(builtin) => Self::Builtin(match builtin {
                 | witx::BuiltinType::Char => todo!(),
@@ -179,6 +183,29 @@ impl Value {
 
     pub fn into_pb_value(self, ty: &witx::Type) -> executor_pb::Value {
         let which = match (ty, self) {
+            | (witx::Type::Record(record_type), Value::Bitflags(bitflags))
+                if record_type.bitflags_repr().is_some() =>
+            {
+                executor_pb::value::Which::Bitflags(executor_pb::value::Bitflags {
+                    repr:           match record_type.bitflags_repr().unwrap() {
+                        | witx::IntRepr::U8 => executor_pb::IntRepr::U8,
+                        | witx::IntRepr::U16 => executor_pb::IntRepr::U16,
+                        | witx::IntRepr::U32 => executor_pb::IntRepr::U32,
+                        | witx::IntRepr::U64 => executor_pb::IntRepr::U64,
+                    }
+                    .into(),
+                    members:        bitflags
+                        .0
+                        .into_iter()
+                        .map(|member| executor_pb::value::bitflags::Member {
+                            name:           member.name,
+                            value:          member.value,
+                            special_fields: Default::default(),
+                        })
+                        .collect(),
+                    special_fields: Default::default(),
+                })
+            },
             | (witx::Type::Variant(variant_type), Value::Variant(variant)) => {
                 let (case_idx, case) = variant_type
                     .cases
@@ -214,6 +241,7 @@ impl Value {
                 }))
             },
             | (_, Value::Handle(handle)) => executor_pb::value::Which::Handle(handle),
+            | (_, Value::String(string)) => executor_pb::value::Which::String(string.into()),
             | (witx::Type::Pointer(tref), Value::Pointer(values)) => {
                 executor_pb::value::Which::Pointer(executor_pb::value::Array {
                     items:          values
@@ -225,6 +253,7 @@ impl Value {
                 })
             },
             | (_, Value::Builtin(builtin)) => executor_pb::value::Which::Builtin(builtin.into()),
+            | (_, Value::Bitflags(_)) => panic!(),
             | (_, Value::Variant(_)) => panic!(),
             | (_, Value::Pointer(_)) => panic!(),
         };
@@ -238,8 +267,18 @@ impl Value {
     fn from_pb_value(x: executor_pb::Value, ty: &witx::Type) -> Self {
         match (ty, x.which.unwrap()) {
             | (_, executor_pb::value::Which::Builtin(builtin)) => Self::Builtin(builtin.into()),
-            | (_, executor_pb::value::Which::String(_)) => todo!(),
-            | (_, executor_pb::value::Which::Bitflags(_)) => todo!(),
+            | (_, executor_pb::value::Which::String(string)) => {
+                Self::String(seed::StringValue::from(string))
+            },
+            | (_, executor_pb::value::Which::Bitflags(bitflags)) => {
+                Self::Bitflags(seed::BitflagsValue(
+                    bitflags
+                        .members
+                        .into_iter()
+                        .map(seed::BitflagsMemberValue::from)
+                        .collect(),
+                ))
+            },
             | (_, executor_pb::value::Which::Handle(handle)) => Self::Handle(handle),
             | (_, executor_pb::value::Which::Array(_)) => todo!(),
             | (_, executor_pb::value::Which::Record(_)) => todo!(),
@@ -325,6 +364,8 @@ pub(crate) fn register_resource_rec(
         // | (_, Value::Record(_)) => unreachable!(),
         // | (_, Value::ConstPointer(_)) => todo!(),
         // | (_, Value::List(_)) => todo!(),
+        | (witx::Type::Record(record_type), Value::Bitflags(_))
+            if record_type.bitflags_repr().is_some() => {},
         | (witx::Type::Variant(variant_type), Value::Variant(variant)) => {
             let case_type = variant_type.cases.get(variant.idx as usize).unwrap();
 
@@ -333,8 +374,10 @@ pub(crate) fn register_resource_rec(
             }
         },
         | (_, Value::Handle(_)) => (),
+        | (_, Value::String(_)) => (),
         | (_, Value::Pointer(_)) => unimplemented!(),
         | (_, Value::Builtin(_)) => (),
+        | (_, Value::Bitflags(_)) => panic!(),
         | (_, Value::Variant(_)) => panic!(),
     }
 }
