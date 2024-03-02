@@ -1,6 +1,7 @@
 use std::{fmt, fs, io, path::PathBuf};
 
 use color_eyre::eyre::{self, eyre as err, Context, ContextCompat};
+use nom::combinator::all_consuming;
 use serde::{Deserialize, Serialize};
 use strace::{parse::Trace, Strace};
 
@@ -61,29 +62,22 @@ impl CallStore {
 
         let trace_content = fs::read_to_string(action_dir.join(OnDiskCall::STRACE_PATH))
             .wrap_err("failed to read trace file")?;
-        let trace = match strace::parse::trace(&trace_content) {
-            | Ok((_rest, trace)) => trace,
-            | Err(_err) => {
-                let trace_content = trace_content.rsplitn(2, '\n').nth(1).unwrap_or_default();
-                let (_rest, trace) = strace::parse::trace(trace_content)
-                    .map_err(|_e| err!("failed to parse trace"))?;
-
-                trace
-            },
-        };
+        let (_rest, trace) = all_consuming(Trace::parse)(&trace_content)
+            .map_err(|_| err!("failed to parse trace"))?;
 
         serde_json::to_writer_pretty(
             fs::OpenOptions::new()
                 .write(true)
                 .create_new(true)
-                .open(action_dir.join(OnDiskCall::MAIN_JSON_PATH))?,
-            &Call {
-                func:    result.func,
-                errno:   result.errno,
-                params:  result.params,
-                results: result.results,
-                trace:   trace,
-            },
+                .open(action_dir.join(OnDiskCall::RESULT_JSON_PATH))?,
+            &result,
+        )?;
+        serde_json::to_writer_pretty(
+            fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(action_dir.join(OnDiskCall::TRACE_JSON_PATH))?,
+            &trace,
         )?;
 
         self.next_idx += 1;
@@ -117,7 +111,8 @@ pub struct OnDiskCall {
 }
 
 impl OnDiskCall {
-    pub(crate) const MAIN_JSON_PATH: &'static str = "main.json";
+    pub(crate) const RESULT_JSON_PATH: &'static str = "result.json";
+    pub(crate) const TRACE_JSON_PATH: &'static str = "trace.json";
     pub(crate) const STRACE_PATH: &'static str = "strace";
 
     pub fn with_existing_directory(path: PathBuf) -> Result<Self, io::Error> {
@@ -126,10 +121,10 @@ impl OnDiskCall {
         })
     }
 
-    pub fn read(&self) -> Result<Call, io::Error> {
+    pub fn read_result(&self) -> Result<CallResult, io::Error> {
         let f = fs::OpenOptions::new()
             .read(true)
-            .open(&self.path.join(Self::MAIN_JSON_PATH))?;
+            .open(&self.path.join(Self::RESULT_JSON_PATH))?;
         let call = serde_json::from_reader(f)?;
 
         Ok(call)
@@ -143,14 +138,4 @@ pub struct CallResult {
     pub errno:   Option<i32>,
     pub params:  Vec<Value>,
     pub results: Vec<Value>,
-}
-
-#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct Call {
-    pub func:    String,
-    pub errno:   Option<i32>,
-    pub params:  Vec<Value>,
-    pub results: Vec<Value>,
-    pub trace:   Trace,
 }

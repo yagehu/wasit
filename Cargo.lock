@@ -753,6 +753,7 @@ version = "0.1.0"
 dependencies = [
  "arbitrary",
  "color-eyre",
+ "nom",
  "once_cell",
  "protobuf",
  "serde",

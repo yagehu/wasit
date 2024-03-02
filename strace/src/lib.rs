@@ -2,7 +2,7 @@ pub mod parse;
 
 use std::{
     fs,
-    io::{self, BufRead, BufReader, Stderr},
+    io::{self, BufRead, BufReader},
     path::Path,
     process,
     thread,

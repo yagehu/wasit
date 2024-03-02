@@ -6,7 +6,13 @@ use crate::common::{get_seed, run, run_seed, spec};
 fn creat() {
     let run = run_seed("00-creat.json");
     let prog = run.result.expect(&run.stderr);
-    let call = prog.call_store().last().unwrap().unwrap().read().unwrap();
+    let call = prog
+        .call_store()
+        .last()
+        .unwrap()
+        .unwrap()
+        .read_result()
+        .unwrap();
 
     assert_eq!(call.errno, Some(0));
     assert!(run.base_dir.path().join("a").exists());

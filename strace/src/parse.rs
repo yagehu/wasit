@@ -187,7 +187,6 @@ impl ThreadEvent {
             let (input, args) = separated_list0(char(','), ws(Arg::parse))(input)?;
             let (input, _) = opt(ws(char(',')))(input)?;
 
-            eprintln!("whoa {input}");
             if peek(unfinished_tag)(input).is_ok() {
                 let (input, _) = ws(unfinished_tag).parse(input)?;
 

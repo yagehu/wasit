@@ -66,10 +66,12 @@ impl Seed {
                             .collect(),
                     )?;
 
-                    let call_data = prog.call_store().last()?.unwrap().read()?;
+                    let call_result = prog.call_store().last()?.unwrap().read_result()?;
 
-                    for ((result_tref, result), result_spec) in
-                        result_trefs.iter().zip(call_data.results).zip(call.results)
+                    for ((result_tref, result), result_spec) in result_trefs
+                        .iter()
+                        .zip(call_result.results)
+                        .zip(call.results)
                     {
                         if let ResultSpec::Resource(id) = result_spec {
                             prog::register_resource_rec(

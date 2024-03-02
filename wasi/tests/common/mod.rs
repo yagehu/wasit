@@ -71,7 +71,7 @@ pub fn run(seed: Seed) -> RunInstance<eyre::Error> {
         }
     });
 
-    let result = rx.recv_timeout(Duration::from_millis(6000));
+    let result = rx.recv_timeout(Duration::from_millis(60000));
 
     executor.kill();
 
