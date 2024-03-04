@@ -17,7 +17,7 @@ use nom::{
         space1,
     },
     combinator::{fail, map, map_res, opt, peek, recognize},
-    multi::{many0_count, separated_list0, separated_list1},
+    multi::{many0_count, separated_list0},
     sequence::{self, delimited, pair, separated_pair, tuple},
     AsChar,
     Parser,
@@ -52,51 +52,46 @@ impl Trace {
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
-#[serde(rename_all = "snake_case")]
-pub enum CallResult {
-    Ok(RetValue),
-    Err { ret: i64, errno: Errno },
+#[serde(deny_unknown_fields)]
+pub struct CallResult {
+    pub ret:     Value,
+    pub decoded: Option<DecodedRetValue>,
+}
+
+impl CallResult {
+    fn parse(input: &str) -> nom::IResult<&str, Self> {
+        let (input, ret) = Value::parse(input)?;
+        let (input, decoded) =
+            opt(ws(delimited(char('('), DecodedRetValue::parse, char(')'))))(input)?;
+
+        Ok((input, Self { ret, decoded }))
+    }
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(rename_all = "snake_case")]
-pub enum RetValue {
-    Int(i64),
-    Addr(u64),
+pub enum DecodedRetValue {
+    Errno(Errno),
+    Flags(FlagSet),
 }
 
-impl RetValue {
+impl DecodedRetValue {
     fn parse(input: &str) -> nom::IResult<&str, Self> {
-        if peek(hex)(input).is_ok() {
-            let (input, value) = hex(input)?;
+        if peek(errno)(input).is_ok() {
+            let (input, errno) = errno(input)?;
 
-            Ok((input, Self::Addr(value)))
+            Ok((input, Self::Errno(errno)))
         } else {
-            let (input, value) = int64(input)?;
+            let (input, _) = ws(tag("flags"))(input)?;
+            let (input, flag_set) = FlagSet::parse(input)?;
 
-            Ok((input, Self::Int(value)))
+            Ok((input, Self::Flags(flag_set)))
         }
     }
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 pub struct Errno(String);
-
-fn call_result(input: &str) -> nom::IResult<&str, CallResult> {
-    let (input, ret_val) = RetValue::parse(input)?;
-
-    match errno(input) {
-        | Ok((input, errno)) => {
-            let ret = match ret_val {
-                | RetValue::Int(i) => i,
-                | RetValue::Addr(_) => panic!(),
-            };
-
-            Ok((input, CallResult::Err { ret, errno }))
-        },
-        | Err(_err) => Ok((input, CallResult::Ok(ret_val))),
-    }
-}
 
 fn errno(input: &str) -> nom::IResult<&str, Errno> {
     let (input, (errno, _, _)) =
@@ -121,6 +116,17 @@ fn exit_status(input: &str) -> nom::IResult<&str, u32> {
         }),
         tag(" +++"),
     )(input)
+}
+
+fn oct(input: &str) -> nom::IResult<&str, u64> {
+    let (input, (_, value)) = pair(
+        char('0'),
+        map_res(take_while1(|c: char| c.is_oct_digit()), |s| {
+            u64::from_str_radix(s, 8)
+        }),
+    )(input)?;
+
+    Ok((input, value))
 }
 
 fn int32(input: &str) -> nom::IResult<&str, i32> {
@@ -172,7 +178,7 @@ impl ThreadEvent {
             let (input, func) = ws(resumed_tag).parse(input)?;
             let (input, args) = separated_list0(char(','), ws(Arg::parse))(input)?;
             let (input, (_, _, call_result)) =
-                tuple((ws(char(')')), ws(char('=')), ws(call_result)))(input)?;
+                tuple((ws(char(')')), ws(char('=')), ws(CallResult::parse)))(input)?;
 
             Ok((
                 input,
@@ -211,7 +217,7 @@ impl ThreadEvent {
                 ))
             } else {
                 let (input, (_, _, call_result)) =
-                    tuple((ws(char(')')), ws(char('=')), ws(call_result)))(input)?;
+                    tuple((ws(char(')')), ws(char('=')), ws(CallResult::parse)))(input)?;
 
                 Ok((
                     input,
@@ -304,10 +310,12 @@ impl Arg {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum Value {
+    Oct(u64),
     Int(i64),
     Addr(u64),
+    Call(CallValue),
     Ident(String),
-    Union(Vec<String>),
+    FlagSet(FlagSet),
     String(StringValue),
     Record(RecordValue),
     List(Vec<Value>),
@@ -320,19 +328,30 @@ impl Value {
             let (input, value) = ws(hex).parse(input)?;
 
             Ok((input, Self::Addr(value)))
-        } else if peek(ident)(input).is_ok() {
-            let (input, idents) = separated_list1(char('|'), ws(is_not("| ,)}")))(input)?;
+        } else if peek(CallValue::parse)(input).is_ok() {
+            let (input, value) = ws(CallValue::parse).parse(input)?;
 
-            if idents.len() == 1 {
-                Ok((input, Self::Ident(idents[0].to_owned())))
+            Ok((input, Self::Call(value)))
+        } else if peek(ident)(input).is_ok() {
+            // Parse the first ident.
+            let (input_, ident) = ws(ident)(input)?;
+
+            if peek(ws(char::<&str, nom::error::Error<_>>('|')))(input_).is_ok() {
+                // This is actually a flag set.
+                let (input, flag_set) = ws(FlagSet::parse)(input)?;
+
+                Ok((input, Self::FlagSet(flag_set)))
             } else {
-                Ok((
-                    input,
-                    Self::Union(idents.into_iter().map(ToOwned::to_owned).collect()),
-                ))
+                Ok((input_, Self::Ident(ident.to_owned())))
             }
+        } else if peek(oct)(input).is_ok() {
+            let (input, value) = oct(input)?;
+
+            Ok((input, Self::Oct(value)))
         } else if peek(int64)(input).is_ok() {
             let (input, value) = int64(input)?;
+            let (input, _) =
+                opt(ws(delimited(tag("/*"), take_until("*/"), tag("*/")))).parse(input)?;
 
             Ok((input, Self::Int(value)))
         } else if peek(StringValue::parse)(input).is_ok() {
@@ -340,8 +359,11 @@ impl Value {
 
             Ok((input, Self::String(s)))
         } else if peek(char::<&str, nom::error::Error<_>>('['))(input).is_ok() {
-            let (input, values) =
-                delimited(char('['), separated_list0(space1, Value::parse), char(']'))(input)?;
+            let (input, values) = delimited(
+                char('['),
+                separated_list0(alt((space1, tag(", "))), Value::parse),
+                char(']'),
+            )(input)?;
 
             Ok((input, Self::List(values)))
         } else if peek(char::<&str, nom::error::Error<_>>('~'))(input).is_ok() {
@@ -364,6 +386,52 @@ impl Value {
         } else {
             fail(input)
         }
+    }
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct FlagSet(Vec<String>);
+
+impl FlagSet {
+    fn parse(input: &str) -> nom::IResult<&str, Self> {
+        let (input, values) = separated_list0(
+            char('|'),
+            take_while1(|c: char| c.is_alphanumeric() || c == '_'),
+        )(input)?;
+
+        Ok((
+            input,
+            Self(values.into_iter().map(ToOwned::to_owned).collect()),
+        ))
+    }
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct CallValue {
+    pub func: String,
+    pub args: Vec<Value>,
+}
+
+impl CallValue {
+    fn parse(input: &str) -> nom::IResult<&str, Self> {
+        let (input, (func, args)) = pair(
+            ident,
+            delimited(
+                char('('),
+                separated_list0(char(','), ws(Value::parse)),
+                char(')'),
+            ),
+        )(input)?;
+
+        Ok((
+            input,
+            Self {
+                func: func.to_owned(),
+                args,
+            },
+        ))
     }
 }
 
@@ -431,7 +499,9 @@ impl RecordMember {
 
 /// A combinator that takes a parser `inner` and produces a parser that also consumes both leading and
 /// trailing whitespace, returning the output of `inner`.
-fn ws<'a, F, O, E: nom::error::ParseError<&'a str>>(inner: F) -> impl Parser<&'a str, O, E>
+fn ws<'a, F, O, E: nom::error::ParseError<&'a str>>(
+    inner: F,
+) -> impl FnMut(&'a str) -> nom::IResult<&'a str, O, E>
 where
     F: Parser<&'a str, O, E>,
 {
@@ -485,11 +555,11 @@ mod tests {
             (
                 "O_RDONLY|O_NONBLOCK|O_LARGEFILE",
                 Arg {
-                    value:   Value::Union(vec![
+                    value:   Value::FlagSet(FlagSet(vec![
                         "O_RDONLY".to_owned(),
                         "O_NONBLOCK".to_owned(),
                         "O_LARGEFILE".to_owned(),
-                    ]),
+                    ])),
                     changed: None,
                 },
             ),
@@ -574,10 +644,11 @@ mod tests {
         15805 epoll_wait(3,  <unfinished ...>
         15808 <... read resumed>""..., 8192)    = 1383
         15821 sched_getaffinity(15821, 32, [0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15]) = 8
+        12812 readv(0, [{iov_base=""..., iov_len=7}, {iov_base=""..., iov_len=1024}], 2) = 1031
         "#;
 
         let (_rest, trace) = all_consuming(Trace::parse)(lines).unwrap();
 
-        assert_eq!(trace.events.len(), 5);
+        assert_eq!(trace.events.len(), 6, "{:#?}", trace);
     }
 }

@@ -1,10 +1,14 @@
 use std::{fs, path::PathBuf};
 
 use nom::combinator::all_consuming;
-use strace::parse::{self, Trace};
+use strace::parse::Trace;
 
 #[test]
 fn parse() {
-    let trace_content = fs::read_to_string(PathBuf::from("testdata").join("01")).unwrap();
-    let (_rest, _trace) = all_consuming(Trace::parse)(&trace_content).unwrap();
+    let cases = vec!["01", "02"];
+
+    for (_i, case) in cases.into_iter().enumerate() {
+        let trace_content = fs::read_to_string(PathBuf::from("testdata").join(case)).unwrap();
+        let (_rest, _trace) = all_consuming(Trace::parse)(&trace_content).unwrap();
+    }
 }

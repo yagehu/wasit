@@ -7,3 +7,6 @@
 [submodule "wasi-sdk/upstream"]
 	path = wasi-sdk/upstream
 	url = https://github.com/yagehu/wasi-sdk
+[submodule "runtimes/wasm-micro-runtime"]
+	path = runtimes/wasm-micro-runtime
+	url = https://github.com/bytecodealliance/wasm-micro-runtime.git

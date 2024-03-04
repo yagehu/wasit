@@ -60,3 +60,42 @@ impl WasiRunner for Wasmtime<'_> {
         command
     }
 }
+
+#[derive(Clone, Debug)]
+pub struct Wamr<'p> {
+    path: &'p str,
+}
+
+impl<'p> Wamr<'p> {
+    pub fn new(path: &'p str) -> Self {
+        Self { path }
+    }
+
+    fn mount_base_dir(&self, dir: Option<PathBuf>) -> Vec<OsString> {
+        match dir {
+            | Some(dir) => vec![OsString::from(format!("--dir={}", dir.display()))],
+            | None => Vec::new(),
+        }
+    }
+}
+
+impl WasiRunner for Wamr<'_> {
+    fn base_dir_fd(&self) -> u32 {
+        3
+    }
+
+    fn prepare_command(&self, wasm_path: PathBuf, base_dir: Option<PathBuf>) -> process::Command {
+        let mut command = process::Command::new(self.path);
+        let mut args = vec![];
+
+        args.extend(self.mount_base_dir(base_dir));
+        args.push(wasm_path.into());
+
+        command.args(args);
+        command.stdin(process::Stdio::piped());
+        command.stdout(process::Stdio::piped());
+        command.stderr(process::Stdio::piped());
+
+        command
+    }
+}
