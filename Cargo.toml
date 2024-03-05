@@ -57,4 +57,5 @@ wazzi-wasi.workspace = true
 wazzi-witx.workspace = true
 
 color-eyre.workspace = true
+git2.workspace = true
 serde_json.workspace = true

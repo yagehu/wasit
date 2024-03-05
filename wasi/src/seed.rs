@@ -16,12 +16,12 @@ pub struct Seed {
 }
 
 impl Seed {
-    pub fn execute(
+    pub fn execute<'s>(
         self,
         spec: &witx::Document,
-        store: ExecutionStore,
+        store: &'s mut ExecutionStore,
         executor: RunningExecutor,
-    ) -> Result<Prog, eyre::Error> {
+    ) -> Result<Prog<'s>, eyre::Error> {
         let base_dir_fd = executor.base_dir_fd();
         let mut prog = Prog::new(executor, store)?;
         let module_spec = spec

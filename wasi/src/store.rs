@@ -1,4 +1,8 @@
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    mem,
+    path::{Path, PathBuf},
+};
 
 use color_eyre::eyre::{self, Context};
 
@@ -6,23 +10,20 @@ use crate::prog::call::CallRecorder;
 
 #[derive(Debug)]
 pub struct ExecutionStore {
-    root:     PathBuf,
+    root:     Box<Path>,
     recorder: CallRecorder,
 }
 
+impl Drop for ExecutionStore {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.root);
+    }
+}
+
 impl ExecutionStore {
-    pub fn new(
-        root: PathBuf,
-        runtime_version: &str,
-        executor_pid: u32,
-    ) -> Result<Self, eyre::Error> {
-        let root = root.canonicalize()?;
+    pub fn new(root: &Path, runtime_version: &str, executor_pid: u32) -> Result<Self, eyre::Error> {
+        let root = root.canonicalize()?.into_boxed_path();
         let calls_dir = root.join("calls");
-        // let repo = git2::Repository::open(repo_path).wrap_err("failed to open runtime repo")?;
-        // let head_ref = repo.head().wrap_err("failed to get head reference")?;
-        // let head_commit = head_ref
-        //     .peel_to_commit()
-        //     .wrap_err("failed to get commit for head ref")?;
 
         fs::write(root.join("version"), runtime_version)?;
 
@@ -30,6 +31,15 @@ impl ExecutionStore {
             .wrap_err("failed to instantiate call recorder")?;
 
         Ok(Self { root, recorder })
+    }
+
+    pub fn into_path(self) -> PathBuf {
+        // Prevent the Drop impl from being called.
+        let mut this = mem::ManuallyDrop::new(self);
+
+        // Replace this.path with an empty Box, since an empty Box does not
+        // allocate any heap memory.
+        mem::replace(&mut this.root, PathBuf::new().into_boxed_path()).into()
     }
 
     pub fn prog_path(&self) -> PathBuf {

@@ -857,6 +857,7 @@ name = "wazzi"
 version = "0.1.0"
 dependencies = [
  "color-eyre",
+ "git2",
  "serde_json",
  "wazzi-executor",
  "wazzi-runners",
