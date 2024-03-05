@@ -1,13 +1,14 @@
 mod common;
 
-use crate::common::{get_seed, run, run_seed, spec};
+use crate::common::run_seed;
 
 #[test]
 fn creat() {
     let run = run_seed("00-creat.json");
     let prog = run.result.expect(&run.stderr);
     let call = prog
-        .call_store()
+        .store()
+        .recorder()
         .last()
         .unwrap()
         .unwrap()

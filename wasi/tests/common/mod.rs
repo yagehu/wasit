@@ -11,7 +11,7 @@ use std::{
 };
 use tempfile::{tempdir, TempDir};
 use wazzi_executor::ExecutorRunner;
-use wazzi_wasi::{prog::Prog, seed::Seed};
+use wazzi_wasi::{prog::Prog, seed::Seed, store::ExecutionStore};
 
 pub fn get_seed(name: &str) -> Seed {
     serde_json::from_reader(
@@ -65,7 +65,8 @@ pub fn run(seed: Seed) -> RunInstance<eyre::Error> {
         let path = base_dir.path().to_owned();
 
         move || {
-            let result = seed.execute(&spec(), path, executor);
+            let store = ExecutionStore::new(path, "test", executor.pid()).unwrap();
+            let result = seed.execute(&spec(), store, executor);
 
             tx.send(result).unwrap();
         }

@@ -1,14 +1,14 @@
 pub mod call;
 
-use std::{fs, io, path::PathBuf};
+use std::io;
 
 use color_eyre::eyre;
 use serde::{Deserialize, Serialize};
 use wazzi_executor::RunningExecutor;
 use witx::Layout;
 
-use self::call::{CallResult, CallStore};
-use crate::{resource_ctx::ResourceContext, seed};
+use self::call::CallResult;
+use crate::{resource_ctx::ResourceContext, seed, store::ExecutionStore};
 
 fn pb_func(name: &str) -> executor_pb::WasiFunc {
     use executor_pb::WasiFunc::*;
@@ -56,24 +56,15 @@ fn pb_func(name: &str) -> executor_pb::WasiFunc {
 
 #[derive(Debug)]
 pub struct Prog {
-    root:         PathBuf,
-    call_store:   CallStore,
+    store:        ExecutionStore,
     executor:     RunningExecutor,
     resource_ctx: ResourceContext,
 }
 
 impl Prog {
-    pub fn with_existing_directory(
-        path: PathBuf,
-        executor: RunningExecutor,
-    ) -> Result<Self, io::Error> {
-        let actions_store_dir = path.join("actions");
-
-        fs::create_dir(&actions_store_dir)?;
-
+    pub fn new(executor: RunningExecutor, store: ExecutionStore) -> Result<Self, io::Error> {
         Ok(Self {
-            root: path.canonicalize()?,
-            call_store: CallStore::with_existing_directory(actions_store_dir, executor.pid())?,
+            store,
             executor,
             resource_ctx: ResourceContext::new(),
         })
@@ -85,7 +76,7 @@ impl Prog {
         params: Vec<Value>,
         results: Vec<Value>,
     ) -> Result<(), eyre::Error> {
-        self.call_store.begin_call()?;
+        self.store.recorder_mut().begin_call()?;
 
         let result_trefs = func.unpack_expected_result();
         let response = self.executor.call(executor_pb::request::Call {
@@ -111,7 +102,7 @@ impl Prog {
 
         std::thread::sleep(std::time::Duration::from_secs(1));
 
-        self.call_store.end_call(CallResult {
+        self.store.recorder_mut().end_call(CallResult {
             func: func.name.as_str().to_owned(),
             errno,
             params: func
@@ -132,16 +123,16 @@ impl Prog {
         Ok(())
     }
 
-    pub fn call_store(&self) -> &CallStore {
-        &self.call_store
-    }
-
     pub fn resource_ctx(&mut self) -> &ResourceContext {
         &self.resource_ctx
     }
 
     pub fn resource_ctx_mut(&mut self) -> &mut ResourceContext {
         &mut self.resource_ctx
+    }
+
+    pub fn store(&self) -> &ExecutionStore {
+        &self.store
     }
 }
 

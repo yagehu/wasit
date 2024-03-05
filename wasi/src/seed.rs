@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use color_eyre::eyre::{self, ContextCompat};
 use serde::{Deserialize, Serialize};
 use wazzi_executor::RunningExecutor;
@@ -7,6 +5,7 @@ use wazzi_executor::RunningExecutor;
 use crate::{
     prog::{self, Prog},
     resource_ctx::ResourceContext,
+    store::ExecutionStore,
 };
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
@@ -20,11 +19,11 @@ impl Seed {
     pub fn execute(
         self,
         spec: &witx::Document,
-        path: PathBuf,
+        store: ExecutionStore,
         executor: RunningExecutor,
     ) -> Result<Prog, eyre::Error> {
         let base_dir_fd = executor.base_dir_fd();
-        let mut prog = Prog::with_existing_directory(path, executor)?;
+        let mut prog = Prog::new(executor, store)?;
         let module_spec = spec
             .module(&witx::Id::new("wasi_snapshot_preview1"))
             .unwrap();
@@ -66,7 +65,7 @@ impl Seed {
                             .collect(),
                     )?;
 
-                    let call_result = prog.call_store().last()?.unwrap().read_result()?;
+                    let call_result = prog.store().recorder().last()?.unwrap().read_result()?;
 
                     for ((result_tref, result), result_spec) in result_trefs
                         .iter()

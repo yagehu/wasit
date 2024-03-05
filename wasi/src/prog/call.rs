@@ -1,4 +1,10 @@
-use std::{fmt, fs, io, path::PathBuf};
+use std::{
+    fmt,
+    fs,
+    io,
+    mem,
+    path::{Path, PathBuf},
+};
 
 use color_eyre::eyre::{self, eyre as err, Context, ContextCompat};
 use nom::combinator::all_consuming;
@@ -7,14 +13,14 @@ use strace::{parse::Trace, Strace};
 
 use super::Value;
 
-pub struct CallStore {
+pub struct CallRecorder {
     executor_pid: u32,
-    root:         PathBuf,
+    root:         Box<Path>,
     next_idx:     usize,
     recording:    Option<(usize, Strace)>,
 }
 
-impl fmt::Debug for CallStore {
+impl fmt::Debug for CallRecorder {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("CallStore")
             .field("executor_pid", &self.executor_pid)
@@ -25,21 +31,37 @@ impl fmt::Debug for CallStore {
     }
 }
 
-impl CallStore {
-    pub fn with_existing_directory(
-        path: PathBuf,
-        executor_pid: u32,
-    ) -> Result<CallStore, io::Error> {
+impl CallRecorder {
+    pub fn new(path: &Path, executor_pid: u32) -> Result<CallRecorder, io::Error> {
+        fs::create_dir(path)?;
+
+        let root = path.canonicalize()?;
+
         Ok(Self {
             executor_pid,
-            root: path.canonicalize()?,
+            root: root.into_boxed_path(),
             next_idx: 0,
             recording: None,
         })
     }
+
+    pub fn into_path(self) -> PathBuf {
+        // Prevent the Drop impl from being called.
+        let mut this = mem::ManuallyDrop::new(self);
+
+        // Replace this.path with an empty Box, since an empty Box does not
+        // allocate any heap memory.
+        mem::replace(&mut this.root, PathBuf::new().into_boxed_path()).into()
+    }
 }
 
-impl CallStore {
+impl Drop for CallRecorder {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.root);
+    }
+}
+
+impl CallRecorder {
     pub fn begin_call(&mut self) -> Result<(), io::Error> {
         let idx = self.next_idx;
         let dir = self.root.join(format!("{idx}"));

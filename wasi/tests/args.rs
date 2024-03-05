@@ -7,7 +7,8 @@ fn args() {
     let run = run_seed("02-args.json");
     let prog = run.result.expect(&run.stderr);
     let call = prog
-        .call_store()
+        .store()
+        .recorder()
         .last()
         .unwrap()
         .unwrap()

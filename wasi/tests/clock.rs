@@ -7,7 +7,8 @@ fn clock() {
     let run = run_seed("04-clock.json");
     let prog = run.result.expect(&run.stderr);
     let call = prog
-        .call_store()
+        .store()
+        .recorder()
         .last()
         .unwrap()
         .unwrap()
