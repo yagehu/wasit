@@ -13,3 +13,6 @@
 [submodule "runtimes/WasmEdge"]
 	path = runtimes/WasmEdge
 	url = git@github.com:yagehu/WasmEdge.git
+[submodule "runtimes/wasmer"]
+	path = runtimes/wasmer
+	url = git@github.com:yagehu/wasmer.git
