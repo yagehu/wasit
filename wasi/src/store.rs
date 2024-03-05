@@ -16,7 +16,7 @@ pub struct ExecutionStore {
 
 impl Drop for ExecutionStore {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.root);
+        // let _ = fs::remove_dir_all(&self.root);
     }
 }
 
@@ -40,6 +40,10 @@ impl ExecutionStore {
         // Replace this.path with an empty Box, since an empty Box does not
         // allocate any heap memory.
         mem::replace(&mut this.root, PathBuf::new().into_boxed_path()).into()
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.root
     }
 
     pub fn prog_path(&self) -> PathBuf {

@@ -1,4 +1,4 @@
-use color_eyre::eyre::{self, ContextCompat};
+use color_eyre::eyre::{self, Context, ContextCompat};
 use serde::{Deserialize, Serialize};
 use wazzi_executor::RunningExecutor;
 
@@ -19,11 +19,11 @@ impl Seed {
     pub fn execute<'s>(
         self,
         spec: &witx::Document,
-        store: &'s mut ExecutionStore,
+        store: ExecutionStore,
         executor: RunningExecutor,
-    ) -> Result<Prog<'s>, eyre::Error> {
+    ) -> Result<Prog, eyre::Error> {
         let base_dir_fd = executor.base_dir_fd();
-        let mut prog = Prog::new(executor, store)?;
+        let mut prog = Prog::new(executor, store).wrap_err("failed to init prog")?;
         let module_spec = spec
             .module(&witx::Id::new("wasi_snapshot_preview1"))
             .unwrap();

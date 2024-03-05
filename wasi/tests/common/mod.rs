@@ -39,54 +39,59 @@ fn executor_bin() -> PathBuf {
 }
 
 #[derive(Debug)]
-pub struct RunInstance<E> {
+pub struct RunInstance {
     pub base_dir: TempDir,
-    pub result:   Result<Prog, E>,
+    pub prog:     Prog,
     pub stderr:   String,
 }
 
-pub fn run_seed(name: &str) -> RunInstance<eyre::Error> {
+pub fn run_seed(name: &str) -> RunInstance {
     let seed = get_seed(name);
 
     run(seed)
 }
 
-pub fn run(seed: Seed) -> RunInstance<eyre::Error> {
+pub fn run(seed: Seed) -> RunInstance {
     let base_dir = tempdir().unwrap();
     let wasmtime = wazzi_runners::Wasmtime::new("wasmtime");
     let stderr = Arc::new(Mutex::new(Vec::new()));
     let executor = ExecutorRunner::new(wasmtime, executor_bin(), Some(base_dir.path().to_owned()))
         .run(stderr.clone())
         .expect("failed to run executor");
-    let (tx, rx) = mpsc::channel();
+    let path = base_dir.path().to_owned();
+    let store = ExecutionStore::new(&path, "test", executor.pid()).unwrap();
+    let run = thread::scope(|scope| {
+        let (tx, rx) = mpsc::channel();
 
-    thread::spawn({
-        let executor = executor.clone();
-        let path = base_dir.path().to_owned();
+        scope.spawn({
+            let executor = executor.clone();
 
-        move || {
-            let store = ExecutionStore::new(path, "test", executor.pid()).unwrap();
-            let result = seed.execute(&spec(), store, executor);
+            move || {
+                let prog = seed.execute(&spec(), store, executor).unwrap();
 
-            tx.send(result).unwrap();
+                prog.executor().kill();
+                tx.send(prog).unwrap();
+            }
+        });
+
+        let result = rx.recv_timeout(Duration::from_millis(60000));
+        let stderr = String::from_utf8(stderr.lock().unwrap().deref().clone()).unwrap();
+        let prog = match result {
+            | Ok(prog) => prog,
+            | Err(err) => panic!(
+                "Execution timeout or error.\nstderr:\n{}\nerr:\n{}",
+                stderr, err
+            ),
+        };
+
+        RunInstance {
+            base_dir,
+            prog,
+            stderr,
         }
     });
 
-    let result = rx.recv_timeout(Duration::from_millis(60000));
-
-    executor.kill();
-
-    let stderr = String::from_utf8(stderr.lock().unwrap().deref().clone()).unwrap();
-    let result = match result {
-        | Ok(result) => result,
-        | Err(err) => panic!("Execution timeout.\nstderr:\n{}\nerr:\n{}", stderr, err),
-    };
-
-    RunInstance {
-        base_dir,
-        result,
-        stderr,
-    }
+    run
 }
 
 pub fn spec() -> witx::Document {

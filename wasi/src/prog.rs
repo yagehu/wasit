@@ -55,17 +55,14 @@ fn pb_func(name: &str) -> executor_pb::WasiFunc {
 }
 
 #[derive(Debug)]
-pub struct Prog<'s> {
-    store:        &'s mut ExecutionStore,
+pub struct Prog {
+    store:        ExecutionStore,
     executor:     RunningExecutor,
     resource_ctx: ResourceContext,
 }
 
-impl<'s> Prog<'s> {
-    pub fn new(
-        executor: RunningExecutor,
-        store: &'s mut ExecutionStore,
-    ) -> Result<Self, io::Error> {
+impl Prog {
+    pub fn new(executor: RunningExecutor, store: ExecutionStore) -> Result<Self, io::Error> {
         Ok(Self {
             store,
             executor,
@@ -134,8 +131,16 @@ impl<'s> Prog<'s> {
         &mut self.resource_ctx
     }
 
-    pub fn store(&self) -> &ExecutionStore {
+    pub fn into_store(self) -> ExecutionStore {
         self.store
+    }
+
+    pub fn store(&self) -> &ExecutionStore {
+        &self.store
+    }
+
+    pub fn executor(&self) -> &RunningExecutor {
+        &self.executor
     }
 }
 

@@ -5,8 +5,8 @@ use crate::common::run_seed;
 #[test]
 fn creat() {
     let run = run_seed("00-creat.json");
-    let prog = run.result.expect(&run.stderr);
-    let call = prog
+    let call = run
+        .prog
         .store()
         .recorder()
         .last()

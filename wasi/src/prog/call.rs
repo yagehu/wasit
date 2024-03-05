@@ -57,7 +57,7 @@ impl CallRecorder {
 
 impl Drop for CallRecorder {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.root);
+        // let _ = fs::remove_dir_all(&self.root);
     }
 }
 
@@ -85,7 +85,7 @@ impl CallRecorder {
         let trace_content = fs::read_to_string(action_dir.join(OnDiskCall::STRACE_PATH))
             .wrap_err("failed to read trace file")?;
         let (_rest, trace) = all_consuming(Trace::parse)(&trace_content)
-            .map_err(|_| err!("failed to parse trace"))?;
+            .map_err(|e| err!("failed to parse trace {}", e.to_string()))?;
 
         serde_json::to_writer_pretty(
             fs::OpenOptions::new()

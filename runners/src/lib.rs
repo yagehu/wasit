@@ -62,6 +62,45 @@ impl WasiRunner for Wasmedge<'_> {
 }
 
 #[derive(Clone, Debug)]
+pub struct Wasmer<'p> {
+    path: &'p str,
+}
+
+impl<'p> Wasmer<'p> {
+    pub fn new(path: &'p str) -> Self {
+        Self { path }
+    }
+
+    fn mount_base_dir(&self, dir: Option<PathBuf>) -> Vec<OsString> {
+        match dir {
+            | Some(dir) => vec!["--mapdir".into(), format!(".:{}", dir.display()).into()],
+            | None => Vec::new(),
+        }
+    }
+}
+
+impl WasiRunner for Wasmer<'_> {
+    fn base_dir_fd(&self) -> u32 {
+        4
+    }
+
+    fn prepare_command(&self, wasm_path: PathBuf, base_dir: Option<PathBuf>) -> process::Command {
+        let mut command = process::Command::new(self.path);
+        let mut args = vec![OsString::from("run")];
+
+        args.extend(self.mount_base_dir(base_dir));
+        args.push(wasm_path.into());
+
+        command.args(args);
+        command.stdin(process::Stdio::piped());
+        command.stdout(process::Stdio::piped());
+        command.stderr(process::Stdio::piped());
+
+        command
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct Wasmtime<'p> {
     path: &'p str,
 }

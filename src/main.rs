@@ -62,17 +62,18 @@ fn main() -> Result<(), eyre::Error> {
                 let executor = ExecutorRunner::new(wamr, executor_bin(), Some(base_dir))
                     .run(stderr.clone())
                     .expect("failed to run executor");
-                let mut store = ExecutionStore::new(
+                let store = ExecutionStore::new(
                     &results_root.join("wamr"),
                     &get_commit_id(&PathBuf::from("runtimes").join("wasm-micro-runtime"))?,
                     executor.pid(),
                 )?;
 
-                seed.execute(&spec(), &mut store, executor.clone())
+                let prog = seed
+                    .execute(&spec(), store, executor.clone())
                     .wrap_err("failed to execute seed")?;
 
                 executor.kill();
-                store.into_path();
+                prog.into_store().into_path();
 
                 Ok(())
             }
@@ -93,17 +94,49 @@ fn main() -> Result<(), eyre::Error> {
                 let executor = ExecutorRunner::new(runtime, executor_bin(), Some(base_dir))
                     .run(stderr.clone())
                     .expect("failed to run executor");
-                let mut store = ExecutionStore::new(
+                let store = ExecutionStore::new(
                     &results_root.join("wasmedge"),
                     &get_commit_id(&PathBuf::from("runtimes").join("WasmEdge"))?,
                     executor.pid(),
                 )?;
 
-                seed.execute(&spec(), &mut store, executor.clone())
+                let prog = seed
+                    .execute(&spec(), store, executor.clone())
                     .wrap_err("failed to execute seed")?;
 
                 executor.kill();
-                store.into_path();
+                prog.into_store().into_path();
+
+                Ok(())
+            }
+        });
+        let wasmer = scope.spawn({
+            let seed = seed.clone();
+            let results_root = results_root.clone();
+
+            move || -> Result<(), eyre::Error> {
+                let result_dir = results_root.join("wasmer");
+                let base_dir = result_dir.join("base");
+
+                fs::create_dir(&result_dir)?;
+                fs::create_dir(&base_dir)?;
+
+                let stderr = Arc::new(Mutex::new(Vec::new()));
+                let runtime = wazzi_runners::Wasmer::new("wasmer");
+                let executor = ExecutorRunner::new(runtime, executor_bin(), Some(base_dir))
+                    .run(stderr.clone())
+                    .expect("failed to run executor");
+                let store = ExecutionStore::new(
+                    &results_root.join("wasmer"),
+                    &get_commit_id(&PathBuf::from("runtimes").join("wasmer"))?,
+                    executor.pid(),
+                )?;
+                let prog = seed
+                    .execute(&spec(), store, executor.clone())
+                    .wrap_err("failed to execute seed")?;
+
+                executor.kill();
+                prog.into_store().into_path();
 
                 Ok(())
             }
@@ -124,17 +157,18 @@ fn main() -> Result<(), eyre::Error> {
                 let executor = ExecutorRunner::new(wasmtime, executor_bin(), Some(base_dir))
                     .run(stderr.clone())
                     .expect("failed to run executor");
-                let mut store = ExecutionStore::new(
+                let store = ExecutionStore::new(
                     &results_root.join("wasmtime"),
                     &get_commit_id(&PathBuf::from("runtimes").join("wasmtime"))?,
                     executor.pid(),
                 )?;
 
-                seed.execute(&spec(), &mut store, executor.clone())
+                let prog = seed
+                    .execute(&spec(), store, executor.clone())
                     .wrap_err("failed to execute seed")?;
 
                 executor.kill();
-                store.into_path();
+                prog.into_store().into_path();
 
                 Ok(())
             }
@@ -143,6 +177,7 @@ fn main() -> Result<(), eyre::Error> {
         Ok((
             wamr.join().unwrap()?,
             wasmedge.join().unwrap()?,
+            wasmer.join().unwrap()?,
             wasmtime.join().unwrap()?,
         ))
     })?;

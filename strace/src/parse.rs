@@ -27,27 +27,16 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct Trace {
-    pub events:      Vec<ThreadEvent>,
-    pub exit_status: Option<u32>,
+    pub events: Vec<ThreadEvent>,
 }
 
 impl Trace {
     pub fn parse(input: &str) -> nom::IResult<&str, Self> {
         let (input, _) = multispace0(input)?;
-        let (input, (events, exit_status)) = ws(tuple((
-            separated_list0(newline, ws(ThreadEvent::parse)),
-            opt(exit_status),
-        )))
-        .parse(input)?;
+        let (input, events) = ws(separated_list0(newline, ws(ThreadEvent::parse)))(input)?;
         let (input, _) = multispace0(input)?;
 
-        Ok((
-            input,
-            Self {
-                events,
-                exit_status,
-            },
-        ))
+        Ok((input, Self { events }))
     }
 }
 
@@ -61,8 +50,7 @@ pub struct CallResult {
 impl CallResult {
     fn parse(input: &str) -> nom::IResult<&str, Self> {
         let (input, ret) = Value::parse(input)?;
-        let (input, decoded) =
-            opt(ws(delimited(char('('), DecodedRetValue::parse, char(')'))))(input)?;
+        let (input, decoded) = opt(ws(DecodedRetValue::parse))(input)?;
 
         Ok((input, Self { ret, decoded }))
     }
@@ -77,13 +65,16 @@ pub enum DecodedRetValue {
 
 impl DecodedRetValue {
     fn parse(input: &str) -> nom::IResult<&str, Self> {
-        if peek(errno)(input).is_ok() {
-            let (input, errno) = errno(input)?;
+        if peek(ws(errno))(input).is_ok() {
+            let (input, errno) = ws(errno)(input)?;
 
             Ok((input, Self::Errno(errno)))
         } else {
-            let (input, _) = ws(tag("flags"))(input)?;
-            let (input, flag_set) = FlagSet::parse(input)?;
+            let (input, (_, flag_set)) = ws(delimited(
+                char('('),
+                pair(tag("flags"), ws(FlagSet::parse)),
+                char(')'),
+            ))(input)?;
 
             Ok((input, Self::Flags(flag_set)))
         }
@@ -106,16 +97,6 @@ fn parens(input: &str) -> nom::IResult<&str, &str> {
 
 fn syscall_name(input: &str) -> nom::IResult<&str, &str> {
     ident(input)
-}
-
-fn exit_status(input: &str) -> nom::IResult<&str, u32> {
-    delimited(
-        tag("+++ exited with "),
-        map_res(take_while1(|c: char| c.is_ascii_digit()), |s: &str| {
-            s.parse::<u32>()
-        }),
-        tag(" +++"),
-    )(input)
 }
 
 fn oct(input: &str) -> nom::IResult<&str, u64> {
@@ -165,31 +146,94 @@ fn hex(input: &str) -> nom::IResult<&str, u64> {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct ThreadEvent {
-    pub pid:  i32,
-    pub func: String,
-    pub case: Event,
+    pub pid:   i32,
+    pub event: Event,
 }
 
 impl ThreadEvent {
-    pub fn parse(input: &str) -> nom::IResult<&str, Self> {
+    fn parse(input: &str) -> nom::IResult<&str, Self> {
         let (input, pid) = ws(int32).parse(input)?;
+        let (input, event) = ws(Event::parse)(input)?;
 
+        Ok((input, Self { pid, event }))
+    }
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum Event {
+    Exit(ExitThreadEvent),
+    Normal(NormalThreadEvent),
+}
+
+impl Event {
+    fn parse(input: &str) -> nom::IResult<&str, Self> {
+        if peek(ws(ExitThreadEvent::parse))(input).is_ok() {
+            let (input, event) = ws(ExitThreadEvent::parse)(input)?;
+
+            Ok((input, Self::Exit(event)))
+        } else {
+            let (input, event) = ws(NormalThreadEvent::parse)(input)?;
+
+            Ok((input, Self::Normal(event)))
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct ExitThreadEvent {
+    pub status: u32,
+}
+
+impl ExitThreadEvent {
+    fn parse(input: &str) -> nom::IResult<&str, Self> {
+        let (input, status) = delimited(
+            tag("+++ exited with "),
+            map_res(take_while1(|c: char| c.is_ascii_digit()), |s: &str| {
+                s.parse::<u32>()
+            }),
+            tag(" +++"),
+        )(input)?;
+
+        Ok((input, Self { status }))
+    }
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct NormalThreadEvent {
+    pub func: String,
+    pub case: NonExitEvent,
+}
+
+impl NormalThreadEvent {
+    pub fn parse(input: &str) -> nom::IResult<&str, Self> {
         if peek(resumed_tag)(input).is_ok() {
             let (input, func) = ws(resumed_tag).parse(input)?;
             let (input, args) = separated_list0(char(','), ws(Arg::parse))(input)?;
-            let (input, (_, _, call_result)) =
-                tuple((ws(char(')')), ws(char('=')), ws(CallResult::parse)))(input)?;
+            let (input, (_, _)) = tuple((ws(char(')')), ws(char('='))))(input)?;
+            let (input, call_result) =
+                if peek(ws(char::<&str, nom::error::Error<_>>('?')))(input).is_ok() {
+                    let (input, _) = ws(char('?'))(input)?;
+
+                    (input, None)
+                } else {
+                    let (input, call_result) = ws(CallResult::parse)(input)?;
+
+                    (input, Some(call_result))
+                };
 
             Ok((
                 input,
                 Self {
-                    pid,
                     func: func.to_owned(),
-                    case: Event::Resumed(FinishedEvent { args, call_result }),
+                    case: NonExitEvent::Resumed(FinishedEvent { args, call_result }),
                 },
             ))
         } else if peek(syscall_name)(input).is_ok() {
             let (input, (func, _)) = tuple((syscall_name, char('(')))(input)?;
+            let (input, _) = opt(ws(tag("<... resuming interrupted read ...>")))(input)?;
             let (input, args) = separated_list0(char(','), ws(Arg::parse))(input)?;
             let (input, _) = opt(ws(char(',')))(input)?;
 
@@ -199,9 +243,8 @@ impl ThreadEvent {
                 Ok((
                     input,
                     Self {
-                        pid,
                         func: func.to_owned(),
-                        case: Event::Unfinished(Unfinished { args }),
+                        case: NonExitEvent::Unfinished(Unfinished { args }),
                     },
                 ))
             } else if peek(detached_tag)(input).is_ok() {
@@ -210,21 +253,28 @@ impl ThreadEvent {
                 Ok((
                     input,
                     Self {
-                        pid,
                         func: func.to_owned(),
-                        case: Event::Detached(Unfinished { args }),
+                        case: NonExitEvent::Detached(Unfinished { args }),
                     },
                 ))
             } else {
-                let (input, (_, _, call_result)) =
-                    tuple((ws(char(')')), ws(char('=')), ws(CallResult::parse)))(input)?;
+                let (input, (_, _)) = tuple((ws(char(')')), ws(char('='))))(input)?;
+                let (input, call_result) =
+                    if peek(ws(char::<&str, nom::error::Error<_>>('?')))(input).is_ok() {
+                        let (input, _) = ws(char('?'))(input)?;
+
+                        (input, None)
+                    } else {
+                        let (input, call_result) = ws(CallResult::parse)(input)?;
+
+                        (input, Some(call_result))
+                    };
 
                 Ok((
                     input,
                     Self {
-                        pid,
                         func: func.to_owned(),
-                        case: Event::Complete(FinishedEvent { args, call_result }),
+                        case: NonExitEvent::Complete(FinishedEvent { args, call_result }),
                     },
                 ))
             }
@@ -236,7 +286,7 @@ impl ThreadEvent {
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(rename_all = "snake_case")]
-pub enum Event {
+pub enum NonExitEvent {
     Complete(FinishedEvent),
     Unfinished(Unfinished),
     Resumed(FinishedEvent),
@@ -253,7 +303,7 @@ pub struct Unfinished {
 #[serde(deny_unknown_fields)]
 pub struct FinishedEvent {
     pub args:        Vec<Arg>,
-    pub call_result: CallResult,
+    pub call_result: Option<CallResult>,
 }
 
 fn detached_tag(input: &str) -> nom::IResult<&str, ()> {
@@ -577,53 +627,59 @@ mod tests {
         let cases = vec![(
             r#"15807 futex(0x562811cdfee8, FUTEX_WAIT_BITSET_PRIVATE, 4294967295, NULL, FUTEX_BITSET_MATCH_ANY <unfinished ...>"#,
             ThreadEvent {
-                pid:  15807,
-                func: "futex".to_owned(),
-                case: Event::Unfinished(Unfinished {
-                    args: vec![
-                        Arg {
-                            value:   Value::Addr(94730097393384),
-                            changed: None,
-                        },
-                        Arg {
-                            value:   Value::Ident("FUTEX_WAIT_BITSET_PRIVATE".to_owned()),
-                            changed: None,
-                        },
-                        Arg {
-                            value:   Value::Int(4294967295),
-                            changed: None,
-                        },
-                        Arg {
-                            value:   Value::Ident("NULL".to_owned()),
-                            changed: None,
-                        },
-                        Arg {
-                            value:   Value::Ident("FUTEX_BITSET_MATCH_ANY".to_owned()),
-                            changed: None,
-                        },
-                    ],
+                pid:   15807,
+                event: Event::Normal(NormalThreadEvent {
+                    func: "futex".to_owned(),
+                    case: NonExitEvent::Unfinished(Unfinished {
+                        args: vec![
+                            Arg {
+                                value:   Value::Addr(94730097393384),
+                                changed: None,
+                            },
+                            Arg {
+                                value:   Value::Ident("FUTEX_WAIT_BITSET_PRIVATE".to_owned()),
+                                changed: None,
+                            },
+                            Arg {
+                                value:   Value::Int(4294967295),
+                                changed: None,
+                            },
+                            Arg {
+                                value:   Value::Ident("NULL".to_owned()),
+                                changed: None,
+                            },
+                            Arg {
+                                value:   Value::Ident("FUTEX_BITSET_MATCH_ANY".to_owned()),
+                                changed: None,
+                            },
+                        ],
+                    }),
                 }),
             },
             r#"15805 read(0, <unfinished ...>"#,
             ThreadEvent {
-                pid:  15805,
-                func: "read".to_owned(),
-                case: Event::Unfinished(Unfinished {
-                    args: vec![Arg {
-                        value:   Value::Int(0),
-                        changed: None,
-                    }],
+                pid:   15805,
+                event: Event::Normal(NormalThreadEvent {
+                    func: "read".to_owned(),
+                    case: NonExitEvent::Unfinished(Unfinished {
+                        args: vec![Arg {
+                            value:   Value::Int(0),
+                            changed: None,
+                        }],
+                    }),
                 }),
             },
             r#"15805 epoll_wait(3,  <unfinished ...>"#,
             ThreadEvent {
-                pid:  15805,
-                func: "epoll_wait".to_owned(),
-                case: Event::Unfinished(Unfinished {
-                    args: vec![Arg {
-                        value:   Value::Int(3),
-                        changed: None,
-                    }],
+                pid:   15805,
+                event: Event::Normal(NormalThreadEvent {
+                    func: "epoll_wait".to_owned(),
+                    case: NonExitEvent::Unfinished(Unfinished {
+                        args: vec![Arg {
+                            value:   Value::Int(3),
+                            changed: None,
+                        }],
+                    }),
                 }),
             },
         )];
@@ -645,10 +701,11 @@ mod tests {
         15808 <... read resumed>""..., 8192)    = 1383
         15821 sched_getaffinity(15821, 32, [0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15]) = 8
         12812 readv(0, [{iov_base=""..., iov_len=7}, {iov_base=""..., iov_len=1024}], 2) = 1031
+        89909 restart_syscall(<... resuming interrupted read ...> <unfinished ...>
         "#;
 
         let (_rest, trace) = all_consuming(Trace::parse)(lines).unwrap();
 
-        assert_eq!(trace.events.len(), 6, "{:#?}", trace);
+        assert_eq!(trace.events.len(), 7, "{:#?}", trace);
     }
 }
