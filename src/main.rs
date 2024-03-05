@@ -46,37 +46,6 @@ fn main() -> Result<(), eyre::Error> {
     let results_root = PathBuf::from("abc");
 
     thread::scope(|scope| -> Result<_, eyre::Error> {
-        let wasmtime = scope.spawn({
-            let seed = seed.clone();
-            let results_root = results_root.clone();
-
-            move || -> Result<(), eyre::Error> {
-                let result_dir = results_root.join("wasmtime");
-                let base_dir = result_dir.join("base");
-
-                fs::create_dir(&result_dir)?;
-                fs::create_dir(&base_dir)?;
-
-                let stderr = Arc::new(Mutex::new(Vec::new()));
-                let wasmtime = wazzi_runners::Wasmtime::new("wasmtime");
-                let executor = ExecutorRunner::new(wasmtime, executor_bin(), Some(base_dir))
-                    .run(stderr.clone())
-                    .expect("failed to run executor");
-                let mut store = ExecutionStore::new(
-                    &results_root.join("wasmtime"),
-                    &get_commit_id(&PathBuf::from("runtimes").join("wasmtime"))?,
-                    executor.pid(),
-                )?;
-
-                seed.execute(&spec(), &mut store, executor.clone())
-                    .wrap_err("failed to execute seed")?;
-
-                executor.kill();
-                store.into_path();
-
-                Ok(())
-            }
-        });
         let wamr = scope.spawn({
             let seed = seed.clone();
             let results_root = results_root.clone();
@@ -108,8 +77,74 @@ fn main() -> Result<(), eyre::Error> {
                 Ok(())
             }
         });
+        let wasmedge = scope.spawn({
+            let seed = seed.clone();
+            let results_root = results_root.clone();
 
-        Ok((wasmtime.join().unwrap()?, wamr.join().unwrap()?))
+            move || -> Result<(), eyre::Error> {
+                let result_dir = results_root.join("wasmedge");
+                let base_dir = result_dir.join("base");
+
+                fs::create_dir(&result_dir)?;
+                fs::create_dir(&base_dir)?;
+
+                let stderr = Arc::new(Mutex::new(Vec::new()));
+                let runtime = wazzi_runners::Wasmedge::new("wasmedge");
+                let executor = ExecutorRunner::new(runtime, executor_bin(), Some(base_dir))
+                    .run(stderr.clone())
+                    .expect("failed to run executor");
+                let mut store = ExecutionStore::new(
+                    &results_root.join("wasmedge"),
+                    &get_commit_id(&PathBuf::from("runtimes").join("WasmEdge"))?,
+                    executor.pid(),
+                )?;
+
+                seed.execute(&spec(), &mut store, executor.clone())
+                    .wrap_err("failed to execute seed")?;
+
+                executor.kill();
+                store.into_path();
+
+                Ok(())
+            }
+        });
+        let wasmtime = scope.spawn({
+            let seed = seed.clone();
+            let results_root = results_root.clone();
+
+            move || -> Result<(), eyre::Error> {
+                let result_dir = results_root.join("wasmtime");
+                let base_dir = result_dir.join("base");
+
+                fs::create_dir(&result_dir)?;
+                fs::create_dir(&base_dir)?;
+
+                let stderr = Arc::new(Mutex::new(Vec::new()));
+                let wasmtime = wazzi_runners::Wasmtime::new("wasmtime");
+                let executor = ExecutorRunner::new(wasmtime, executor_bin(), Some(base_dir))
+                    .run(stderr.clone())
+                    .expect("failed to run executor");
+                let mut store = ExecutionStore::new(
+                    &results_root.join("wasmtime"),
+                    &get_commit_id(&PathBuf::from("runtimes").join("wasmtime"))?,
+                    executor.pid(),
+                )?;
+
+                seed.execute(&spec(), &mut store, executor.clone())
+                    .wrap_err("failed to execute seed")?;
+
+                executor.kill();
+                store.into_path();
+
+                Ok(())
+            }
+        });
+
+        Ok((
+            wamr.join().unwrap()?,
+            wasmedge.join().unwrap()?,
+            wasmtime.join().unwrap()?,
+        ))
     })?;
 
     Ok(())
