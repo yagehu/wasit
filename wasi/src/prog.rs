@@ -135,7 +135,7 @@ impl<'s> Prog<'s> {
     }
 
     pub fn store(&self) -> &ExecutionStore {
-        &self.store
+        self.store
     }
 }
 
@@ -205,8 +205,7 @@ impl Value {
                     .cases
                     .iter()
                     .enumerate()
-                    .filter(|(_i, case)| case.name.as_str() == variant.name)
-                    .next()
+                    .find(|(_i, case)| case.name.as_str() == variant.name)
                     .unwrap();
                 let payload = match variant.payload {
                     | Some(payload) => {

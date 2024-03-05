@@ -14,6 +14,12 @@ pub struct ResourceContext {
     by_types: HashMap<ResourceType, BTreeSet<ResourceId>>,
 }
 
+impl Default for ResourceContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ResourceContext {
     pub fn new() -> Self {
         Self {

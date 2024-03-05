@@ -146,7 +146,7 @@ impl OnDiskCall {
     pub fn read_result(&self) -> Result<CallResult, io::Error> {
         let f = fs::OpenOptions::new()
             .read(true)
-            .open(&self.path.join(Self::RESULT_JSON_PATH))?;
+            .open(self.path.join(Self::RESULT_JSON_PATH))?;
         let call = serde_json::from_reader(f)?;
 
         Ok(call)

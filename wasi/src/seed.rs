@@ -156,7 +156,7 @@ pub enum Value {
 impl Value {
     fn into_prog_value(self, ty: &witx::Type, resource_ctx: &ResourceContext) -> prog::Value {
         match (ty, self) {
-            | (_, Value::Builtin(builtin)) => prog::Value::Builtin(builtin.into()),
+            | (_, Value::Builtin(builtin)) => prog::Value::Builtin(builtin),
             | (_, Value::String(string)) => prog::Value::String(string),
             | (witx::Type::Record(record_type), Value::Bitflags(bitflags))
                 if record_type.bitflags_repr().is_some() =>
@@ -186,8 +186,7 @@ impl Value {
                     .cases
                     .iter()
                     .enumerate()
-                    .filter(|(_i, case)| case.name.as_str() == variant.name)
-                    .next()
+                    .find(|(_i, case)| case.name.as_str() == variant.name)
                     .unwrap();
 
                 prog::Value::Variant(prog::VariantValue {

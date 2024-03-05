@@ -111,8 +111,8 @@ fn syscall_name(input: &str) -> nom::IResult<&str, &str> {
 fn exit_status(input: &str) -> nom::IResult<&str, u32> {
     delimited(
         tag("+++ exited with "),
-        map_res(take_while1(|c: char| c.is_digit(10)), |s| {
-            u32::from_str_radix(s, 10)
+        map_res(take_while1(|c: char| c.is_ascii_digit()), |s: &str| {
+            s.parse::<u32>()
         }),
         tag(" +++"),
     )(input)
@@ -132,8 +132,8 @@ fn oct(input: &str) -> nom::IResult<&str, u64> {
 fn int32(input: &str) -> nom::IResult<&str, i32> {
     let (input, (neg, i)) = tuple((
         opt(char('-')),
-        map_res(take_while1(|c: char| c.is_dec_digit()), |s| {
-            i32::from_str_radix(s, 10)
+        map_res(take_while1(|c: char| c.is_dec_digit()), |s: &str| {
+            s.parse::<i32>()
         }),
     ))(input)?;
     let i = if neg.is_some() { -i } else { i };
@@ -144,8 +144,8 @@ fn int32(input: &str) -> nom::IResult<&str, i32> {
 fn int64(input: &str) -> nom::IResult<&str, i64> {
     let (input, (neg, i)) = tuple((
         opt(char('-')),
-        map_res(take_while1(|c: char| c.is_dec_digit()), |s| {
-            i64::from_str_radix(s, 10)
+        map_res(take_while1(|c: char| c.is_dec_digit()), |s: &str| {
+            s.parse::<i64>()
         }),
     ))(input)?;
     let i = if neg.is_some() { -i } else { i };
@@ -155,7 +155,7 @@ fn int64(input: &str) -> nom::IResult<&str, i64> {
 
 fn hex(input: &str) -> nom::IResult<&str, u64> {
     let (input, _) = tag("0x")(input)?;
-    let (input, value) = map_res(take_while1(|c: char| c.is_digit(16)), |digits| {
+    let (input, value) = map_res(take_while1(|c: char| c.is_ascii_hexdigit()), |digits| {
         u64::from_str_radix(digits, 16)
     })(input)?;
 
