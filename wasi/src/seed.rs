@@ -16,7 +16,7 @@ pub struct Seed {
 }
 
 impl Seed {
-    pub fn execute<'s>(
+    pub fn execute(
         self,
         spec: &witx::Document,
         store: ExecutionStore,
