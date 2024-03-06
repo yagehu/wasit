@@ -12,6 +12,18 @@ function join_by {
   fi
 }
 
+function build_node {
+  local repo_path="$1"
+
+  (
+    cd "$repo_path"
+    ./configure
+    make -j 4
+  )
+
+  extra_paths+=("$(realpath $repo_path)")
+}
+
 function build_wamr {
   local repo_path="$1"
   local build_path="$repo_path/product-mini/platforms/linux/build"
@@ -64,11 +76,13 @@ function build_wasmtime {
   extra_paths+=("$(realpath $path/target/release)")
 }
 
+node_repo_dir="${NODE_REPO_DIR:-runtimes/node}"
 wamr_repo_dir="${WAMR_REPO_DIR:-runtimes/wasm-micro-runtime}"
 wasmedge_repo_dir="${WASMEDGE_REPO_DIR:-runtimes/WasmEdge}"
 wasmer_repo_dir="${WASMER_REPO_DIR:-runtimes/wasmer}"
 wasmtime_repo_dir="${WASMTIME_REPO_DIR:-runtimes/wasmtime}"
 
+build_node "$node_repo_dir"
 build_wamr "$wamr_repo_dir"
 build_wasmedge "$wasmedge_repo_dir"
 build_wasmer "$wasmer_repo_dir"

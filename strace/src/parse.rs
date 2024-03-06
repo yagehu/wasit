@@ -211,6 +211,16 @@ impl NormalThreadEvent {
     pub fn parse(input: &str) -> nom::IResult<&str, Self> {
         if peek(resumed_tag)(input).is_ok() {
             let (input, func) = ws(resumed_tag).parse(input)?;
+            let (input, prev_changed) =
+                if peek(ws(tag::<&str, &str, nom::error::Error<_>>("=>")))(input).is_ok() {
+                    let (input, (_, value, _)) =
+                        tuple((ws(tag("=>")), ws(Value::parse), ws(char(','))))(input)?;
+
+                    (input, Some(value))
+                } else {
+                    (input, None)
+                };
+
             let (input, args) = separated_list0(char(','), ws(Arg::parse))(input)?;
             let (input, (_, _)) = tuple((ws(char(')')), ws(char('='))))(input)?;
             let (input, call_result) =
@@ -228,7 +238,11 @@ impl NormalThreadEvent {
                 input,
                 Self {
                     func: func.to_owned(),
-                    case: NonExitEvent::Resumed(FinishedEvent { args, call_result }),
+                    case: NonExitEvent::Resumed(FinishedEvent {
+                        prev_changed,
+                        args,
+                        call_result,
+                    }),
                 },
             ))
         } else if peek(syscall_name)(input).is_ok() {
@@ -274,7 +288,11 @@ impl NormalThreadEvent {
                     input,
                     Self {
                         func: func.to_owned(),
-                        case: NonExitEvent::Complete(FinishedEvent { args, call_result }),
+                        case: NonExitEvent::Complete(FinishedEvent {
+                            prev_changed: None,
+                            args,
+                            call_result,
+                        }),
                     },
                 ))
             }
@@ -302,8 +320,9 @@ pub struct Unfinished {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct FinishedEvent {
-    pub args:        Vec<Arg>,
-    pub call_result: Option<CallResult>,
+    pub prev_changed: Option<Value>,
+    pub args:         Vec<Arg>,
+    pub call_result:  Option<CallResult>,
 }
 
 fn detached_tag(input: &str) -> nom::IResult<&str, ()> {
@@ -707,5 +726,17 @@ mod tests {
         let (_rest, trace) = all_consuming(Trace::parse)(lines).unwrap();
 
         assert_eq!(trace.events.len(), 7, "{:#?}", trace);
+    }
+
+    #[test]
+    fn resumed_changed() {
+        let lines = r#"
+            37860 clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, child_tid=0x7fc7c1000990, parent_tid=0x7fc7c1000990, exit_signal=0, stack=0x7fc7c0e00000, stack_size=0x1ff900, tls=0x7fc7c10006c0} <unfinished ...>
+            37860 <... clone3 resumed> => {parent_tid=[37905]}, 88) = 37905
+        "#;
+
+        let (_rest, trace) = all_consuming(Trace::parse)(lines).unwrap();
+
+        assert_eq!(trace.events.len(), 2, "{:#?}", trace);
     }
 }

@@ -1,21 +1,30 @@
 use std::{
     ffi::OsString,
-    io::{self},
-    path::PathBuf,
+    fs,
+    io,
+    path::{Path, PathBuf},
     process,
 };
 
+use tera::Tera;
+
 pub trait WasiRunner {
     fn base_dir_fd(&self) -> u32;
-    fn prepare_command(&self, wasm_path: PathBuf, base_dir: Option<PathBuf>) -> process::Command;
+    fn prepare_command(
+        &self,
+        wasm_path: PathBuf,
+        working_dir: &Path,
+        base_dir: Option<PathBuf>,
+    ) -> process::Command;
 
     #[tracing::instrument(skip(self))]
     fn run(
         &self,
         wasm_path: PathBuf,
+        working_dir: &Path,
         base_dir: Option<PathBuf>,
     ) -> Result<process::Child, io::Error> {
-        let mut command = self.prepare_command(wasm_path, base_dir);
+        let mut command = self.prepare_command(wasm_path, working_dir, base_dir);
         let child = command.spawn()?;
 
         Ok(child)
@@ -23,12 +32,61 @@ pub trait WasiRunner {
 }
 
 #[derive(Clone, Debug)]
+pub struct Node<'p> {
+    path: &'p Path,
+}
+
+impl<'p> Node<'p> {
+    pub fn new(path: &'p Path) -> Self {
+        Self { path }
+    }
+}
+
+impl WasiRunner for Node<'_> {
+    fn base_dir_fd(&self) -> u32 {
+        3
+    }
+
+    fn prepare_command(
+        &self,
+        wasm_path: PathBuf,
+        working_dir: &Path,
+        base_dir: Option<PathBuf>,
+    ) -> process::Command {
+        static GLUE_TMPL: &str = include_str!("run.js.tera.tmpl");
+
+        let mut tmpl_ctx = tera::Context::new();
+
+        tmpl_ctx.insert("executor", &wasm_path.canonicalize().unwrap());
+
+        if let Some(base_dir) = base_dir {
+            tmpl_ctx.insert("execroot", &base_dir.canonicalize().unwrap());
+        }
+
+        let glue = Tera::one_off(GLUE_TMPL, &tmpl_ctx, false).unwrap();
+        let glue_path = working_dir.join("glue.js");
+
+        fs::write(&glue_path, glue).unwrap();
+
+        let mut command = process::Command::new(self.path);
+
+        command.arg(glue_path);
+        command.stdin(process::Stdio::piped());
+        command.stdout(process::Stdio::piped());
+        command.stderr(process::Stdio::piped());
+        command.current_dir(working_dir);
+
+        command
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct Wasmedge<'p> {
-    path: &'p str,
+    path: &'p Path,
 }
 
 impl<'p> Wasmedge<'p> {
-    pub fn new(path: &'p str) -> Self {
+    pub fn new(path: &'p Path) -> Self {
         Self { path }
     }
 
@@ -45,7 +103,12 @@ impl WasiRunner for Wasmedge<'_> {
         3
     }
 
-    fn prepare_command(&self, wasm_path: PathBuf, base_dir: Option<PathBuf>) -> process::Command {
+    fn prepare_command(
+        &self,
+        wasm_path: PathBuf,
+        working_dir: &Path,
+        base_dir: Option<PathBuf>,
+    ) -> process::Command {
         let mut command = process::Command::new(self.path);
         let mut args = vec![OsString::from("run")];
 
@@ -56,6 +119,7 @@ impl WasiRunner for Wasmedge<'_> {
         command.stdin(process::Stdio::piped());
         command.stdout(process::Stdio::piped());
         command.stderr(process::Stdio::piped());
+        command.current_dir(working_dir);
 
         command
     }
@@ -63,11 +127,11 @@ impl WasiRunner for Wasmedge<'_> {
 
 #[derive(Clone, Debug)]
 pub struct Wasmer<'p> {
-    path: &'p str,
+    path: &'p Path,
 }
 
 impl<'p> Wasmer<'p> {
-    pub fn new(path: &'p str) -> Self {
+    pub fn new(path: &'p Path) -> Self {
         Self { path }
     }
 
@@ -84,7 +148,12 @@ impl WasiRunner for Wasmer<'_> {
         4
     }
 
-    fn prepare_command(&self, wasm_path: PathBuf, base_dir: Option<PathBuf>) -> process::Command {
+    fn prepare_command(
+        &self,
+        wasm_path: PathBuf,
+        working_dir: &Path,
+        base_dir: Option<PathBuf>,
+    ) -> process::Command {
         let mut command = process::Command::new(self.path);
         let mut args = vec![OsString::from("run")];
 
@@ -95,6 +164,7 @@ impl WasiRunner for Wasmer<'_> {
         command.stdin(process::Stdio::piped());
         command.stdout(process::Stdio::piped());
         command.stderr(process::Stdio::piped());
+        command.current_dir(working_dir);
 
         command
     }
@@ -102,11 +172,11 @@ impl WasiRunner for Wasmer<'_> {
 
 #[derive(Clone, Debug)]
 pub struct Wasmtime<'p> {
-    path: &'p str,
+    path: &'p Path,
 }
 
 impl<'p> Wasmtime<'p> {
-    pub fn new(path: &'p str) -> Self {
+    pub fn new(path: &'p Path) -> Self {
         Self { path }
     }
 
@@ -123,7 +193,12 @@ impl WasiRunner for Wasmtime<'_> {
         3
     }
 
-    fn prepare_command(&self, wasm_path: PathBuf, base_dir: Option<PathBuf>) -> process::Command {
+    fn prepare_command(
+        &self,
+        wasm_path: PathBuf,
+        working_dir: &Path,
+        base_dir: Option<PathBuf>,
+    ) -> process::Command {
         let mut command = process::Command::new(self.path);
         let mut args = vec![OsString::from("run")];
 
@@ -134,6 +209,7 @@ impl WasiRunner for Wasmtime<'_> {
         command.stdin(process::Stdio::piped());
         command.stdout(process::Stdio::piped());
         command.stderr(process::Stdio::piped());
+        command.current_dir(working_dir);
 
         command
     }
@@ -141,11 +217,11 @@ impl WasiRunner for Wasmtime<'_> {
 
 #[derive(Clone, Debug)]
 pub struct Wamr<'p> {
-    path: &'p str,
+    path: &'p Path,
 }
 
 impl<'p> Wamr<'p> {
-    pub fn new(path: &'p str) -> Self {
+    pub fn new(path: &'p Path) -> Self {
         Self { path }
     }
 
@@ -162,7 +238,12 @@ impl WasiRunner for Wamr<'_> {
         3
     }
 
-    fn prepare_command(&self, wasm_path: PathBuf, base_dir: Option<PathBuf>) -> process::Command {
+    fn prepare_command(
+        &self,
+        wasm_path: PathBuf,
+        working_dir: &Path,
+        base_dir: Option<PathBuf>,
+    ) -> process::Command {
         let mut command = process::Command::new(self.path);
         let mut args = vec![];
 
@@ -173,6 +254,7 @@ impl WasiRunner for Wamr<'_> {
         command.stdin(process::Stdio::piped());
         command.stdout(process::Stdio::piped());
         command.stderr(process::Stdio::piped());
+        command.current_dir(working_dir);
 
         command
     }

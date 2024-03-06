@@ -16,6 +16,7 @@ use wazzi_runners::WasiRunner;
 pub struct ExecutorRunner<WR> {
     wasi_runner: WR,
     executor:    PathBuf,
+    working_dir: PathBuf,
     base_dir:    Option<PathBuf>,
 }
 
@@ -23,10 +24,16 @@ impl<WR> ExecutorRunner<WR>
 where
     WR: WasiRunner,
 {
-    pub fn new(wasi_runner: WR, executor: PathBuf, base_dir: Option<PathBuf>) -> Self {
+    pub fn new(
+        wasi_runner: WR,
+        executor: PathBuf,
+        working_dir: PathBuf,
+        base_dir: Option<PathBuf>,
+    ) -> Self {
         Self {
             wasi_runner,
             executor,
+            working_dir,
             base_dir,
         }
     }
@@ -35,9 +42,11 @@ where
     where
         W: io::Write + Send + 'static,
     {
-        let mut child = self
-            .wasi_runner
-            .run(self.executor.clone(), self.base_dir.clone())?;
+        let mut child = self.wasi_runner.run(
+            self.executor.clone(),
+            &self.working_dir,
+            self.base_dir.clone(),
+        )?;
         let mut stderr = child.stderr.take().unwrap();
         let stderr_copy_handle = thread::spawn(move || {
             io::copy(&mut stderr, stderr_logger.lock().unwrap().deref_mut()).unwrap()
