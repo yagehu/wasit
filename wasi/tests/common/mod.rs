@@ -1,16 +1,16 @@
 extern crate wazzi_witx as witx;
 
-use color_eyre::eyre;
 use std::{
     fs,
     ops::Deref,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{mpsc, Arc, Mutex},
     thread,
     time::Duration,
 };
 use tempfile::{tempdir, TempDir};
 use wazzi_executor::ExecutorRunner;
+use wazzi_runners::Wasmtime;
 use wazzi_wasi::{prog::Prog, seed::Seed, store::ExecutionStore};
 
 pub fn get_seed(name: &str) -> Seed {
@@ -53,11 +53,16 @@ pub fn run_seed(name: &str) -> RunInstance {
 
 pub fn run(seed: Seed) -> RunInstance {
     let base_dir = tempdir().unwrap();
-    let wasmtime = wazzi_runners::Wasmtime::new("wasmtime");
+    let wasmtime = Wasmtime::new(Path::new("wasmtime"));
     let stderr = Arc::new(Mutex::new(Vec::new()));
-    let executor = ExecutorRunner::new(wasmtime, executor_bin(), Some(base_dir.path().to_owned()))
-        .run(stderr.clone())
-        .expect("failed to run executor");
+    let executor = ExecutorRunner::new(
+        wasmtime,
+        executor_bin(),
+        base_dir.path().to_path_buf(),
+        Some(base_dir.path().to_owned()),
+    )
+    .run(stderr.clone())
+    .expect("failed to run executor");
     let path = base_dir.path().to_owned();
     let store = ExecutionStore::new(&path, "test", executor.pid()).unwrap();
     let run = thread::scope(|scope| {
