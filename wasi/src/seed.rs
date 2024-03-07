@@ -163,8 +163,33 @@ impl Value {
             {
                 prog::Value::Bitflags(bitflags)
             },
-            | (_, Value::Record(_)) => todo!(),
-            | (_, Value::List(_)) => todo!(),
+            | (witx::Type::Record(record_type), Value::Record(record)) => {
+                prog::Value::Record(prog::RecordValue {
+                    members: record_type
+                        .members
+                        .iter()
+                        .zip(record.0)
+                        .map(|(member_type, member)| prog::RecordMemberValue {
+                            name:  member.name,
+                            value: match member.value {
+                                | ResourceOrValue::Resource(id) => {
+                                    resource_ctx.get_resource(id).unwrap().value
+                                },
+                                | ResourceOrValue::Value(value) => value.into_prog_value(
+                                    member_type.tref.type_().as_ref(),
+                                    resource_ctx,
+                                ),
+                            },
+                        })
+                        .collect(),
+                })
+            },
+            | (witx::Type::List(item_tref), Value::List(list)) => prog::Value::List(
+                list.0
+                    .into_iter()
+                    .map(|item| item.into_prog_value(item_tref.type_().as_ref(), resource_ctx))
+                    .collect(),
+            ),
             | (_, Value::ConstPointer(_)) => todo!(),
             | (witx::Type::Pointer(tref), Value::Pointer(pointer)) => {
                 let value = match pointer.default_value {
@@ -201,8 +226,10 @@ impl Value {
                         }),
                 })
             },
-            | (_, Value::Bitflags(_)) => panic!(),
-            | (_, Value::Pointer(_)) => panic!(),
+            | (_, Value::Bitflags(_))
+            | (_, Value::Record(_))
+            | (_, Value::List(_))
+            | (_, Value::Pointer(_))
             | (_, Value::Variant(_)) => panic!(),
         }
     }

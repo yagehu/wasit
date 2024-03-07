@@ -1,10 +1,8 @@
-mod common;
-
 use crate::common::run_seed;
 
 #[test]
-fn clock() {
-    let run = run_seed("04-clock.json");
+fn args() {
+    let run = run_seed("02-args.json");
     let call = run
         .prog
         .store()

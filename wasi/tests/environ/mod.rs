@@ -1,9 +1,7 @@
-mod common;
-
 use crate::common::run_seed;
 
 #[test]
-fn environ() {
+fn ok() {
     let run = run_seed("03-environ.json");
     let call = run
         .prog

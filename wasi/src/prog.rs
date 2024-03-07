@@ -148,8 +148,10 @@ impl Prog {
 #[serde(rename_all = "snake_case")]
 pub enum Value {
     Bitflags(seed::BitflagsValue),
+    Record(RecordValue),
     Variant(VariantValue),
     Handle(u32),
+    List(Vec<Value>),
     String(seed::StringValue),
     Pointer(Vec<Value>),
     Builtin(seed::BuiltinValue),
@@ -205,6 +207,31 @@ impl Value {
                     special_fields: Default::default(),
                 })
             },
+            | (witx::Type::Record(record_type), Value::Record(record)) => {
+                executor_pb::value::Which::Record(executor_pb::value::Record {
+                    members:        record_type
+                        .member_layout()
+                        .into_iter()
+                        .zip(record_type.members.iter())
+                        .zip(record.members)
+                        .map(|((member_layout, member_type), member)| {
+                            executor_pb::value::record::Member {
+                                name:           member.name,
+                                value:          Some(
+                                    member
+                                        .value
+                                        .into_pb_value(member_type.tref.type_().as_ref()),
+                                )
+                                .into(),
+                                offset:         member_layout.offset as u32,
+                                special_fields: Default::default(),
+                            }
+                        })
+                        .collect(),
+                    size:           record_type.mem_size() as u32,
+                    special_fields: Default::default(),
+                })
+            },
             | (witx::Type::Variant(variant_type), Value::Variant(variant)) => {
                 let (case_idx, case) = variant_type
                     .cases
@@ -239,6 +266,16 @@ impl Value {
                 }))
             },
             | (_, Value::Handle(handle)) => executor_pb::value::Which::Handle(handle),
+            | (witx::Type::List(item_tref), Value::List(items)) => {
+                executor_pb::value::Which::Array(executor_pb::value::Array {
+                    items:          items
+                        .into_iter()
+                        .map(|item| item.into_pb_value(item_tref.type_().as_ref()))
+                        .collect(),
+                    item_size:      item_tref.mem_size() as u32,
+                    special_fields: Default::default(),
+                })
+            },
             | (_, Value::String(string)) => executor_pb::value::Which::String(string.into()),
             | (witx::Type::Pointer(tref), Value::Pointer(values)) => {
                 executor_pb::value::Which::Pointer(executor_pb::value::Array {
@@ -251,8 +288,10 @@ impl Value {
                 })
             },
             | (_, Value::Builtin(builtin)) => executor_pb::value::Which::Builtin(builtin.into()),
-            | (_, Value::Bitflags(_)) => panic!(),
-            | (_, Value::Variant(_)) => panic!(),
+            | (_, Value::Bitflags(_))
+            | (_, Value::Record(_))
+            | (_, Value::Variant(_))
+            | (_, Value::List(_))
             | (_, Value::Pointer(_)) => panic!(),
         };
 
@@ -321,6 +360,20 @@ impl Value {
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct RecordValue {
+    pub members: Vec<RecordMemberValue>,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct RecordMemberValue {
+    pub name:  String,
+    pub value: Value,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
+#[serde(deny_unknown_fields)]
 pub struct VariantValue {
     pub idx:     u64,
     pub name:    String,
@@ -344,26 +397,13 @@ pub(crate) fn register_resource_rec(
     }
 
     match (tref.type_().as_ref(), value) {
-        // | (_, Value::String(_)) => (),
-        // | (_, Value::Bitflags(_)) => (),
-        // | (witx::Type::Record(record_type), Value::Record(record)) => {
-        //     for (member_type, member) in record_type.members.iter().zip(record.0.iter()) {
-        //         register_resource_rec(
-        //             ctx,
-        //             spec,
-        //             &member_type.tref,
-        //             member
-        //                 .to_owned()
-        //                 .into_pb_value(member_type.tref.type_().as_ref()),
-        //             None,
-        //         );
-        //     }
-        // },
-        // | (_, Value::Record(_)) => unreachable!(),
-        // | (_, Value::ConstPointer(_)) => todo!(),
-        // | (_, Value::List(_)) => todo!(),
         | (witx::Type::Record(record_type), Value::Bitflags(_))
             if record_type.bitflags_repr().is_some() => {},
+        | (witx::Type::Record(record_type), Value::Record(record)) => {
+            for (member_type, member) in record_type.members.iter().zip(record.members) {
+                register_resource_rec(ctx, spec, &member_type.tref, member.value, None);
+            }
+        },
         | (witx::Type::Variant(variant_type), Value::Variant(variant)) => {
             let case_type = variant_type.cases.get(variant.idx as usize).unwrap();
 
@@ -372,11 +412,11 @@ pub(crate) fn register_resource_rec(
             }
         },
         | (_, Value::Handle(_)) => (),
+        | (_, Value::List(_)) => (),
         | (_, Value::String(_)) => (),
         | (_, Value::Pointer(_)) => unimplemented!(),
         | (_, Value::Builtin(_)) => (),
-        | (_, Value::Bitflags(_)) => panic!(),
-        | (_, Value::Variant(_)) => panic!(),
+        | (_, Value::Bitflags(_)) | (_, Value::Record(_)) | (_, Value::Variant(_)) => panic!(),
     }
 }
 

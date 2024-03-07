@@ -120,23 +120,25 @@
                         "value": {
                             "list": [
                                 {
-                                    "record": [
-                                        {
-                                            "name": "buf",
-                                            "value": {
+                                    "value": {
+                                        "record": [
+                                            {
+                                                "name": "buf",
                                                 "value": {
-                                                    "const_pointer": [
-                                                        { "builtin": { "u8": 97 } },
-                                                        { "builtin": { "u8": 98 } }
-                                                    ]
+                                                    "value": {
+                                                        "const_pointer": [
+                                                            { "value": { "builtin": { "u8": 97 } } },
+                                                            { "value": { "builtin": { "u8": 98 } } }
+                                                        ]
+                                                    }
                                                 }
+                                            },
+                                            {
+                                                "name": "buf_len",
+                                                "value": { "value": { "builtin": { "u32": 2 } } }
                                             }
-                                        },
-                                        {
-                                            "name": "buf_len",
-                                            "value": { "value": { "builtin": { "u32": 2 } } }
-                                        }
-                                    ]
+                                        ]
+                                    }
                                 }
                             ]
                         }

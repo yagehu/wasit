@@ -72,27 +72,30 @@ pub fn run(seed: Seed) -> RunInstance {
             let executor = executor.clone();
 
             move || {
-                let prog = seed.execute(&spec(), store, executor).unwrap();
+                let result = seed.execute(&spec(), store, executor);
 
-                prog.executor().kill();
-                tx.send(prog).unwrap();
+                tx.send(result).unwrap();
             }
         });
 
         let result = rx.recv_timeout(Duration::from_millis(60000));
-        let stderr = String::from_utf8(stderr.lock().unwrap().deref().clone()).unwrap();
         let prog = match result {
-            | Ok(prog) => prog,
-            | Err(err) => panic!(
-                "Execution timeout or error.\nstderr:\n{}\nerr:\n{}",
-                stderr, err
-            ),
+            | Ok(result) => match result {
+                | Ok(prog) => prog,
+                | Err(err) => {
+                    let stderr = String::from_utf8(stderr.lock().unwrap().deref().clone()).unwrap();
+                    panic!("Failed to execute seed:\nstderr:\n{stderr}\nerr:\n{err}");
+                },
+            },
+            | Err(err) => panic!("Execution timeout or error.\nerr:\n{}", err),
         };
+
+        prog.executor().kill();
 
         RunInstance {
             base_dir,
             prog,
-            stderr,
+            stderr: String::from_utf8(stderr.lock().unwrap().deref().clone()).unwrap(),
         }
     });
 

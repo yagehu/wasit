@@ -1,4 +1,4 @@
-mod common;
+use std::fs;
 
 use crate::common::run_seed;
 
@@ -19,17 +19,25 @@ fn creat() {
     assert!(run.base_dir.path().join("a").exists());
 }
 
-// #[test]
-// fn write() {
-//     let run = run_seed("01-write.json");
-//     let prog = run.result.expect(&run.stderr).finish(&spec());
+#[test]
+fn write() {
+    let run = run_seed("01-write.json");
+    let call = run
+        .prog
+        .store()
+        .recorder()
+        .last()
+        .unwrap()
+        .unwrap()
+        .read_result()
+        .unwrap();
 
-//     assert_eq!(prog.calls.last().unwrap().errno, Some(0));
+    assert_eq!(call.errno, Some(0));
 
-//     let file_content = fs::read(run.base_dir.path().join("a")).unwrap();
+    let file_content = fs::read(run.base_dir.path().join("a")).unwrap();
 
-//     assert_eq!(file_content, vec![97, 98]);
-// }
+    assert_eq!(file_content, vec![97, 98]);
+}
 
 // #[test]
 // fn read_after_write() {
