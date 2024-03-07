@@ -154,6 +154,7 @@ pub enum Value {
     List(Vec<Value>),
     String(seed::StringValue),
     Pointer(Vec<Value>),
+    ConstPointer(Vec<Value>),
     Builtin(seed::BuiltinValue),
 }
 
@@ -287,12 +288,23 @@ impl Value {
                     special_fields: Default::default(),
                 })
             },
+            | (witx::Type::ConstPointer(tref), Value::ConstPointer(items)) => {
+                executor_pb::value::Which::ConstPointer(executor_pb::value::Array {
+                    items:          items
+                        .into_iter()
+                        .map(|v| v.into_pb_value(tref.type_().as_ref()))
+                        .collect(),
+                    item_size:      tref.mem_size() as u32,
+                    special_fields: Default::default(),
+                })
+            },
             | (_, Value::Builtin(builtin)) => executor_pb::value::Which::Builtin(builtin.into()),
             | (_, Value::Bitflags(_))
             | (_, Value::Record(_))
             | (_, Value::Variant(_))
             | (_, Value::List(_))
-            | (_, Value::Pointer(_)) => panic!(),
+            | (_, Value::Pointer(_))
+            | (_, Value::ConstPointer(_)) => panic!(),
         };
 
         executor_pb::Value {
@@ -317,9 +329,38 @@ impl Value {
                 ))
             },
             | (_, executor_pb::value::Which::Handle(handle)) => Self::Handle(handle),
-            | (_, executor_pb::value::Which::Array(_)) => todo!(),
-            | (_, executor_pb::value::Which::Record(_)) => todo!(),
-            | (_, executor_pb::value::Which::ConstPointer(_)) => todo!(),
+            | (witx::Type::List(tref), executor_pb::value::Which::Array(array)) => Self::List(
+                array
+                    .items
+                    .into_iter()
+                    .map(|item| Self::from_pb_value(item, tref.type_().as_ref()))
+                    .collect(),
+            ),
+            | (witx::Type::Record(record_type), executor_pb::value::Which::Record(record)) => {
+                Self::Record(RecordValue {
+                    members: record_type
+                        .members
+                        .iter()
+                        .zip(record.members)
+                        .map(|(member_type, member)| RecordMemberValue {
+                            name:  member_type.name.as_str().to_owned(),
+                            value: Self::from_pb_value(
+                                member.value.unwrap(),
+                                member_type.tref.type_().as_ref(),
+                            ),
+                        })
+                        .collect(),
+                })
+            },
+            | (witx::Type::ConstPointer(tref), executor_pb::value::Which::ConstPointer(array)) => {
+                Self::ConstPointer(
+                    array
+                        .items
+                        .into_iter()
+                        .map(|item| Value::from_pb_value(item, tref.type_().as_ref()))
+                        .collect(),
+                )
+            },
             | (witx::Type::Pointer(tref), executor_pb::value::Which::Pointer(list)) => {
                 let mut items = Vec::with_capacity(list.items.len());
 
@@ -415,6 +456,7 @@ pub(crate) fn register_resource_rec(
         | (_, Value::List(_)) => (),
         | (_, Value::String(_)) => (),
         | (_, Value::Pointer(_)) => unimplemented!(),
+        | (_, Value::ConstPointer(_)) => unimplemented!(),
         | (_, Value::Builtin(_)) => (),
         | (_, Value::Bitflags(_)) | (_, Value::Record(_)) | (_, Value::Variant(_)) => panic!(),
     }

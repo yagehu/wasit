@@ -190,7 +190,14 @@ impl Value {
                     .map(|item| item.into_prog_value(item_tref.type_().as_ref(), resource_ctx))
                     .collect(),
             ),
-            | (_, Value::ConstPointer(_)) => todo!(),
+            | (witx::Type::ConstPointer(tref), Value::ConstPointer(list)) => {
+                prog::Value::ConstPointer(
+                    list.0
+                        .into_iter()
+                        .map(|item| item.into_prog_value(tref.type_().as_ref(), resource_ctx))
+                        .collect(),
+                )
+            },
             | (witx::Type::Pointer(tref), Value::Pointer(pointer)) => {
                 let value = match pointer.default_value {
                     | Some(value) => value.into_prog_value(ty, resource_ctx),
@@ -230,6 +237,7 @@ impl Value {
             | (_, Value::Record(_))
             | (_, Value::List(_))
             | (_, Value::Pointer(_))
+            | (_, Value::ConstPointer(_))
             | (_, Value::Variant(_)) => panic!(),
         }
     }
