@@ -84,10 +84,15 @@ pub fn run(seed: Seed) -> RunInstance {
             | Ok(result) => match result {
                 | Ok(prog) => prog,
                 | Err(err) => {
-                    panic!("Failed to execute seed:\nerr:\n{err}");
+                    panic!("Failed to execute seed:\nerr:\n{err}asdf");
                 },
             },
-            | Err(err) => panic!("Execution timeout or error.\nerr:\n{}", err),
+            | Err(err) => {
+                executor.kill();
+                let s = String::from_utf8(stderr.lock().unwrap().to_vec()).unwrap();
+                eprintln!("{s}");
+                panic!("Execution timeout or error.\nerr:\n{}", err)
+            },
         };
 
         prog.executor().kill();

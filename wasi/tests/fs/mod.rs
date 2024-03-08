@@ -66,47 +66,97 @@ fn read_after_write() {
     );
 }
 
-// #[test]
-// fn advise() {
-//     let run = run_seed("06-advise.json");
-//     let prog = run.result.expect(&run.stderr).finish(&spec());
+#[test]
+fn advise() {
+    let run = run_seed("06-advise.json");
 
-//     assert_eq!(prog.calls.last().unwrap().errno, Some(0));
-// }
+    assert_eq!(
+        run.prog
+            .store()
+            .recorder()
+            .last()
+            .unwrap()
+            .unwrap()
+            .read_result()
+            .unwrap()
+            .errno,
+        Some(0)
+    );
+}
 
-// #[test]
-// fn allocate() {
-//     let run = run_seed("07-allocate.json");
-//     let prog = run.result.expect(&run.stderr).finish(&spec());
+#[test]
+fn allocate() {
+    let run = run_seed("07-allocate.json");
 
-//     // Wasmtime no longer supports `fd_allocate`.
-//     // https://github.com/bytecodealliance/wasmtime/pull/6217
-//     assert_eq!(prog.calls.last().unwrap().errno, Some(58));
-// }
+    // Wasmtime no longer supports `fd_allocate`.
+    // https://github.com/bytecodealliance/wasmtime/pull/6217
+    assert_eq!(
+        run.prog
+            .store()
+            .recorder()
+            .last()
+            .unwrap()
+            .unwrap()
+            .read_result()
+            .unwrap()
+            .errno,
+        Some(58)
+    );
+}
 
-// #[test]
-// fn close() {
-//     let run = run_seed("08-close.json");
-//     let prog = run.result.expect(&run.stderr).finish(&spec());
+#[test]
+fn close() {
+    let run = run_seed("08-close.json");
 
-//     assert_eq!(prog.calls.last().unwrap().errno, Some(0));
-// }
+    assert_eq!(
+        run.prog
+            .store()
+            .recorder()
+            .last()
+            .unwrap()
+            .unwrap()
+            .read_result()
+            .unwrap()
+            .errno,
+        Some(0)
+    );
+}
 
-// #[test]
-// fn datasync() {
-//     let run = run_seed("09-datasync.json");
-//     let prog = run.result.expect(&run.stderr).finish(&spec());
+#[test]
+fn datasync() {
+    let run = run_seed("09-datasync.json");
 
-//     assert_eq!(prog.calls.last().unwrap().errno, Some(0));
-// }
+    assert_eq!(
+        run.prog
+            .store()
+            .recorder()
+            .last()
+            .unwrap()
+            .unwrap()
+            .read_result()
+            .unwrap()
+            .errno,
+        Some(0)
+    );
+}
 
-// #[test]
-// fn fdstat_get() {
-//     let run = run_seed("10-fdstat_get.json");
-//     let prog = run.result.expect(&run.stderr).finish(&spec());
+#[test]
+fn fdstat_get() {
+    let run = run_seed("10-fdstat_get.json");
 
-//     assert_eq!(prog.calls.last().unwrap().errno, Some(0));
-// }
+    assert_eq!(
+        run.prog
+            .store()
+            .recorder()
+            .last()
+            .unwrap()
+            .unwrap()
+            .read_result()
+            .unwrap()
+            .errno,
+        Some(0)
+    );
+}
 
 // #[test]
 // fn fdstat_set_flags() {

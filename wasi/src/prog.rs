@@ -161,8 +161,36 @@ pub enum Value {
 impl Value {
     pub fn zero_value_from_spec(tref: &witx::TypeRef) -> Self {
         match tref.type_().as_ref() {
-            | witx::Type::Record(_) => todo!(),
-            | witx::Type::Variant(_) => todo!(),
+            | witx::Type::Record(record) if record.bitflags_repr().is_some() => {
+                Self::Bitflags(seed::BitflagsValue(
+                    record
+                        .members
+                        .iter()
+                        .map(|member| seed::BitflagsMemberValue {
+                            name:  member.name.as_str().to_owned(),
+                            value: false,
+                        })
+                        .collect(),
+                ))
+            },
+            | witx::Type::Record(record) => Self::Record(RecordValue {
+                members: record
+                    .members
+                    .iter()
+                    .map(|member| RecordMemberValue {
+                        name:  member.name.as_str().to_owned(),
+                        value: Value::zero_value_from_spec(&member.tref),
+                    })
+                    .collect(),
+            }),
+            | witx::Type::Variant(variant) => Self::Variant(VariantValue {
+                idx:     0,
+                name:    variant.cases[0].name.as_str().to_owned(),
+                payload: variant.cases[0]
+                    .tref
+                    .as_ref()
+                    .map(|tref| Box::new(Value::zero_value_from_spec(tref))),
+            }),
             | witx::Type::Handle(_) => Self::Handle(0),
             | witx::Type::List(_) => todo!(),
             | witx::Type::Pointer(_tref) => Self::Pointer(vec![]),
