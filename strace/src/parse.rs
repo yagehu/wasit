@@ -247,7 +247,11 @@ impl NormalThreadEvent {
             ))
         } else if peek(syscall_name)(input).is_ok() {
             let (input, (func, _)) = tuple((syscall_name, char('(')))(input)?;
-            let (input, _) = opt(ws(tag("<... resuming interrupted read ...>")))(input)?;
+            let (input, _) = opt(ws(tuple((
+                tag("<... resuming interrupted"),
+                ws(ident),
+                tag("...>"),
+            ))))(input)?;
             let (input, args) = separated_list0(char(','), ws(Arg::parse))(input)?;
             let (input, _) = opt(ws(char(',')))(input)?;
 
@@ -738,5 +742,16 @@ mod tests {
         let (_rest, trace) = all_consuming(Trace::parse)(lines).unwrap();
 
         assert_eq!(trace.events.len(), 2, "{:#?}", trace);
+    }
+
+    #[test]
+    fn resuming_futex() {
+        let lines = r#"
+            42526 restart_syscall(<... resuming interrupted futex ...> <unfinished ...>
+        "#;
+
+        let (_rest, trace) = all_consuming(Trace::parse)(lines).unwrap();
+
+        assert_eq!(trace.events.len(), 1, "{:#?}", trace);
     }
 }

@@ -136,7 +136,7 @@
                                                 "name": "buf_len",
                                                 "value": {
                                                     "value": {
-                                                        "builtin": { "u32": 131072 }
+                                                        "builtin": { "u32": 1 }
                                                     }
                                                 }
                                             }

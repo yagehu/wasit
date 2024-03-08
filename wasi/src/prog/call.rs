@@ -1,7 +1,7 @@
 use std::{
     fmt,
     fs,
-    io,
+    io::{self, BufReader, BufWriter},
     mem,
     path::{Path, PathBuf},
 };
@@ -88,17 +88,21 @@ impl CallRecorder {
             .map_err(|e| err!("failed to parse trace {}", e.to_string()))?;
 
         serde_json::to_writer_pretty(
-            fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(action_dir.join(OnDiskCall::RESULT_JSON_PATH))?,
+            BufWriter::new(
+                fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(action_dir.join(OnDiskCall::RESULT_JSON_PATH))?,
+            ),
             &result,
         )?;
         serde_json::to_writer_pretty(
-            fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(action_dir.join(OnDiskCall::TRACE_JSON_PATH))?,
+            BufWriter::new(
+                fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(action_dir.join(OnDiskCall::TRACE_JSON_PATH))?,
+            ),
             &trace,
         )?;
 
@@ -147,7 +151,7 @@ impl OnDiskCall {
         let f = fs::OpenOptions::new()
             .read(true)
             .open(self.path.join(Self::RESULT_JSON_PATH))?;
-        let call = serde_json::from_reader(f)?;
+        let call = serde_json::from_reader(BufReader::new(f))?;
 
         Ok(call)
     }

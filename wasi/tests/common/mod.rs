@@ -2,6 +2,7 @@ extern crate wazzi_witx as witx;
 
 use std::{
     fs,
+    io::BufReader,
     ops::Deref,
     path::{Path, PathBuf},
     sync::{mpsc, Arc, Mutex},
@@ -14,12 +15,12 @@ use wazzi_runners::Wasmtime;
 use wazzi_wasi::{prog::Prog, seed::Seed, store::ExecutionStore};
 
 pub fn get_seed(name: &str) -> Seed {
-    serde_json::from_reader(
+    serde_json::from_reader(BufReader::new(
         fs::OpenOptions::new()
             .read(true)
             .open(wazzi_compile_time::root().join("seeds").join(name))
             .unwrap(),
-    )
+    ))
     .unwrap()
 }
 
@@ -83,8 +84,7 @@ pub fn run(seed: Seed) -> RunInstance {
             | Ok(result) => match result {
                 | Ok(prog) => prog,
                 | Err(err) => {
-                    let stderr = String::from_utf8(stderr.lock().unwrap().deref().clone()).unwrap();
-                    panic!("Failed to execute seed:\nstderr:\n{stderr}\nerr:\n{err}");
+                    panic!("Failed to execute seed:\nerr:\n{err}");
                 },
             },
             | Err(err) => panic!("Execution timeout or error.\nerr:\n{}", err),

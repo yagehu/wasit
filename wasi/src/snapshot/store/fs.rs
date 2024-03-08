@@ -1,6 +1,6 @@
 use std::{
     fs,
-    io,
+    io::{self, BufReader, BufWriter},
     path::PathBuf,
     sync::atomic::{AtomicUsize, Ordering},
 };
@@ -44,7 +44,7 @@ impl SnapshotStore for FsSnapshotStore {
             .write(true)
             .open(dir.join(Self::CALL_FILE_NAME))?;
 
-        serde_json::to_writer_pretty(file, &snapshot)?;
+        serde_json::to_writer_pretty(BufWriter::new(file), &snapshot)?;
 
         Ok(())
     }
@@ -62,7 +62,7 @@ impl SnapshotStore for FsSnapshotStore {
         let call_file = fs::OpenOptions::new()
             .read(true)
             .open(dir.join(Self::CALL_FILE_NAME))?;
-        let snapshot: WasiSnapshot = serde_json::from_reader(call_file)?;
+        let snapshot: WasiSnapshot = serde_json::from_reader(BufReader::new(call_file))?;
 
         Ok(Some(snapshot))
     }
