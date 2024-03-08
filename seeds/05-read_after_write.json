@@ -120,26 +120,28 @@
                         "value": {
                             "list": [
                                 {
-                                    "record": [
-                                        {
-                                            "name": "buf",
-                                            "value": {
+                                    "value": {
+                                        "record": [
+                                            {
+                                                "name": "buf",
                                                 "value": {
-                                                    "const_pointer": [
-                                                        { "builtin": { "u8": 97 } }
-                                                    ]
+                                                    "value": {
+                                                        "const_pointer": [
+                                                            { "value": { "builtin": { "u8": 97 } } }
+                                                        ]
+                                                    }
+                                                }
+                                            },
+                                            {
+                                                "name": "buf_len",
+                                                "value": {
+                                                    "value": {
+                                                        "builtin": { "u32": 131072 }
+                                                    }
                                                 }
                                             }
-                                        },
-                                        {
-                                            "name": "buf_len",
-                                            "value": {
-                                                "value": {
-                                                    "builtin": { "u32": 131072 }
-                                                }
-                                            }
-                                        }
-                                    ]
+                                        ]
+                                    }
                                 }
                             ]
                         }
@@ -170,16 +172,18 @@
                         "value": {
                             "list": [
                                 {
-                                    "record": [
-                                        {
-                                            "name": "buf",
-                                            "value": { "value": { "pointer": { "alloc_from_resource": 2 } } }
-                                        },
-                                        {
-                                            "name": "buf_len",
-                                            "value": { "resource": 2 }
-                                        }
-                                    ]
+                                    "value": {
+                                        "record": [
+                                            {
+                                                "name": "buf",
+                                                "value": { "value": { "pointer": { "alloc_from_resource": 2 } } }
+                                            },
+                                            {
+                                                "name": "buf_len",
+                                                "value": { "resource": 2 }
+                                            }
+                                        ]
+                                    }
                                 }
                             ]
                         }
