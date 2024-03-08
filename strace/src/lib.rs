@@ -39,7 +39,7 @@ impl Strace {
         stderr.read_until(b'\n', &mut buf)?;
         std::thread::sleep(std::time::Duration::from_secs(1));
 
-        thread::spawn(move || io::copy(&mut stderr, &mut io::stderr()).unwrap());
+        thread::spawn(move || io::copy(&mut stderr, &mut io::sink()).unwrap());
 
         Ok(Self { process: child })
     }
