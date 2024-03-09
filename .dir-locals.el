@@ -1,5 +1,7 @@
-((nil . ((eval . (add-to-list 'lsp-file-watch-ignored-directories
-                              "[/\\\\]\\runtimes\\'"
-                              "[/\\\\]\\target\\'"
-                              "[/\\\\]\\wasi-sdk\\'"))))
+;;; Directory Local Variables            -*- no-byte-compile: t -*-
+;;; For more information see (info "(emacs) Directory Variables")
 
+((nil . ((lsp-file-watch-ignored-directories . '("[/\\\\]\\.git\\'"
+                                                 "[/\\\\]\\runtimes\\'"
+                                                 "[/\\\\]\\target\\'"
+                                                 "[/\\\\]\\wasi-sdk\\'")))))
