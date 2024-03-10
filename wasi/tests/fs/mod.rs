@@ -248,76 +248,83 @@ fn filestat_set_times() {
     );
 }
 
-// #[test]
-// fn pread() {
-//     let mut seed = get_seed("16-pread.json");
-//     let size = 32;
-//     let mut file_content = vec![SeedValue::Builtin(seed::BuiltinValue::U8(97)); size as usize - 1];
+#[test]
+fn pread() {
+    let seed = get_seed("16-pread.json");
+    // let size = 32;
+    // let mut file_content = vec![SeedValue::Builtin(seed::BuiltinValue::U8(97)); size as usize - 1];
 
-//     file_content.push(SeedValue::Builtin(seed::BuiltinValue::U8(98)));
+    // file_content.push(SeedValue::Builtin(seed::BuiltinValue::U8(98)));
 
-//     match &mut seed.actions[1] {
-//         | seed::Action::Call(call) => {
-//             call.params[1] =
-//                 seed::ParamSpec::Value(SeedValue::List(seed::ListValue(vec![SeedValue::Record(
-//                     seed::RecordValue(vec![
-//                         seed::RecordMember {
-//                             name:  "buf".to_owned(),
-//                             value: ParamSpec::Value(SeedValue::ConstPointer(seed::ListValue(
-//                                 file_content,
-//                             ))),
-//                         },
-//                         seed::RecordMember {
-//                             name:  "buf_len".to_owned(),
-//                             value: ParamSpec::Value(SeedValue::Builtin(seed::BuiltinValue::U32(
-//                                 size,
-//                             ))),
-//                         },
-//                     ]),
-//                 )])))
-//         },
-//         | _ => panic!(),
-//     }
+    // match &mut seed.actions[1] {
+    //     | seed::Action::Call(call) => {
+    //         call.params[1] =
+    //             seed::ParamSpec::Value(SeedValue::List(seed::ListValue(vec![SeedValue::Record(
+    //                 seed::RecordValue(vec![
+    //                     seed::RecordMember {
+    //                         name:  "buf".to_owned(),
+    //                         value: ParamSpec::Value(SeedValue::ConstPointer(seed::ListValue(
+    //                             file_content,
+    //                         ))),
+    //                     },
+    //                     seed::RecordMember {
+    //                         name:  "buf_len".to_owned(),
+    //                         value: ParamSpec::Value(SeedValue::Builtin(seed::BuiltinValue::U32(
+    //                             size,
+    //                         ))),
+    //                     },
+    //                 ]),
+    //             )])))
+    //     },
+    //     | _ => panic!(),
+    // }
 
-//     let run = run(seed);
-//     let prog = run.result.expect(&run.stderr).finish(&spec());
-//     let read_call = prog.calls.last().unwrap();
+    let run = run(seed);
+    let read_call = run
+        .prog
+        .store()
+        .recorder()
+        .last()
+        .unwrap()
+        .unwrap()
+        .read_result()
+        .unwrap();
 
-//     assert_eq!(read_call.errno, Some(0));
-//     assert!(
-//         matches!(
-//             read_call.results.last().unwrap(),
-//             &Value::Builtin(seed::BuiltinValue::U32(i)) if i == size,
-//         ),
-//         "stderr:{}\n{:#?}",
-//         run.stderr,
-//         read_call.results.first().unwrap()
-//     );
+    assert_eq!(read_call.errno, Some(0));
+    assert!(
+        matches!(
+            read_call.results.last().unwrap(),
+            &Value::Builtin(seed::BuiltinValue::U32(2)),
+        ),
+        "stderr:{}\n{:#?}",
+        run.stderr,
+        read_call.results.first().unwrap()
+    );
 
-//     let iovec = match &read_call.params_post[1] {
-//         | Value::List(values) => &values[0],
-//         | _ => panic!(),
-//     };
-//     let buf = match &iovec {
-//         | Value::Record(record) => &record.0[0].value,
-//         | _ => panic!(),
-//     };
-//     let values = match &buf {
-//         | Value::Pointer(values) => values,
-//         | _ => panic!(),
-//     };
+    let iovec = match &read_call.params[1] {
+        | Value::List(values) => &values[0],
+        | _ => panic!(),
+    };
+    let buf = match &iovec {
+        | Value::Record(record) => &record.members[0].value,
+        | _ => panic!(),
+    };
+    let values = match &buf {
+        | Value::Pointer(values) => values,
+        | _ => panic!(),
+    };
 
-//     assert_eq!(values.len(), size as usize);
-//     assert!(
-//         matches!(
-//             values.last().unwrap(),
-//             Value::Builtin(seed::BuiltinValue::U8(98)),
-//         ),
-//         "{}\n{:#?}",
-//         run.stderr,
-//         values.last()
-//     );
-// }
+    assert_eq!(values.len(), 2);
+    assert!(
+        matches!(
+            values.last().unwrap(),
+            Value::Builtin(seed::BuiltinValue::U8(98)),
+        ),
+        "{}\n{:#?}",
+        run.stderr,
+        values.last()
+    );
+}
 
 // #[test]
 // fn prestat_get() {
