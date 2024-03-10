@@ -38,7 +38,20 @@ impl Seed {
 
         for action in self.actions {
             match action {
-                | Action::Decl(_decl) => todo!(),
+                | Action::Decl(decl) => {
+                    let resource = spec
+                        .resource(&witx::Id::new(&decl.resource_type))
+                        .wrap_err("resource not found in spec")?;
+                    let value = decl
+                        .value
+                        .into_prog_value(resource.tref.type_().as_ref(), prog.resource_ctx());
+
+                    prog.resource_ctx_mut().register_resource(
+                        &decl.resource_type,
+                        value,
+                        decl.resource_id,
+                    );
+                },
                 | Action::Call(call) => {
                     let func_spec = module_spec
                         .func(&witx::Id::new(&call.func))

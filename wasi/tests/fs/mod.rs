@@ -349,25 +349,45 @@ fn prestat_dir_name() {
     assert!(string.ends_with(&run.base_dir.path().to_string_lossy().to_string()));
 }
 
-// #[test]
-// fn pwrite() {
-//     let run = run_seed("19-pwrite.json");
-//     let prog = run.result.expect(&run.stderr).finish(&spec());
+#[test]
+fn pwrite() {
+    let run = run_seed("19-pwrite.json");
 
-//     assert_eq!(prog.calls.last().unwrap().errno, Some(0));
+    assert_eq!(
+        run.prog
+            .store()
+            .recorder()
+            .last()
+            .unwrap()
+            .unwrap()
+            .read_result()
+            .unwrap()
+            .errno,
+        Some(0)
+    );
 
-//     let file_content = fs::read(run.base_dir.path().join("a")).unwrap();
+    let file_content = fs::read(run.base_dir.path().join("a")).unwrap();
 
-//     assert_eq!(&file_content, &[97, 98]);
-// }
+    assert_eq!(&file_content, &[97, 98]);
+}
 
-// #[test]
-// fn fd_readdir() {
-//     let run = run_seed("20-fd_readdir.json");
-//     let prog = run.result.expect(&run.stderr).finish(&spec());
+#[test]
+fn fd_readdir() {
+    let run = run_seed("20-fd_readdir.json");
 
-//     assert_eq!(prog.calls.last().unwrap().errno, Some(0));
-// }
+    assert_eq!(
+        run.prog
+            .store()
+            .recorder()
+            .last()
+            .unwrap()
+            .unwrap()
+            .read_result()
+            .unwrap()
+            .errno,
+        Some(0)
+    );
+}
 
 // #[test]
 // fn fd_renumber() {

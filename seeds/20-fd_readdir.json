@@ -4,7 +4,7 @@
         {
             "decl": {
                 "resource_id": 1,
-                "type": "dirent_buf_size",
+                "resource_type": "dirent_buf_size",
                 "value": { "builtin": { "u32": 16 } }
             }
         },
