@@ -250,36 +250,7 @@ fn filestat_set_times() {
 
 #[test]
 fn pread() {
-    let seed = get_seed("16-pread.json");
-    // let size = 32;
-    // let mut file_content = vec![SeedValue::Builtin(seed::BuiltinValue::U8(97)); size as usize - 1];
-
-    // file_content.push(SeedValue::Builtin(seed::BuiltinValue::U8(98)));
-
-    // match &mut seed.actions[1] {
-    //     | seed::Action::Call(call) => {
-    //         call.params[1] =
-    //             seed::ParamSpec::Value(SeedValue::List(seed::ListValue(vec![SeedValue::Record(
-    //                 seed::RecordValue(vec![
-    //                     seed::RecordMember {
-    //                         name:  "buf".to_owned(),
-    //                         value: ParamSpec::Value(SeedValue::ConstPointer(seed::ListValue(
-    //                             file_content,
-    //                         ))),
-    //                     },
-    //                     seed::RecordMember {
-    //                         name:  "buf_len".to_owned(),
-    //                         value: ParamSpec::Value(SeedValue::Builtin(seed::BuiltinValue::U32(
-    //                             size,
-    //                         ))),
-    //                     },
-    //                 ]),
-    //             )])))
-    //     },
-    //     | _ => panic!(),
-    // }
-
-    let run = run(seed);
+    let run = run_seed("16-pread.json");
     let read_call = run
         .prog
         .store()
@@ -326,13 +297,23 @@ fn pread() {
     );
 }
 
-// #[test]
-// fn prestat_get() {
-//     let run = run_seed("17-prestat_get.json");
-//     let prog = run.result.expect(&run.stderr).finish(&spec());
+#[test]
+fn prestat_get() {
+    let run = run_seed("17-prestat_get.json");
 
-//     assert_eq!(prog.calls.last().unwrap().errno, Some(0));
-// }
+    assert_eq!(
+        run.prog
+            .store()
+            .recorder()
+            .last()
+            .unwrap()
+            .unwrap()
+            .read_result()
+            .unwrap()
+            .errno,
+        Some(0)
+    );
+}
 
 // #[test]
 // fn prestat_dir_name() {
