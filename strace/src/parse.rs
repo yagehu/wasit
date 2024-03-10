@@ -255,7 +255,7 @@ impl NormalThreadEvent {
             let (input, args) = separated_list0(char(','), ws(Arg::parse))(input)?;
             let (input, _) = opt(ws(char(',')))(input)?;
 
-            if peek(unfinished_tag)(input).is_ok() {
+            if peek(ws(unfinished_tag))(input).is_ok() {
                 let (input, _) = ws(unfinished_tag).parse(input)?;
 
                 Ok((
