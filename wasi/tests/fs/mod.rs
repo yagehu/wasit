@@ -466,13 +466,23 @@ fn path_create_directory() {
     assert!(run.base_dir.path().join("a").is_dir());
 }
 
-// #[test]
-// fn path_filestat_get() {
-//     let run = run_seed("25-path_filestat_get.json");
-//     let prog = run.result.expect(&run.stderr).finish(&spec());
+#[test]
+fn path_filestat_get() {
+    let run = run_seed("25-path_filestat_get.json");
 
-//     assert_eq!(prog.calls.last().unwrap().errno, Some(0));
-// }
+    assert_eq!(
+        run.prog
+            .store()
+            .recorder()
+            .last()
+            .unwrap()
+            .unwrap()
+            .read_result()
+            .unwrap()
+            .errno,
+        Some(0)
+    );
+}
 
 // #[test]
 // fn path_filestat_set_times() {
