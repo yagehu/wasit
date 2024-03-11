@@ -407,7 +407,7 @@ impl Value {
             Ok((input, Self::Call(value)))
         } else if peek(ident)(input).is_ok() {
             // Parse the first ident.
-            let (input_, ident) = ws(ident)(input)?;
+            let (input_, ident) = ident(input)?;
 
             if peek(ws(char::<&str, nom::error::Error<_>>('|')))(input_).is_ok() {
                 // This is actually a flag set.
@@ -749,7 +749,16 @@ mod tests {
         let lines = r#"
             42526 restart_syscall(<... resuming interrupted futex ...> <unfinished ...>
         "#;
+        let (_rest, trace) = all_consuming(Trace::parse)(lines).unwrap();
 
+        assert_eq!(trace.events.len(), 1, "{:#?}", trace);
+    }
+
+    #[test]
+    fn ident_list() {
+        let lines = r#"
+            142  rt_sigprocmask(SIG_UNBLOCK, [RTMIN RT_1], NULL, 8) = 0
+        "#;
         let (_rest, trace) = all_consuming(Trace::parse)(lines).unwrap();
 
         assert_eq!(trace.events.len(), 1, "{:#?}", trace);

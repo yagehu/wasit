@@ -520,14 +520,24 @@ fn path_link() {
     );
 }
 
-// #[test]
-// fn path_remove_directory() {
-//     let run = run_seed("28-path_remove_directory.json");
-//     let prog = run.result.expect(&run.stderr).finish(&spec());
+#[test]
+fn path_remove_directory() {
+    let run = run_seed("28-path_remove_directory.json");
 
-//     assert_eq!(prog.calls.last().unwrap().errno, Some(0));
-//     assert!(!run.base_dir.path().join("a").exists());
-// }
+    assert_eq!(
+        run.prog
+            .store()
+            .recorder()
+            .last()
+            .unwrap()
+            .unwrap()
+            .read_result()
+            .unwrap()
+            .errno,
+        Some(0)
+    );
+    assert!(!run.base_dir.path().join("a").exists());
+}
 
 // #[test]
 // fn path_rename() {
