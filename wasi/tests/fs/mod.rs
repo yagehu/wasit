@@ -539,33 +539,63 @@ fn path_remove_directory() {
     assert!(!run.base_dir.path().join("a").exists());
 }
 
-// #[test]
-// fn path_rename() {
-//     let run = run_seed("29-path_rename.json");
-//     let prog = run.result.expect(&run.stderr).finish(&spec());
+#[test]
+fn path_rename() {
+    let run = run_seed("29-path_rename.json");
 
-//     assert_eq!(prog.calls.last().unwrap().errno, Some(0));
-//     assert!(!run.base_dir.path().join("a").exists());
-//     assert!(run.base_dir.path().join("b").exists());
-// }
+    assert_eq!(
+        run.prog
+            .store()
+            .recorder()
+            .last()
+            .unwrap()
+            .unwrap()
+            .read_result()
+            .unwrap()
+            .errno,
+        Some(0)
+    );
+    assert!(!run.base_dir.path().join("a").exists());
+    assert!(run.base_dir.path().join("b").exists());
+}
 
-// #[test]
-// fn path_symlink() {
-//     let run = run_seed("30-path_symlink.json");
-//     let prog = run.result.expect(&run.stderr).finish(&spec());
+#[test]
+fn path_symlink() {
+    let run = run_seed("30-path_symlink.json");
 
-//     assert_eq!(prog.calls.last().unwrap().errno, Some(0));
-//     assert_eq!(
-//         run.base_dir.path().join("a").canonicalize().unwrap(),
-//         run.base_dir.path().join("b").canonicalize().unwrap(),
-//     );
-// }
+    assert_eq!(
+        run.prog
+            .store()
+            .recorder()
+            .last()
+            .unwrap()
+            .unwrap()
+            .read_result()
+            .unwrap()
+            .errno,
+        Some(0)
+    );
+    assert_eq!(
+        run.base_dir.path().join("a").canonicalize().unwrap(),
+        run.base_dir.path().join("b").canonicalize().unwrap(),
+    );
+}
 
-// #[test]
-// fn path_unlink_file() {
-//     let run = run_seed("31-path_unlink_file.json");
-//     let prog = run.result.expect(&run.stderr).finish(&spec());
+#[test]
+fn path_unlink_file() {
+    let run = run_seed("31-path_unlink_file.json");
 
-//     assert_eq!(prog.calls.last().unwrap().errno, Some(0));
-//     assert!(!run.base_dir.path().join("a").exists());
-// }
+    assert_eq!(
+        run.prog
+            .store()
+            .recorder()
+            .last()
+            .unwrap()
+            .unwrap()
+            .read_result()
+            .unwrap()
+            .errno,
+        Some(0)
+    );
+    assert!(!run.base_dir.path().join("a").exists());
+}
