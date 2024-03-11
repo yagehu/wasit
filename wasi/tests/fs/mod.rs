@@ -484,13 +484,23 @@ fn path_filestat_get() {
     );
 }
 
-// #[test]
-// fn path_filestat_set_times() {
-//     let run = run_seed("26-path_filestat_set_times.json");
-//     let prog = run.result.expect(&run.stderr).finish(&spec());
+#[test]
+fn path_filestat_set_times() {
+    let run = run_seed("26-path_filestat_set_times.json");
 
-//     assert_eq!(prog.calls.last().unwrap().errno, Some(0));
-// }
+    assert_eq!(
+        run.prog
+            .store()
+            .recorder()
+            .last()
+            .unwrap()
+            .unwrap()
+            .read_result()
+            .unwrap()
+            .errno,
+        Some(0)
+    );
+}
 
 // #[test]
 // fn path_link() {
