@@ -389,25 +389,45 @@ fn fd_readdir() {
     );
 }
 
-// #[test]
-// fn fd_renumber() {
-//     let run = run_seed("21-fd_renumber.json");
-//     let prog = run.result.expect(&run.stderr).finish(&spec());
+#[test]
+fn fd_renumber() {
+    let run = run_seed("21-fd_renumber.json");
 
-//     assert_eq!(prog.calls.last().unwrap().errno, Some(0));
+    assert_eq!(
+        run.prog
+            .store()
+            .recorder()
+            .last()
+            .unwrap()
+            .unwrap()
+            .read_result()
+            .unwrap()
+            .errno,
+        Some(0)
+    );
 
-//     let file_content = fs::read(run.base_dir.path().join("a")).unwrap();
+    let file_content = fs::read(run.base_dir.path().join("a")).unwrap();
 
-//     assert_eq!(&file_content, &[97, 98]);
-// }
+    assert_eq!(&file_content, &[97, 98]);
+}
 
-// #[test]
-// fn fd_sync() {
-//     let run = run_seed("22-fd_sync.json");
-//     let prog = run.result.expect(&run.stderr).finish(&spec());
+#[test]
+fn fd_sync() {
+    let run = run_seed("22-fd_sync.json");
 
-//     assert_eq!(prog.calls.last().unwrap().errno, Some(0));
-// }
+    assert_eq!(
+        run.prog
+            .store()
+            .recorder()
+            .last()
+            .unwrap()
+            .unwrap()
+            .read_result()
+            .unwrap()
+            .errno,
+        Some(0)
+    );
+}
 
 // #[test]
 // fn fd_tell() {
