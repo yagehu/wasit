@@ -447,14 +447,24 @@ fn fd_tell() {
     );
 }
 
-// #[test]
-// fn path_create_directory() {
-//     let run = run_seed("24-path_create_directory.json");
-//     let prog = run.result.expect(&run.stderr).finish(&spec());
+#[test]
+fn path_create_directory() {
+    let run = run_seed("24-path_create_directory.json");
 
-//     assert_eq!(prog.calls.last().unwrap().errno, Some(0));
-//     assert!(run.base_dir.path().join("a").is_dir());
-// }
+    assert_eq!(
+        run.prog
+            .store()
+            .recorder()
+            .last()
+            .unwrap()
+            .unwrap()
+            .read_result()
+            .unwrap()
+            .errno,
+        Some(0)
+    );
+    assert!(run.base_dir.path().join("a").is_dir());
+}
 
 // #[test]
 // fn path_filestat_get() {
