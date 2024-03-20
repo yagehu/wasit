@@ -259,6 +259,7 @@ impl Value {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum BuiltinValue {
+    Char(char),
     U8(u8),
     U32(u32),
     U64(u64),
@@ -268,6 +269,7 @@ pub enum BuiltinValue {
 impl From<BuiltinValue> for executor_pb::value::Builtin {
     fn from(x: BuiltinValue) -> Self {
         let which = match x {
+            | BuiltinValue::Char(c) => executor_pb::value::builtin::Which::Char(c as u32),
             | BuiltinValue::U8(i) => executor_pb::value::builtin::Which::U8(i.into()),
             | BuiltinValue::U32(i) => executor_pb::value::builtin::Which::U32(i),
             | BuiltinValue::U64(i) => executor_pb::value::builtin::Which::U64(i),
@@ -284,6 +286,7 @@ impl From<BuiltinValue> for executor_pb::value::Builtin {
 impl From<executor_pb::value::Builtin> for BuiltinValue {
     fn from(x: executor_pb::value::Builtin) -> Self {
         match x.which.unwrap() {
+            | executor_pb::value::builtin::Which::Char(i) => Self::Char(char::from_u32(i).unwrap()),
             | executor_pb::value::builtin::Which::U8(i) => Self::U8(i as u8),
             | executor_pb::value::builtin::Which::U32(i) => Self::U32(i),
             | executor_pb::value::builtin::Which::U64(i) => Self::U64(i),

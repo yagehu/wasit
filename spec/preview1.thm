@@ -1,0 +1,87 @@
+<?xml version="1.0"?>
+<alloy>
+
+<view>
+
+<defaultnode/>
+
+<defaultedge/>
+
+<node>
+   <type name="Advice"/>
+   <type name="Fd"/>
+   <type name="FdAdvise"/>
+   <type name="FdBase"/>
+   <type name="FdDir"/>
+   <type name="Fdflags"/>
+   <type name="FdRead"/>
+   <type name="FdReg"/>
+   <type name="FdTell"/>
+   <type name="FileOffset"/>
+   <type name="FileSliceLen"/>
+   <type name="Flags"/>
+   <type name="I32"/>
+   <type name="Int"/>
+   <type name="Iovec"/>
+   <type name="IovecArray"/>
+   <type name="List"/>
+   <type name="Lookupflags"/>
+   <type name="NByte"/>
+   <type name="Oflags"/>
+   <type name="Path"/>
+   <type name="PathOpen"/>
+   <type name="Pointer"/>
+   <type name="ReadBuf"/>
+   <type name="ReadBufLen"/>
+   <type name="Record"/>
+   <type name="Rights"/>
+   <type name="Str"/>
+   <type name="String"/>
+   <type name="U32"/>
+   <type name="U64"/>
+   <type name="U8"/>
+   <type name="univ"/>
+   <type name="ValueTypeUserDefined"/>
+   <type name="Variant"/>
+   <type name="seq/Int"/>
+   <set name="$t" type="ValueTypeFundamental"/>
+   <set name="$t" type="ValueTypeSpecialized"/>
+</node>
+
+<node color="Blue">
+   <type name="Function"/>
+</node>
+
+<node shape="Circle">
+   <type name="ValueType"/>
+</node>
+
+<node shape="Diamond" color="Gray">
+   <type name="ValueTypeFundamental"/>
+</node>
+
+<node shape="Hexagon" color="Gray">
+   <type name="ValueTypeSpecialized"/>
+</node>
+
+<edge color="Blue" visible="no">
+   <relation name="parent"> <type name="ValueTypeUserDefined"/> <type name="ValueType"/> </relation>
+</edge>
+
+<edge color="Gray">
+   <relation name="$param_of"> <type name="ValueType"/> <type name="Function"/> </relation>
+</edge>
+
+<edge color="Gray" visible="no">
+   <relation name="params"> <type name="Function"/> <type name="ValueType"/> </relation>
+</edge>
+
+<edge visible="no">
+   <relation name="element"> <type name="List"/> <type name="ValueType"/> </relation>
+   <relation name="members"> <type name="Record"/> <type name="ValueType"/> </relation>
+   <relation name="pointee"> <type name="Pointer"/> <type name="ValueType"/> </relation>
+</edge>
+
+</view>
+
+</alloy>

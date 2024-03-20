@@ -1,8 +1,17 @@
-use petgraph::{graph::DiGraph, stable_graph::NodeIndex, Direction};
+use petgraph::{
+    graph::{DiGraph, Edge},
+    stable_graph::{DefaultIx, EdgeIndex, IndexType, NodeIndex},
+    visit::{GraphRef, Reversed, VisitMap, Visitable},
+    Direction,
+    EdgeType,
+    Graph,
+};
 
 use crate::Abi;
 use std::{
     collections::{HashMap, HashSet},
+    fmt,
+    marker::PhantomData,
     rc::{Rc, Weak},
 };
 
@@ -145,6 +154,43 @@ impl Document {
             | Definition::Constant(c) => Some(c),
             | _ => None,
         })
+    }
+
+    pub fn resource_fulfilled_by_transitive(
+        &self,
+        name: &Id,
+    ) -> Option<Vec<(Resource, Vec<Resource>)>> {
+        let mut paths: HashMap<NodeIndex, Vec<Resource>> = Default::default();
+        let fulfilled_by_graph = Reversed(&self.resources);
+        let resource_node = *self.resources_map.get(name)?;
+        let mut dfs = Dfs::new(&fulfilled_by_graph, resource_node);
+        let mut fulfilled_by = Vec::new();
+
+        while let Some((nx, ex)) = dfs.next(&fulfilled_by_graph) {
+            match ex {
+                | Some(ex) => {
+                    // Find the source, which is actually the target since we revered the graph.
+                    let (_source, target) = self.resources.edge_endpoints(ex).unwrap();
+                    let mut path = paths.get(&target).unwrap().clone();
+
+                    path.push(self.resources.node_weight(target).unwrap().clone());
+                    fulfilled_by.push((
+                        self.resources.node_weight(nx).unwrap().clone(),
+                        path.clone(),
+                    ));
+                    paths.insert(nx, path);
+                },
+                | None => {
+                    fulfilled_by.push((
+                        self.resources.node_weight(nx).unwrap().clone(),
+                        Vec::with_capacity(0),
+                    ));
+                    paths.insert(nx, Vec::with_capacity(0));
+                },
+            }
+        }
+
+        Some(fulfilled_by)
     }
 }
 
@@ -731,4 +777,173 @@ impl Resource {
 pub enum ResourceRelation {
     Alloc,
     Subtype,
+}
+
+#[derive(Clone, Debug)]
+struct Dfs<N, E, VM, G> {
+    /// The stack of nodes to visit.
+    stack: Vec<(N, Option<E>)>,
+
+    /// The map of discovered nodes.
+    discovered: VM,
+
+    graph: PhantomData<G>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NeighborsWithEdges<'a, E: 'a, Ix: 'a = DefaultIx> {
+    /// starting node to skip over
+    skip_start: NodeIndex<Ix>,
+    edges:      &'a [Edge<E, Ix>],
+    next:       [EdgeIndex<Ix>; 2],
+}
+
+impl<'a, E, Ix> Iterator for NeighborsWithEdges<'a, E, Ix>
+where
+    Ix: IndexType,
+    E: fmt::Debug,
+{
+    type Item = (NodeIndex<Ix>, EdgeIndex<Ix>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // First any outgoing edges
+        match self.edges.get(self.next[0].index()) {
+            | None => {},
+            | Some(edge) => {
+                let idx = self.next[0];
+
+                self.next[0] = edge.next_edge(Direction::Outgoing);
+
+                return Some((edge.target(), idx));
+            },
+        }
+        // Then incoming edges
+        // For an "undirected" iterator (traverse both incoming
+        // and outgoing edge lists), make sure we don't double
+        // count selfloops by skipping them in the incoming list.
+        while let Some(edge) = self.edges.get(self.next[1].index()) {
+            let idx = self.next[1];
+
+            self.next[1] = edge.next_edge(Direction::Incoming);
+
+            if edge.source() != self.skip_start {
+                return Some((edge.source(), idx));
+            }
+        }
+
+        None
+    }
+}
+
+trait IntoNeighborsWithEdgesDirected: GraphRef {
+    type NeighborsWithEdgesDirected: Iterator<Item = (Self::NodeId, Self::EdgeId)>;
+
+    fn neighbors_with_edges_directed(
+        self,
+        a: Self::NodeId,
+        dir: Direction,
+    ) -> Self::NeighborsWithEdgesDirected;
+}
+
+impl<'a, G> IntoNeighborsWithEdgesDirected for &'a Reversed<G>
+where
+    G: IntoNeighborsWithEdgesDirected<NodeId = NodeIndex, EdgeId = EdgeIndex>,
+{
+    type NeighborsWithEdgesDirected = G::NeighborsWithEdgesDirected;
+
+    fn neighbors_with_edges_directed(
+        self,
+        a: Self::NodeId,
+        dir: Direction,
+    ) -> Self::NeighborsWithEdgesDirected {
+        self.0.neighbors_with_edges_directed(a, dir.opposite())
+    }
+}
+
+impl<'a, N, E, Ty, Ix> IntoNeighborsWithEdgesDirected for &'a Graph<N, E, Ty, Ix>
+where
+    Ty: EdgeType,
+    Ix: IndexType,
+    E: fmt::Debug,
+{
+    type NeighborsWithEdgesDirected = NeighborsWithEdges<'a, E, Ix>;
+
+    fn neighbors_with_edges_directed(
+        self,
+        a: Self::NodeId,
+        dir: Direction,
+    ) -> Self::NeighborsWithEdgesDirected {
+        let mut iter = NeighborsWithEdges {
+            skip_start: a,
+            edges:      self.raw_edges(),
+            next:       match self.raw_nodes().get(a.index()) {
+                | None => [EdgeIndex::end(), EdgeIndex::end()],
+                | Some(n) => [
+                    n.next_edge(Direction::Outgoing),
+                    n.next_edge(Direction::Incoming),
+                ],
+            },
+        };
+
+        if self.is_directed() {
+            let k = dir.index();
+            iter.next[1 - k] = EdgeIndex::end();
+            iter.skip_start = NodeIndex::end();
+        }
+
+        iter
+    }
+}
+
+impl<N, E, VM, G> Dfs<N, E, VM, G>
+where
+    N: Copy + PartialEq,
+    E: fmt::Debug,
+    VM: VisitMap<N>,
+    G: GraphRef<EdgeId = E>
+        + Visitable<NodeId = N, Map = VM>
+        + IntoNeighborsWithEdgesDirected<NodeId = N>,
+{
+    /// Create a new **Dfs**, using the graph's visitor map, and put **start**
+    /// in the stack of nodes to visit.
+    pub fn new(graph: G, start: N) -> Self {
+        let mut dfs = Dfs::empty(graph);
+        dfs.move_to(start, None);
+        dfs
+    }
+
+    /// Create a new **Dfs** using the graph's visitor map, and no stack.
+    pub fn empty(graph: G) -> Self {
+        Dfs {
+            stack:      Vec::new(),
+            discovered: graph.visit_map(),
+            graph:      PhantomData,
+        }
+    }
+
+    /// Keep the discovered map, but clear the visit stack and restart
+    /// the dfs from a particular node.
+    pub fn move_to(&mut self, start: N, start_edge: Option<E>) {
+        self.stack.clear();
+        self.stack.push((start, start_edge));
+    }
+
+    /// Return the next node and connecting edge in the dfs, or **None** if the traversal is done.
+    pub fn next(&mut self, graph: G) -> Option<(N, Option<E>)> {
+        while let Some((node, edge)) = self.stack.pop() {
+            if self.discovered.visit(node) {
+                for (succ_node, succ_edge) in
+                    graph.neighbors_with_edges_directed(node, Direction::Outgoing)
+                {
+                    if !self.discovered.is_visited(&succ_node) {
+                        self.stack.push((succ_node, Some(succ_edge)));
+                    }
+                }
+
+                return Some((node, edge));
+            }
+        }
+
+        None
+    }
 }

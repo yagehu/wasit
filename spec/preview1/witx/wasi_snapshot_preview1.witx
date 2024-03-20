@@ -8,6 +8,15 @@
 
 (use "typenames.witx")
 
+(typename $clock_res $timestamp)
+(resource $clock_res (type $clock_res))
+
+(typename $clock_res_maybe $clock_res)
+(resource $clock_res_maybe (type $clock_res_maybe))
+
+(typename $clock_time $clock_res_maybe)
+(resource $clock_time (type $clock_res_maybe))
+
 (typename $fd_reg $fd)
 (resource $fd_reg (type $fd_reg))
 
@@ -41,9 +50,6 @@
 (typename $environ_buf_size $size)
 (resource $environ_buf_size (type $environ_buf_size) (@alloc $environ_buf))
 
-(typename $clock_res $timestamp)
-(resource $clock_res (type $clock_res))
-
 (typename $dirent_buf (@witx pointer u8))
 (resource $dirent_buf (type $dirent_buf))
 
@@ -52,6 +58,14 @@
 
 (typename $file_offset $filesize)
 (resource $file_offset (type $file_offset))
+
+(typename $symlink_content (@witx pointer u8))
+(resource $symlink_content (type $symlink_content))
+
+(typename $symlink_content_size $size)
+(resource $symlink_content_size (type $symlink_content_size) (@alloc $symlink_content))
+(typename $symlink_content_size_maybe $symlink_content_size)
+(resource $symlink_content_size_maybe (type $symlink_content_size_maybe))
 
 (module $wasi_snapshot_preview1
   ;;; Linear memory to be accessed by WASI functions that need it.
@@ -115,9 +129,9 @@
     ;;; The clock for which to return the time.
     (param $id $clockid)
     ;;; The maximum lag (exclusive) that the returned time value may have, compared to its actual value.
-    (param $precision $timestamp)
+    (param $precision $clock_res)
     ;;; The time value of the clock.
-    (result $error (expected $timestamp (error $errno)))
+    (result $error (expected $clock_time (error $errno)))
   )
 
   ;;; Provide file advisory information on a file descriptor.
@@ -237,8 +251,8 @@
   (@interface func (export "fd_prestat_dir_name")
     (param $fd $fd)
     ;;; A buffer into which to write the preopened directory name.
-    (param $path (@witx pointer u8))
-    (param $path_len $size)
+    (param $path $prestat_dir_name)
+    (param $path_len $pr_name_len)
     (result $error (expected (error $errno)))
   )
 
@@ -432,7 +446,7 @@
     (param $fs_rights_inheriting $rights)
     (param $fdflags $fdflags)
     ;;; The file descriptor of the file that has been opened.
-    (result $error (expected $fd_reg (error $errno)))
+    (result $error (expected $fd (error $errno)))
   )
 
   ;;; Read the contents of a symbolic link.
@@ -444,8 +458,8 @@
     ;;; The path of the symbolic link from which to read.
     (param $path string)
     ;;; The buffer to which to write the contents of the symbolic link.
-    (param $buf (@witx pointer u8))
-    (param $buf_len $size)
+    (param $buf $symlink_content)
+    (param $buf_len $symlink_content_size)
     ;;; The number of bytes placed in the buffer.
     (result $error (expected $size (error $errno)))
   )

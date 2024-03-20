@@ -519,7 +519,7 @@ impl StringValue {
     fn parse(input: &str) -> nom::IResult<&str, Self> {
         let (input, s) = delimited(
             char('"'),
-            bytes::streaming::escaped(none_of(r#"\""#), '\\', one_of(r#"""#)),
+            bytes::streaming::escaped(none_of(r#"\""#), '\\', one_of(r#""n0123456789"#)),
             char('"'),
         )(input)?;
 
@@ -758,6 +758,26 @@ mod tests {
     fn ident_list() {
         let lines = r#"
             142  rt_sigprocmask(SIG_UNBLOCK, [RTMIN RT_1], NULL, 8) = 0
+        "#;
+        let (_rest, trace) = all_consuming(Trace::parse)(lines).unwrap();
+
+        assert_eq!(trace.events.len(), 1, "{:#?}", trace);
+    }
+
+    #[test]
+    fn string() {
+        let lines = r#"
+            16362 newfstatat(3, "\372\327\n", 0x7ffd9c054e10, AT_SYMLINK_NOFOLLOW) = -1 ENOENT (No such file or directory)
+        "#;
+        let (_rest, trace) = all_consuming(Trace::parse)(lines).unwrap();
+
+        assert_eq!(trace.events.len(), 1, "{:#?}", trace);
+    }
+
+    #[test]
+    fn string_path() {
+        let lines = r#"
+            26613 openat(AT_FDCWD, "/some/path/n", O_RDWR|O_CREAT|O_EXCL|O_CLOEXEC, 0666) = 25
         "#;
         let (_rest, trace) = all_consuming(Trace::parse)(lines).unwrap();
 

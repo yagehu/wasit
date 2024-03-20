@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use serde::{Deserialize, Serialize};
 
@@ -11,7 +11,7 @@ type ResourceType = String;
 pub struct ResourceContext {
     next_id:  ResourceId,
     map:      HashMap<ResourceId, Value>,
-    by_types: HashMap<ResourceType, BTreeSet<ResourceId>>,
+    by_types: BTreeMap<ResourceType, BTreeSet<ResourceId>>,
 }
 
 impl Default for ResourceContext {
@@ -61,6 +61,10 @@ impl ResourceContext {
 
             unreachable!()
         })
+    }
+
+    pub fn iter_by_type(&self) -> impl Iterator<Item = (&String, &BTreeSet<ResourceId>)> {
+        self.by_types.iter()
     }
 }
 

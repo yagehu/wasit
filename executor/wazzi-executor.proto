@@ -44,10 +44,11 @@ enum IntRepr {
 message Value {
     message Builtin {
         oneof which {
-            uint32 u8 = 1;
-            uint32 u32 = 3;
-            uint64 u64 = 4;
-            sint64 s64 = 8;
+            uint32 char = 1;
+            uint32 u8 = 2;
+            uint32 u32 = 4;
+            uint64 u64 = 5;
+            sint64 s64 = 9;
         }
     }
 

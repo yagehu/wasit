@@ -1,5 +1,6 @@
 use std::{
     ffi::OsString,
+    fmt,
     fs,
     io,
     path::{Path, PathBuf},
@@ -8,7 +9,7 @@ use std::{
 
 use tera::Tera;
 
-pub trait WasiRunner {
+pub trait WasiRunner: fmt::Debug + Send + Sync {
     fn base_dir_fd(&self) -> u32;
     fn prepare_command(
         &self,
@@ -17,7 +18,6 @@ pub trait WasiRunner {
         base_dir: Option<PathBuf>,
     ) -> process::Command;
 
-    #[tracing::instrument(skip(self))]
     fn run(
         &self,
         wasm_path: PathBuf,

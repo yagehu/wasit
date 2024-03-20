@@ -12,20 +12,16 @@ use std::{
 use protobuf::Message;
 use wazzi_runners::WasiRunner;
 
-#[derive(Debug)]
-pub struct ExecutorRunner<WR> {
-    wasi_runner: WR,
+pub struct ExecutorRunner<'r> {
+    wasi_runner: &'r dyn WasiRunner,
     executor:    PathBuf,
     working_dir: PathBuf,
     base_dir:    Option<PathBuf>,
 }
 
-impl<WR> ExecutorRunner<WR>
-where
-    WR: WasiRunner,
-{
+impl<'r> ExecutorRunner<'r> {
     pub fn new(
-        wasi_runner: WR,
+        wasi_runner: &'r dyn WasiRunner,
         executor: PathBuf,
         working_dir: PathBuf,
         base_dir: Option<PathBuf>,

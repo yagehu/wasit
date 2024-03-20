@@ -760,8 +760,13 @@
   )
 )
 
+;; User may not pass in a previously returned `pr_name_len` to `fd_prestat_dir_name`
+(typename $prestat_dir_name (@witx pointer u8))
+(resource $prestat_dir_name (type $prestat_dir_name))
 (typename $pr_name_len $size)
-(resource $pr_name_len (type $pr_name_len))
+(resource $pr_name_len (type $pr_name_len) (@alloc $prestat_dir_name))
+(typename $pr_name_len_maybe $pr_name_len)
+(resource $pr_name_len_maybe (type $pr_name_len_maybe))
 
 ;;; The contents of a `prestat` when type is `preopentype::dir`.
 (typename $prestat_dir

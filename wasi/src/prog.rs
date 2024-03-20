@@ -1,9 +1,11 @@
 pub mod call;
 
-use std::io;
+use std::{collections::HashSet, io};
 
-use color_eyre::eyre;
+use arbitrary::Unstructured;
+use color_eyre::eyre::{self, Context};
 use serde::{Deserialize, Serialize};
+use tracing::{error, info};
 use wazzi_executor::RunningExecutor;
 use witx::Layout;
 
@@ -100,8 +102,6 @@ impl Prog {
             | _ => panic!(),
         };
 
-        std::thread::sleep(std::time::Duration::from_secs(1));
-
         self.store.recorder_mut().end_call(CallResult {
             func: func.name.as_str().to_owned(),
             errno,
@@ -119,6 +119,47 @@ impl Prog {
                 })
                 .collect(),
         })?;
+
+        Ok(())
+    }
+
+    pub fn call_arbitrary(
+        &mut self,
+        u: &mut Unstructured,
+        spec: &witx::Document,
+    ) -> Result<(), eyre::Error> {
+        let funcs_to_skip = ["proc_raise", "sched_yield", "sock_recv", "sock_send"]
+            .into_iter()
+            .collect::<HashSet<_>>();
+        let module_spec = spec
+            .module(&witx::Id::new("wasi_snapshot_preview1"))
+            .unwrap();
+        let func_specs = module_spec
+            .funcs()
+            .filter(|f| !funcs_to_skip.contains(f.name.as_str()))
+            .collect::<Vec<_>>();
+        let func_spec = u.choose(&func_specs)?;
+        let result_trefs = func_spec.unpack_expected_result();
+        let mut params = Vec::with_capacity(func_spec.params.len());
+        let mut results = Vec::with_capacity(result_trefs.len());
+
+        info!(func = func_spec.name.as_str(), "Picked arbitrary func");
+
+        for (i, param) in func_spec.params.iter().enumerate() {
+            let next = func_spec.params.get(i + 1).map(|param| &param.tref);
+
+            params.push(
+                self.arbitrary_value_or_resource(u, spec, &param.tref, next)
+                    .wrap_err(format!("failed to choose arbitrary param {i}"))?,
+            );
+        }
+
+        for result_tref in &result_trefs {
+            results.push(Value::zero_value_from_spec(result_tref));
+        }
+
+        self.call(func_spec, params, results)
+            .wrap_err(format!("failed to call func {}", func_spec.name.as_str()))?;
 
         Ok(())
     }
@@ -141,6 +182,119 @@ impl Prog {
 
     pub fn executor(&self) -> &RunningExecutor {
         &self.executor
+    }
+
+    fn arbitrary_value_or_resource(
+        &self,
+        u: &mut Unstructured,
+        spec: &witx::Document,
+        tref: &witx::TypeRef,
+        next: Option<&witx::TypeRef>,
+    ) -> Result<Value, eyre::Error> {
+        match tref.resource(spec) {
+            | Some(resource) => {
+                // First, handle the special case that the structurally next value can allocate the
+                // current value.  If so, resolve the next value first.
+
+                let candidate_resource_types = spec
+                    .resource_fulfilled_by_transitive(&resource.name)
+                    .unwrap();
+                let candidate_resource_type_set = candidate_resource_types
+                    .iter()
+                    .map(|resource| resource.0.name.as_str())
+                    .collect::<HashSet<_>>();
+                let mut populated_candidates = Vec::new();
+
+                for (resource_type, resources) in self.resource_ctx.iter_by_type() {
+                    if !candidate_resource_type_set.contains(resource_type.as_str()) {
+                        continue;
+                    }
+
+                    if resources.is_empty() && !resource_type.ends_with("_maybe") {
+                        continue;
+                    }
+
+                    populated_candidates.push((resource_type, resources));
+                }
+
+                if populated_candidates.is_empty() {
+                    return self.arbitrary_value(u, spec, tref);
+                }
+
+                let &(_resource_type, resources) = u.choose(&populated_candidates)?;
+                let resource_pool = resources.iter().cloned().collect::<Vec<_>>();
+                let resource_id = *u.choose(&resource_pool)?;
+                let resource = self.resource_ctx.get_resource(resource_id).unwrap();
+
+                Ok(resource.value)
+            },
+            | None => self.arbitrary_value(u, spec, tref),
+        }
+    }
+
+    fn arbitrary_value(
+        &self,
+        u: &mut Unstructured,
+        spec: &witx::Document,
+        tref: &witx::TypeRef,
+    ) -> Result<Value, eyre::Error> {
+        Ok(match tref.type_().as_ref() {
+            | witx::Type::Record(record) if record.bitflags_repr().is_some() => {
+                let mut members = Vec::with_capacity(record.members.len());
+
+                for member in &record.members {
+                    members.push(seed::BitflagsMemberValue {
+                        name:  member.name.as_str().to_owned(),
+                        value: u.arbitrary()?,
+                    });
+                }
+
+                Value::Bitflags(seed::BitflagsValue(members))
+            },
+            | witx::Type::Record(_record) => todo!(),
+            | witx::Type::Variant(variant) => {
+                let &(idx, case) =
+                    u.choose(&variant.cases.iter().enumerate().collect::<Vec<_>>())?;
+
+                Value::Variant(VariantValue {
+                    idx:     idx as u64,
+                    name:    case.name.as_str().to_owned(),
+                    payload: case
+                        .tref
+                        .as_ref()
+                        .map(|tref| self.arbitrary_value_or_resource(u, spec, tref, None))
+                        .transpose()?
+                        .map(|value| Box::new(value)),
+                })
+            },
+            | witx::Type::Handle(_) => todo!(),
+            | witx::Type::List(tref) => {
+                // Pick a length.
+                let len = u.choose_index(4)?;
+                let mut values = Vec::with_capacity(len);
+
+                for _i in 0..len {
+                    values.push(self.arbitrary_value_or_resource(u, spec, tref, None)?);
+                }
+
+                Value::List(values)
+            },
+            | witx::Type::Pointer(tref) => todo!(),
+            | witx::Type::ConstPointer(_) => todo!(),
+            | witx::Type::Builtin(builtin) => Value::Builtin(match builtin {
+                | witx::BuiltinType::Char => seed::BuiltinValue::Char(u.arbitrary()?),
+                | witx::BuiltinType::U8 { .. } => seed::BuiltinValue::U8(u.arbitrary()?),
+                | witx::BuiltinType::U16 => todo!(),
+                | witx::BuiltinType::U32 { .. } => seed::BuiltinValue::U32(u.arbitrary()?),
+                | witx::BuiltinType::U64 => seed::BuiltinValue::U64(u.arbitrary()?),
+                | witx::BuiltinType::S8 => todo!(),
+                | witx::BuiltinType::S16 => todo!(),
+                | witx::BuiltinType::S32 => todo!(),
+                | witx::BuiltinType::S64 => seed::BuiltinValue::S64(u.arbitrary()?),
+                | witx::BuiltinType::F32 => unimplemented!(),
+                | witx::BuiltinType::F64 => unimplemented!(),
+            }),
+        })
     }
 }
 
