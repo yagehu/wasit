@@ -1,8 +1,6 @@
 (module $wasi_snapshot_preview1
   (typename $fd (handle))
-  (typename $fd_reg (handle) (@wazzi fulfills $fd))
   (typename $fd_dir (handle) (@wazzi fulfills $fd))
-  (typename $fd_base (handle) (@wazzi fulfills $fd_dir))
 
   (typename $fdflags
     (flags (@witx repr u16)
@@ -13,8 +11,6 @@
       $sync
     )
   )
-
-  (typename $file_offset u64)
 
   (typename $lookupflags
     (flags (@witx repr u32)
@@ -66,11 +62,6 @@
       $sock_shutdown
       $sock_accept
     )
-  )
-
-  (@interface func (export "fd_tell")
-    (param $fd $fd_reg)
-    (result $error (expected $file_offset (error $errno)))
   )
 
   (@interface func (export "path_open")
