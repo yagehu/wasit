@@ -7,17 +7,20 @@ use nom::{
     sequence::{delimited, pair, tuple},
     Parser as _,
 };
-use nom_locate::{position, LocatedSpan};
+use nom_locate::position;
 use nom_supreme::{
     error::ErrorTree,
     final_parser::final_parser,
     multi::collect_separated_terminated,
-    ParserExt,
+    ParserExt as _,
 };
 
-use crate::ast::Package;
+use crate::{
+    package::{self, Defvaltype, Interface, Package},
+    Error,
+};
 
-type Span<'a> = LocatedSpan<&'a str>;
+use super::Span;
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Document<'a> {
@@ -37,8 +40,63 @@ impl<'a> Document<'a> {
         Ok(Self { modules })
     }
 
-    pub fn into_package(self) -> Result<Package, eyre::Error> {
-        Ok(Package::new())
+    pub fn into_package(self) -> Result<Package, Error> {
+        let mut package = Package::new();
+
+        for module in self.modules {
+            let mut interface = Interface::new();
+            let mut typenames = Vec::new();
+            let mut functions = Vec::new();
+
+            for decl in module.decls {
+                match decl {
+                    | Decl::Typename(typename) => typenames.push(typename),
+                    | Decl::Func(function) => functions.push(function),
+                }
+            }
+
+            for typename in typenames {
+                let defvaltype = typename.ty.into_package(&interface)?;
+
+                interface.register_resource(defvaltype, Some(typename.name.name().to_owned()))?;
+
+                for annotation in typename.annotations {
+                    if annotation.name.name() != "wazzi" {
+                        continue;
+                    }
+
+                    match &annotation.strs[..] {
+                        | [annotation_type, resource_id] if **annotation_type == "fulfills" => {
+                            let (_rest, resource_id) = Id::parse
+                                .all_consuming()
+                                .parse(*resource_id)
+                                .map_err(|_err| {
+                                    Error::InvalidTypeidx(package::Typeidx::Symbolic(
+                                        resource_id.to_string(),
+                                    ))
+                                })?;
+
+                            interface.register_resource_relation(
+                                package::TypeidxBorrow::Symbolic(typename.name.name()),
+                                package::TypeidxBorrow::Symbolic(resource_id.name()),
+                            )?;
+                        },
+                        | _ => continue,
+                    }
+                }
+            }
+
+            for function in functions {
+                interface.register_function(
+                    function.name.to_string(),
+                    function.into_package(&interface)?,
+                )?;
+            }
+
+            package.register_interface(interface, module.name.map(|id| id.name().to_owned()));
+        }
+
+        Ok(package)
     }
 }
 
@@ -166,6 +224,22 @@ impl<'a> Func<'a> {
             },
         ))
     }
+
+    fn into_package(self, interface: &Interface) -> Result<package::Function, Error> {
+        Ok(package::Function {
+            name:    self.name.to_string(),
+            params:  self
+                .params
+                .into_iter()
+                .map(|p| p.into_package(interface))
+                .collect::<Result<Vec<_>, _>>()?,
+            results: self
+                .results
+                .into_iter()
+                .map(|r| r.into_package(interface))
+                .collect::<Result<Vec<_>, _>>()?,
+        })
+    }
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -182,6 +256,13 @@ impl<'a> FuncParam<'a> {
                 .parse(input)?;
 
         Ok((input, Self { name, tref }))
+    }
+
+    fn into_package(self, interface: &package::Interface) -> Result<package::FunctionParam, Error> {
+        Ok(package::FunctionParam {
+            name:    self.name.name().to_owned(),
+            valtype: self.tref.into_package(interface)?,
+        })
     }
 }
 
@@ -203,23 +284,62 @@ impl<'a> FuncResult<'a> {
 
         Ok((input, Self { name, tref }))
     }
+
+    fn into_package(self, interface: &package::Interface) -> Result<package::FunctionParam, Error> {
+        Ok(package::FunctionParam {
+            name:    self.name.name().to_owned(),
+            valtype: self.tref.into_package(interface)?,
+        })
+    }
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum TypeRef<'a> {
-    Name(Id<'a>),
+    Numeric(u32),
+    Symbolic(Id<'a>),
     Type(Box<Type<'a>>),
 }
 
 impl<'a> TypeRef<'a> {
     fn parse(input: Span<'a>) -> nom::IResult<Span, Self, ErrorTree<Span>> {
         alt((
-            Id::parse.map(Self::Name),
+            uint32.map(Self::Numeric),
+            Id::parse.map(Self::Symbolic),
             Type::parse.map(|ty| Self::Type(Box::new(ty))),
         ))
         .cut()
         .context("type ref")
         .parse(input)
+    }
+
+    fn into_package(self, interface: &package::Interface) -> Result<package::Valtype, Error> {
+        match self {
+            | TypeRef::Numeric(idx) => {
+                if interface
+                    .get_resource_type(package::TypeidxBorrow::Numeric(idx))
+                    .is_none()
+                {
+                    return Err(Error::InvalidTypeidx(package::Typeidx::Numeric(idx)));
+                }
+
+                Ok(package::Valtype::Typeidx(package::Typeidx::Numeric(idx)))
+            },
+            | TypeRef::Symbolic(id) => {
+                if interface
+                    .get_resource_type(package::TypeidxBorrow::Symbolic(id.name()))
+                    .is_none()
+                {
+                    return Err(Error::InvalidTypeidx(package::Typeidx::Symbolic(
+                        id.name().to_owned(),
+                    )));
+                }
+
+                Ok(package::Valtype::Typeidx(package::Typeidx::Symbolic(
+                    id.name().to_owned(),
+                )))
+            },
+            | TypeRef::Type(ty) => Ok(package::Valtype::Defvaltype(ty.into_package(interface)?)),
+        }
     }
 }
 
@@ -249,7 +369,15 @@ impl<'a> Annotation<'a> {
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum Type<'a> {
-    // Fundamental value types.
+    // Fundamental numerical value types
+    U8,
+    U64,
+
+    // Container value types
+    Record(Record<'a>),
+    Enum(Enum<'a>),
+    List(List<'a>),
+
     Handle,
 
     // Specialized value types.
@@ -259,8 +387,13 @@ pub enum Type<'a> {
 }
 
 impl<'a> Type<'a> {
-    pub fn parse(input: Span<'a>) -> nom::IResult<Span, Self, ErrorTree<Span>> {
+    fn parse(input: Span<'a>) -> nom::IResult<Span, Self, ErrorTree<Span>> {
         alt((
+            tag("u8").value(Self::U8),
+            tag("u64").value(Self::U64),
+            Record::parse.map(Self::Record),
+            Enum::parse.map(Self::Enum),
+            List::parse.map(Self::List),
             paren(tag("handle")).value(Self::Handle),
             Flags::parse.map(Self::Flags),
             ResultType::parse.map(Self::Result),
@@ -270,6 +403,147 @@ impl<'a> Type<'a> {
         .context("type")
         .parse(input)
     }
+
+    fn into_package(self, interface: &package::Interface) -> Result<Defvaltype, Error> {
+        Ok(match self {
+            | Type::U8 => Defvaltype::U8,
+            | Type::U64 => Defvaltype::U64,
+            | Type::Record(record) => Defvaltype::Record(record.into_package(interface)?),
+            | Type::Enum(e) => Defvaltype::Variant(e.into()),
+            | Type::List(list) => Defvaltype::List(Box::new(list.into_package(interface)?)),
+            | Type::Handle => Defvaltype::Handle,
+            | Type::Flags(flags) => Defvaltype::Flags(package::FlagsType {
+                repr:    flags.repr.into(),
+                members: flags
+                    .members
+                    .into_iter()
+                    .map(|field| field.name().to_owned())
+                    .collect(),
+            }),
+            | Type::Result(result) => Defvaltype::Result(Box::new(result.into_package(interface)?)),
+            | Type::String => Defvaltype::String,
+        })
+    }
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct Record<'a> {
+    pub fields: Vec<RecordField<'a>>,
+}
+
+impl<'a> Record<'a> {
+    fn parse(input: Span<'a>) -> nom::IResult<Span, Self, ErrorTree<Span>> {
+        let (input, (_, fields)) = paren(tuple((
+            ws(tag("record")),
+            ws(collect_separated_terminated(
+                RecordField::parse,
+                multispace0,
+                multispace0.terminated(char(')')).peek(),
+            )),
+        )))
+        .parse(input)?;
+
+        Ok((input, Self { fields }))
+    }
+
+    fn into_package(self, interface: &Interface) -> Result<package::Record, Error> {
+        Ok(package::Record {
+            members: self
+                .fields
+                .into_iter()
+                .map(|field| field.into_package(interface))
+                .collect::<Result<_, _>>()?,
+        })
+    }
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct RecordField<'a> {
+    pub name: Id<'a>,
+    pub tref: TypeRef<'a>,
+}
+
+impl<'a> RecordField<'a> {
+    fn parse(input: Span<'a>) -> nom::IResult<Span, Self, ErrorTree<Span>> {
+        let (input, (_, name, tref)) =
+            paren(tuple((ws(tag("field")), ws(Id::parse), ws(TypeRef::parse)))).parse(input)?;
+
+        Ok((input, Self { name, tref }))
+    }
+
+    fn into_package(self, interface: &Interface) -> Result<package::RecordMember, Error> {
+        Ok(package::RecordMember {
+            name: self.name.name().to_owned(),
+            ty:   self.tref.into_package(interface)?,
+        })
+    }
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct Enum<'a> {
+    pub repr:  Repr,
+    pub cases: Vec<Id<'a>>,
+}
+
+impl<'a> Enum<'a> {
+    fn parse(input: Span<'a>) -> nom::IResult<Span, Self, ErrorTree<Span>> {
+        let (input, (_, (_, _, repr), cases)) = paren(tuple((
+            ws(tag("enum")),
+            paren(tuple((ws(tag("@witx")), ws(tag("tag")), ws(Repr::parse)))),
+            ws(collect_separated_terminated(
+                Id::parse,
+                multispace1,
+                multispace0.terminated(char(')')).peek(),
+            )),
+        )))
+        .context("variant")
+        .parse(input)?;
+
+        Ok((input, Self { repr, cases }))
+    }
+}
+
+impl From<Enum<'_>> for package::Variant {
+    fn from(value: Enum) -> Self {
+        package::Variant {
+            tag_repr: value.repr.into(),
+            cases:    value
+                .cases
+                .into_iter()
+                .map(|id| package::VariantCase {
+                    name:    id.name().to_owned(),
+                    payload: None,
+                })
+                .collect(),
+        }
+    }
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct List<'a> {
+    tref: TypeRef<'a>,
+}
+
+impl<'a> List<'a> {
+    fn parse(input: Span<'a>) -> nom::IResult<Span, Self, ErrorTree<Span>> {
+        let (input, (_, tref)) = paren(pair(ws(tag("list")), ws(TypeRef::parse)))
+            .context("list")
+            .parse(input)?;
+
+        Ok((input, Self { tref }))
+    }
+
+    fn into_package(self, interface: &Interface) -> Result<package::ListType, Error> {
+        Ok(package::ListType {
+            element: self.tref.into_package(interface)?,
+        })
+    }
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct VariantCase<'a> {
+    pub name:    &'a str,
+    pub payland: TypeRef<'a>,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -300,6 +574,19 @@ impl<'a> Flags<'a> {
     }
 }
 
+impl From<Flags<'_>> for package::FlagsType {
+    fn from(value: Flags) -> Self {
+        Self {
+            repr:    value.repr.into(),
+            members: value
+                .members
+                .into_iter()
+                .map(|member| member.name().to_owned())
+                .collect(),
+        }
+    }
+}
+
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct ResultType<'a> {
     pub ok:    Option<TypeRef<'a>>,
@@ -318,9 +605,19 @@ impl<'a> ResultType<'a> {
 
         Ok((input, Self { ok, error }))
     }
+
+    fn into_package(self, interface: &Interface) -> Result<package::ResultType, Error> {
+        Ok(package::ResultType {
+            ok:    self
+                .ok
+                .map(|tref| tref.into_package(interface))
+                .transpose()?,
+            error: self.error.into_package(interface)?,
+        })
+    }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum Repr {
     U16,
     U32,
@@ -339,6 +636,16 @@ impl Repr {
         .parse(input)?;
 
         Ok((input, repr))
+    }
+}
+
+impl From<Repr> for package::Repr {
+    fn from(value: Repr) -> Self {
+        match value {
+            | Repr::U16 => Self::U16,
+            | Repr::U32 => Self::U32,
+            | Repr::U64 => Self::U64,
+        }
     }
 }
 
@@ -400,6 +707,12 @@ fn quoted_string(input: Span) -> nom::IResult<Span, Span, ErrorTree<Span>> {
     .parse(input)
 }
 
+fn uint32(input: Span) -> nom::IResult<Span, u32, ErrorTree<Span>> {
+    take_while1(|c: char| c.is_numeric())
+        .map_res(|res: Span| u32::from_str_radix(*res, 10))
+        .parse(input)
+}
+
 fn paren<'a, F: 'a, O, E: ParseError<Span<'a>>>(
     inner: F,
 ) -> impl FnMut(Span<'a>) -> nom::IResult<Span, O, E>
@@ -413,7 +726,7 @@ fn ws<'a, F: 'a, O, E: ParseError<Span<'a>>>(
     inner: F,
 ) -> impl FnMut(Span<'a>) -> nom::IResult<Span, O, E>
 where
-    F: FnMut(Span<'a>) -> nom::IResult<Span, O, E>,
+    F: nom::Parser<Span<'a>, O, E>,
 {
     delimited(multispace0, inner, multispace0)
 }
@@ -534,6 +847,27 @@ mod tests {
                             results: _,
                         })
                             if **name == "path_open"
+                    ));
+                }),
+            },
+            Case {
+                input:  include_str!("testdata/05.witx"),
+                assert: Box::new(|doc| {
+                    assert!(matches!(
+                        &doc.modules[0]
+                            .decls
+                            .iter()
+                            .find(|decl| match decl {
+                                | Decl::Typename(_) => true,
+                                | Decl::Func(_) => false,
+                            })
+                            .unwrap(),
+                        Decl::Typename(Typename {
+                            name: _,
+                            ty,
+                            annotations: _,
+                        })
+                            if matches!(ty, Type::Record(members))
                     ));
                 }),
             },

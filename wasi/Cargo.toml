@@ -9,10 +9,10 @@ strace.workspace = true
 wazzi-executor.workspace = true
 wazzi-executor-pb-rust.workspace = true
 wazzi-runners.workspace = true
-wazzi-witx.workspace = true
+wazzi-spec.workspace = true
 
 arbitrary.workspace = true
-color-eyre.workspace = true
+eyre.workspace = true
 git2.workspace = true
 nom.workspace = true
 once_cell.workspace = true

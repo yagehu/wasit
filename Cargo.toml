@@ -13,9 +13,12 @@ members = [
     "fuzzer",
     "runners",
     "spec",
+    "store",
     "strace",
     "wasi",
     "wasi-sdk/build",
+    "wazi",
+    "wazi/component-model",
     "witx",
 ]
 
@@ -31,7 +34,9 @@ wazzi-fuzzer.path = "fuzzer"
 wazzi-runners.path = "runners"
 wazzi-snapshot.path = "snapshot"
 wazzi-spec.path = "spec"
+wazzi-store.path = "store"
 wazzi-wasi.path = "wasi"
+wazzi-wasi-component-model.path = "wazi/component-model"
 wazzi-witx.path = "witx"
 
 arbitrary = "1"

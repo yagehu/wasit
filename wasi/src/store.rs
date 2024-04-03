@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use color_eyre::eyre::{self, Context};
+use eyre::{self, Context};
 
 use crate::prog::call::CallRecorder;
 

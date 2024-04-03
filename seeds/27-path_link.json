@@ -8,7 +8,7 @@
                     { "resource": 0 },
                     {
                         "value": {
-                            "bitflags": [
+                            "flags": [
                                 { "name": "symlink_follow", "value": false }
                             ]
                         }
@@ -16,7 +16,7 @@
                     { "value": { "string": { "utf8": "a" } } },
                     {
                         "value": {
-                            "bitflags": [
+                            "flags": [
                                 { "name": "creat",     "value": true },
                                 { "name": "directory", "value": false },
                                 { "name": "excl",      "value": true },
@@ -26,7 +26,7 @@
                     },
                     {
                         "value": {
-                            "bitflags": [
+                            "flags": [
                                 { "name": "fd_datasync",             "value": true },
                                 { "name": "fd_read",                 "value": true },
                                 { "name": "fd_seek",                 "value": true },
@@ -62,7 +62,7 @@
                     },
                     {
                         "value": {
-                            "bitflags": [
+                            "flags": [
                                 { "name": "fd_datasync",             "value": true },
                                 { "name": "fd_read",                 "value": true },
                                 { "name": "fd_seek",                 "value": true },
@@ -98,7 +98,7 @@
                     },
                     {
                         "value": {
-                            "bitflags": [
+                            "flags": [
                                 { "name": "append",   "value": false },
                                 { "name": "dsync",    "value": false },
                                 { "name": "nonblock", "value": false },
@@ -116,7 +116,7 @@
                 "func": "path_link",
                 "params": [
                     { "resource": 0 },
-                    { "value": { "bitflags": [ { "name": "symlink_follow", "value": false } ] } },
+                    { "value": { "flags": [ { "name": "symlink_follow", "value": false } ] } },
                     { "value": { "string": { "utf8": "a" } } },
                     { "resource": 0 },
                     { "value": { "string": { "utf8": "b" } } }

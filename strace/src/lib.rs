@@ -1,5 +1,6 @@
 pub mod parse;
 
+use core::fmt;
 use std::{
     fs,
     io::{self, BufRead, BufReader},
@@ -15,6 +16,12 @@ use nix::{
 
 pub struct Strace {
     process: process::Child,
+}
+
+impl fmt::Debug for Strace {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Strace").field(&self.process.id()).finish()
+    }
 }
 
 impl Strace {

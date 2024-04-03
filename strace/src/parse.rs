@@ -5,23 +5,16 @@ use nom::{
         complete::{is_not, tag, take_until, take_while1},
     },
     character::complete::{
-        alpha1,
-        alphanumeric1,
-        char,
-        multispace0,
-        multispace1,
-        newline,
-        none_of,
-        one_of,
-        space0,
+        alpha1, alphanumeric1, char, multispace0, multispace1, newline, none_of, one_of, space0,
         space1,
     },
     combinator::{fail, map, map_res, opt, peek, recognize},
     multi::{many0_count, separated_list0},
     sequence::{self, delimited, pair, separated_pair, tuple},
-    AsChar,
-    Parser,
+    AsChar, Parser,
 };
+use nom_supreme::error::ErrorTree;
+use nom_supreme::final_parser::final_parser;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
@@ -31,19 +24,17 @@ pub struct Trace {
 }
 
 impl Trace {
-    pub fn parse(input: &str) -> nom::IResult<&str, Self> {
-        let (input, _) = multispace0(input)?;
-        let (input, events) = ws(separated_list0(newline, ws(ThreadEvent::parse)))(input)?;
-        let (input, _) = multispace0(input)?;
+    pub fn parse(input: &str) -> Result<Self, ErrorTree<&str>> {
+        let events = final_parser(ws(separated_list0(newline, ws(ThreadEvent::parse))))(input)?;
 
-        Ok((input, Self { events }))
+        Ok(Self { events })
     }
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct CallResult {
-    pub ret:     Value,
+    pub ret: Value,
     pub decoded: Option<DecodedRetValue>,
 }
 
@@ -95,7 +86,7 @@ fn parens(input: &str) -> nom::IResult<&str, &str> {
     sequence::delimited(char('('), is_not(")"), char(')'))(input)
 }
 
-fn syscall_name(input: &str) -> nom::IResult<&str, &str> {
+fn syscall_name(input: &str) -> nom::IResult<&str, &str, ErrorTree<&str>> {
     ident(input)
 }
 
@@ -110,7 +101,7 @@ fn oct(input: &str) -> nom::IResult<&str, u64> {
     Ok((input, value))
 }
 
-fn int32(input: &str) -> nom::IResult<&str, i32> {
+fn int32(input: &str) -> nom::IResult<&str, i32, ErrorTree<&str>> {
     let (input, (neg, i)) = tuple((
         opt(char('-')),
         map_res(take_while1(|c: char| c.is_dec_digit()), |s: &str| {
@@ -134,7 +125,7 @@ fn int64(input: &str) -> nom::IResult<&str, i64> {
     Ok((input, i))
 }
 
-fn hex(input: &str) -> nom::IResult<&str, u64> {
+fn hex(input: &str) -> nom::IResult<&str, u64, ErrorTree<&str>> {
     let (input, _) = tag("0x")(input)?;
     let (input, value) = map_res(take_while1(|c: char| c.is_ascii_hexdigit()), |digits| {
         u64::from_str_radix(digits, 16)
@@ -146,12 +137,12 @@ fn hex(input: &str) -> nom::IResult<&str, u64> {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct ThreadEvent {
-    pub pid:   i32,
+    pub pid: i32,
     pub event: Event,
 }
 
 impl ThreadEvent {
-    fn parse(input: &str) -> nom::IResult<&str, Self> {
+    fn parse(input: &str) -> nom::IResult<&str, Self, ErrorTree<&str>> {
         let (input, pid) = ws(int32).parse(input)?;
         let (input, event) = ws(Event::parse)(input)?;
 
@@ -167,7 +158,7 @@ pub enum Event {
 }
 
 impl Event {
-    fn parse(input: &str) -> nom::IResult<&str, Self> {
+    fn parse(input: &str) -> nom::IResult<&str, Self, ErrorTree<&str>> {
         if peek(ws(ExitThreadEvent::parse))(input).is_ok() {
             let (input, event) = ws(ExitThreadEvent::parse)(input)?;
 
@@ -187,7 +178,7 @@ pub struct ExitThreadEvent {
 }
 
 impl ExitThreadEvent {
-    fn parse(input: &str) -> nom::IResult<&str, Self> {
+    fn parse(input: &str) -> nom::IResult<&str, Self, ErrorTree<&str>> {
         let (input, status) = delimited(
             tag("+++ exited with "),
             map_res(take_while1(|c: char| c.is_ascii_digit()), |s: &str| {
@@ -208,7 +199,7 @@ pub struct NormalThreadEvent {
 }
 
 impl NormalThreadEvent {
-    pub fn parse(input: &str) -> nom::IResult<&str, Self> {
+    pub fn parse(input: &str) -> nom::IResult<&str, Self, ErrorTree<&str>> {
         if peek(resumed_tag)(input).is_ok() {
             let (input, func) = ws(resumed_tag).parse(input)?;
             let (input, prev_changed) =
@@ -325,8 +316,8 @@ pub struct Unfinished {
 #[serde(deny_unknown_fields)]
 pub struct FinishedEvent {
     pub prev_changed: Option<Value>,
-    pub args:         Vec<Arg>,
-    pub call_result:  Option<CallResult>,
+    pub args: Vec<Arg>,
+    pub call_result: Option<CallResult>,
 }
 
 fn detached_tag(input: &str) -> nom::IResult<&str, ()> {
@@ -341,7 +332,7 @@ fn unfinished_tag(input: &str) -> nom::IResult<&str, ()> {
     Ok((input, ()))
 }
 
-fn resumed_tag(input: &str) -> nom::IResult<&str, &str> {
+fn resumed_tag(input: &str) -> nom::IResult<&str, &str, ErrorTree<&str>> {
     let (input, (_, func, _)) = delimited(
         char('<'),
         tuple((tag("..."), ws(syscall_name), tag("resumed"))),
@@ -351,7 +342,7 @@ fn resumed_tag(input: &str) -> nom::IResult<&str, &str> {
     Ok((input, func))
 }
 
-fn ident(input: &str) -> nom::IResult<&str, &str> {
+fn ident(input: &str) -> nom::IResult<&str, &str, ErrorTree<&str>> {
     recognize(pair(
         alt((alpha1, tag("_"))),
         many0_count(alt((alphanumeric1, tag("_")))),
@@ -362,12 +353,12 @@ fn ident(input: &str) -> nom::IResult<&str, &str> {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(rename_all = "snake_case")]
 pub struct Arg {
-    pub value:   Value,
+    pub value: Value,
     pub changed: Option<Value>,
 }
 
 impl Arg {
-    fn parse(input: &str) -> nom::IResult<&str, Self> {
+    fn parse(input: &str) -> nom::IResult<&str, Self, ErrorTree<&str>> {
         let (input, (value, changed)) = tuple((
             ws(Value::parse),
             opt(map(
@@ -396,7 +387,7 @@ pub enum Value {
 }
 
 impl Value {
-    fn parse(input: &str) -> nom::IResult<&str, Self> {
+    fn parse(input: &str) -> nom::IResult<&str, Self, ErrorTree<&str>> {
         if peek(hex)(input).is_ok() {
             let (input, value) = ws(hex).parse(input)?;
 
@@ -488,7 +479,7 @@ pub struct CallValue {
 }
 
 impl CallValue {
-    fn parse(input: &str) -> nom::IResult<&str, Self> {
+    fn parse(input: &str) -> nom::IResult<&str, Self, ErrorTree<&str>> {
         let (input, (func, args)) = pair(
             ident,
             delimited(
@@ -552,7 +543,7 @@ impl RecordValue {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct RecordMember {
-    pub name:  String,
+    pub name: String,
     pub value: Arg,
 }
 
@@ -593,42 +584,42 @@ mod tests {
             (
                 "213486712",
                 Arg {
-                    value:   Value::Int(213486712),
+                    value: Value::Int(213486712),
                     changed: None,
                 },
             ),
             (
                 "0x00000000",
                 Arg {
-                    value:   Value::Addr(0),
+                    value: Value::Addr(0),
                     changed: None,
                 },
             ),
             (
                 "0x00000001",
                 Arg {
-                    value:   Value::Addr(1),
+                    value: Value::Addr(1),
                     changed: None,
                 },
             ),
             (
                 "NULL",
                 Arg {
-                    value:   Value::Ident("NULL".to_owned()),
+                    value: Value::Ident("NULL".to_owned()),
                     changed: None,
                 },
             ),
             (
                 "FUTEX_WAIT_BITSET_PRIVATE",
                 Arg {
-                    value:   Value::Ident("FUTEX_WAIT_BITSET_PRIVATE".to_owned()),
+                    value: Value::Ident("FUTEX_WAIT_BITSET_PRIVATE".to_owned()),
                     changed: None,
                 },
             ),
             (
                 "O_RDONLY|O_NONBLOCK|O_LARGEFILE",
                 Arg {
-                    value:   Value::FlagSet(FlagSet(vec![
+                    value: Value::FlagSet(FlagSet(vec![
                         "O_RDONLY".to_owned(),
                         "O_NONBLOCK".to_owned(),
                         "O_LARGEFILE".to_owned(),
@@ -650,29 +641,29 @@ mod tests {
         let cases = vec![(
             r#"15807 futex(0x562811cdfee8, FUTEX_WAIT_BITSET_PRIVATE, 4294967295, NULL, FUTEX_BITSET_MATCH_ANY <unfinished ...>"#,
             ThreadEvent {
-                pid:   15807,
+                pid: 15807,
                 event: Event::Normal(NormalThreadEvent {
                     func: "futex".to_owned(),
                     case: NonExitEvent::Unfinished(Unfinished {
                         args: vec![
                             Arg {
-                                value:   Value::Addr(94730097393384),
+                                value: Value::Addr(94730097393384),
                                 changed: None,
                             },
                             Arg {
-                                value:   Value::Ident("FUTEX_WAIT_BITSET_PRIVATE".to_owned()),
+                                value: Value::Ident("FUTEX_WAIT_BITSET_PRIVATE".to_owned()),
                                 changed: None,
                             },
                             Arg {
-                                value:   Value::Int(4294967295),
+                                value: Value::Int(4294967295),
                                 changed: None,
                             },
                             Arg {
-                                value:   Value::Ident("NULL".to_owned()),
+                                value: Value::Ident("NULL".to_owned()),
                                 changed: None,
                             },
                             Arg {
-                                value:   Value::Ident("FUTEX_BITSET_MATCH_ANY".to_owned()),
+                                value: Value::Ident("FUTEX_BITSET_MATCH_ANY".to_owned()),
                                 changed: None,
                             },
                         ],
@@ -681,12 +672,12 @@ mod tests {
             },
             r#"15805 read(0, <unfinished ...>"#,
             ThreadEvent {
-                pid:   15805,
+                pid: 15805,
                 event: Event::Normal(NormalThreadEvent {
                     func: "read".to_owned(),
                     case: NonExitEvent::Unfinished(Unfinished {
                         args: vec![Arg {
-                            value:   Value::Int(0),
+                            value: Value::Int(0),
                             changed: None,
                         }],
                     }),
@@ -694,12 +685,12 @@ mod tests {
             },
             r#"15805 epoll_wait(3,  <unfinished ...>"#,
             ThreadEvent {
-                pid:   15805,
+                pid: 15805,
                 event: Event::Normal(NormalThreadEvent {
                     func: "epoll_wait".to_owned(),
                     case: NonExitEvent::Unfinished(Unfinished {
                         args: vec![Arg {
-                            value:   Value::Int(3),
+                            value: Value::Int(3),
                             changed: None,
                         }],
                     }),
@@ -727,7 +718,7 @@ mod tests {
         89909 restart_syscall(<... resuming interrupted read ...> <unfinished ...>
         "#;
 
-        let (_rest, trace) = all_consuming(Trace::parse)(lines).unwrap();
+        let trace = Trace::parse(lines).unwrap();
 
         assert_eq!(trace.events.len(), 7, "{:#?}", trace);
     }
@@ -738,8 +729,7 @@ mod tests {
             37860 clone3({flags=CLONE_VM|CLONE_FS|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD|CLONE_SYSVSEM|CLONE_SETTLS|CLONE_PARENT_SETTID|CLONE_CHILD_CLEARTID, child_tid=0x7fc7c1000990, parent_tid=0x7fc7c1000990, exit_signal=0, stack=0x7fc7c0e00000, stack_size=0x1ff900, tls=0x7fc7c10006c0} <unfinished ...>
             37860 <... clone3 resumed> => {parent_tid=[37905]}, 88) = 37905
         "#;
-
-        let (_rest, trace) = all_consuming(Trace::parse)(lines).unwrap();
+        let trace = Trace::parse(lines).unwrap();
 
         assert_eq!(trace.events.len(), 2, "{:#?}", trace);
     }
@@ -749,7 +739,7 @@ mod tests {
         let lines = r#"
             42526 restart_syscall(<... resuming interrupted futex ...> <unfinished ...>
         "#;
-        let (_rest, trace) = all_consuming(Trace::parse)(lines).unwrap();
+        let trace = Trace::parse(lines).unwrap();
 
         assert_eq!(trace.events.len(), 1, "{:#?}", trace);
     }
@@ -759,7 +749,7 @@ mod tests {
         let lines = r#"
             142  rt_sigprocmask(SIG_UNBLOCK, [RTMIN RT_1], NULL, 8) = 0
         "#;
-        let (_rest, trace) = all_consuming(Trace::parse)(lines).unwrap();
+        let trace = Trace::parse(lines).unwrap();
 
         assert_eq!(trace.events.len(), 1, "{:#?}", trace);
     }
@@ -769,7 +759,7 @@ mod tests {
         let lines = r#"
             16362 newfstatat(3, "\372\327\n", 0x7ffd9c054e10, AT_SYMLINK_NOFOLLOW) = -1 ENOENT (No such file or directory)
         "#;
-        let (_rest, trace) = all_consuming(Trace::parse)(lines).unwrap();
+        let trace = Trace::parse(lines).unwrap();
 
         assert_eq!(trace.events.len(), 1, "{:#?}", trace);
     }
@@ -779,7 +769,7 @@ mod tests {
         let lines = r#"
             26613 openat(AT_FDCWD, "/some/path/n", O_RDWR|O_CREAT|O_EXCL|O_CLOEXEC, 0666) = 25
         "#;
-        let (_rest, trace) = all_consuming(Trace::parse)(lines).unwrap();
+        let trace = Trace::parse(lines).unwrap();
 
         assert_eq!(trace.events.len(), 1, "{:#?}", trace);
     }

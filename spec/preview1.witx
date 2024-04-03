@@ -1,8 +1,89 @@
 (module $wasi_snapshot_preview1
+  (typename $errno
+    (enum (@witx tag u16)
+      $success
+      $2big
+      $acces
+      $addrinuse
+      $addrnotavail
+      $afnosupport
+      $again
+      $already
+      $badf
+      $badmsg
+      $busy
+      $canceled
+      $child
+      $connaborted
+      $connrefused
+      $connreset
+      $deadlk
+      $destaddrreq
+      $dom
+      $dquot
+      $exist
+      $fault
+      $fbig
+      $hostunreach
+      $idrm
+      $ilseq
+      $inprogress
+      $intr
+      $inval
+      $io
+      $isconn
+      $isdir
+      $loop
+      $mfile
+      $mlink
+      $msgsize
+      $multihop
+      $nametoolong
+      $netdown
+      $netreset
+      $netunreach
+      $nfile
+      $nobufs
+      $nodev
+      $noent
+      $noexec
+      $nolck
+      $nolink
+      $nomem
+      $nomsg
+      $noprotoopt
+      $nospc
+      $nosys
+      $notconn
+      $notdir
+      $notempty
+      $notrecoverable
+      $notsock
+      $notsup
+      $notty
+      $nxio
+      $overflow
+      $ownerdead
+      $perm
+      $pipe
+      $proto
+      $protonosupport
+      $prototype
+      $range
+      $rofs
+      $spipe
+      $srch
+      $stale
+      $timedout
+      $txtbsy
+      $xdev
+      $notcapable
+    )
+  )
+
+  (typename $size u32)
+
   (typename $fd (handle))
-  (typename $fd_reg (handle) (@wazzi fulfills $fd))
-  (typename $fd_dir (handle) (@wazzi fulfills $fd))
-  (typename $fd_base (handle) (@wazzi fulfills $fd_dir))
 
   (typename $fdflags
     (flags (@witx repr u16)
@@ -69,8 +150,21 @@
   )
 
   (@interface func (export "fd_tell")
-    (param $fd $fd_reg)
+    (param $fd $fd)
     (result $error (expected $file_offset (error $errno)))
+  )
+
+  (typename $ciovec
+    (record
+      (field $buf (list u8))
+    )
+  )
+  (typename $ciovec_array (list $ciovec))
+
+  (@interface func (export "fd_write")
+    (param $fd $fd)
+    (param $iovs $ciovec_array)
+    (result $error (expected $size (error $errno)))
   )
 
   (@interface func (export "path_open")

@@ -7,6 +7,7 @@ publish.workspace = true
 [dependencies]
 nix.workspace = true
 nom.workspace = true
+nom-supreme.workspace = true
 serde.workspace = true
 
 [dev-dependencies]

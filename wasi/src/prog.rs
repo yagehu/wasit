@@ -3,7 +3,7 @@ pub mod call;
 use std::{collections::HashSet, io};
 
 use arbitrary::Unstructured;
-use color_eyre::eyre::{self, Context};
+use eyre::{self, Context};
 use serde::{Deserialize, Serialize};
 use tracing::{error, info};
 use wazzi_executor::RunningExecutor;

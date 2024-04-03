@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use color_eyre::eyre::{self, eyre as err, Context, ContextCompat};
+use eyre::{self, eyre as err, Context, ContextCompat};
 use nom::combinator::all_consuming;
 use serde::{Deserialize, Serialize};
 use strace::{parse::Trace, Strace};
