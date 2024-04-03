@@ -371,6 +371,7 @@ impl<'a> Annotation<'a> {
 pub enum Type<'a> {
     // Fundamental numerical value types
     U8,
+    U32,
     U64,
 
     // Container value types
@@ -390,6 +391,7 @@ impl<'a> Type<'a> {
     fn parse(input: Span<'a>) -> nom::IResult<Span, Self, ErrorTree<Span>> {
         alt((
             tag("u8").value(Self::U8),
+            tag("u32").value(Self::U32),
             tag("u64").value(Self::U64),
             Record::parse.map(Self::Record),
             Enum::parse.map(Self::Enum),
@@ -407,6 +409,7 @@ impl<'a> Type<'a> {
     fn into_package(self, interface: &package::Interface) -> Result<Defvaltype, Error> {
         Ok(match self {
             | Type::U8 => Defvaltype::U8,
+            | Type::U32 => Defvaltype::U32,
             | Type::U64 => Defvaltype::U64,
             | Type::Record(record) => Defvaltype::Record(record.into_package(interface)?),
             | Type::Enum(e) => Defvaltype::Variant(e.into()),

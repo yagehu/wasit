@@ -168,7 +168,7 @@
   )
 
   (@interface func (export "path_open")
-    (param $fd $fd_dir)
+    (param $fd $fd)
     (param $dirflags $lookupflags)
     (param $path $path)
     (param $oflags $oflags)
