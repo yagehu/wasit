@@ -122,7 +122,7 @@
                 "func": "fd_filestat_set_size",
                 "params": [
                     { "resource": 1 },
-                    { "value": { "builtin": { "u64": 0 } } }
+                    { "value": { "u64": 0 } }
                 ]
             }
         }

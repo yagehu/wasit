@@ -250,6 +250,12 @@
     (result $error (expected $filestat (error $errno)))
   )
 
+  (@interface func (export "fd_filestat_set_size")
+    (param $fd $fd)
+    (param $size $filesize)
+    (result $error (expected (error $errno)))
+  )
+
   (@interface func (export "fd_tell")
     (param $fd $fd)
     (result $error (expected $file_offset (error $errno)))
