@@ -1,6 +1,7 @@
+use arbitrary::Unstructured;
 use eyre::{Context, ContextCompat};
 use wazzi_executor::RunningExecutor;
-use wazzi_spec::package::{Function, Interface};
+use wazzi_spec::package::{Function, Interface, Package};
 use wazzi_store::{Call, RuntimeStore};
 use wazzi_wasi_component_model::value::Value;
 
@@ -154,5 +155,16 @@ impl Prog {
             .wrap_err("failed to end call")?;
 
         Ok(())
+    }
+
+    pub fn call_arbitrary(&self, spec: &Package, u: &mut Unstructured) -> Result<(), eyre::Error> {
+        let interface = u.choose(spec.interfaces())?;
+        let functions = interface.functions().collect::<Vec<_>>();
+        let function = *u.choose(&functions)?;
+        let mut params = Vec::with_capacity(function.params.len());
+
+        for param_type in &function.params {}
+
+        self.call(interface, function, params, results)
     }
 }

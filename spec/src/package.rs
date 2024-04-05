@@ -18,6 +18,10 @@ impl Package {
         }
     }
 
+    pub fn interfaces(&self) -> &[Interface] {
+        self.interfaces.as_slice()
+    }
+
     pub fn interface(&self, idx: TypeidxBorrow) -> Option<&Interface> {
         match idx {
             | TypeidxBorrow::Numeric(i) => self.interfaces.get(i as usize),
@@ -56,8 +60,16 @@ impl Interface {
         }
     }
 
+    pub fn functions(&self) -> impl Iterator<Item = &Function> {
+        self.functions.values()
+    }
+
     pub fn function(&self, name: &str) -> Option<&Function> {
         self.functions.get(name)
+    }
+
+    pub fn resources(&self) -> impl Iterator<Item = &Resource> {
+        self.resources.iter()
     }
 
     pub fn resolve_valtype(&self, valtype: &Valtype) -> Option<Defvaltype> {
@@ -275,7 +287,7 @@ impl Valtype {
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-struct Resource {
+pub struct Resource {
     node_idx: NodeIndex,
     def:      Defvaltype,
 }

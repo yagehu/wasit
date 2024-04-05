@@ -120,6 +120,13 @@ impl ResourceContext {
     pub fn iter_by_type(&self) -> impl Iterator<Item = (&String, &BTreeSet<ResourceId>)> {
         self.by_types.iter()
     }
+
+    pub fn arbitrary_value_by_valtype(
+        &self,
+        interface: &Interface,
+        valtype: &Valtype,
+    ) -> Result<(), eyre::Error> {
+    }
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
