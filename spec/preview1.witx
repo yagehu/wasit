@@ -273,6 +273,13 @@
     (result $error (expected (error $errno)))
   )
 
+  (@interface func (export "fd_pread")
+    (param $fd $fd)
+    (param $iovs $iovec_array)
+    (param $offset $filesize)
+    (result $error (expected $size (error $errno)))
+  )
+
   (@interface func (export "fd_tell")
     (param $fd $fd)
     (result $error (expected $file_offset (error $errno)))
