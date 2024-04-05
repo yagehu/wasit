@@ -170,6 +170,23 @@
     (result $error (expected (error $errno)))
   )
 
+  (@interface func (export "fd_allocate")
+    (param $fd $fd)
+    (param $offset $filesize)
+    (param $len $filesize)
+    (result $error (expected (error $errno)))
+  )
+
+  (@interface func (export "fd_close")
+    (param $fd $fd)
+    (result $error (expected (error $errno)))
+  )
+
+  (@interface func (export "fd_datasync")
+    (param $fd $fd)
+    (result $error (expected (error $errno)))
+  )
+
   (@interface func (export "fd_tell")
     (param $fd $fd)
     (result $error (expected $file_offset (error $errno)))

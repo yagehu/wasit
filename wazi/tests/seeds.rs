@@ -114,6 +114,66 @@ fn main() -> Result<(), eyre::Error> {
                 Ok(())
             }),
         },
+        Case {
+            seed:   "07-fd_allocate.json",
+            spec:   "preview1.witx",
+            assert: Box::new(|run| {
+                let action = run
+                    .prog
+                    .store()
+                    .trace()
+                    .last_call()
+                    .unwrap()
+                    .wrap_err("no last call")?
+                    .read()
+                    .unwrap();
+                let call = action.call().unwrap();
+
+                assert_eq!(call.errno, Some(58));
+
+                Ok(())
+            }),
+        },
+        Case {
+            seed:   "08-fd_close.json",
+            spec:   "preview1.witx",
+            assert: Box::new(|run| {
+                let action = run
+                    .prog
+                    .store()
+                    .trace()
+                    .last_call()
+                    .unwrap()
+                    .wrap_err("no last call")?
+                    .read()
+                    .unwrap();
+                let call = action.call().unwrap();
+
+                assert_eq!(call.errno, Some(0));
+
+                Ok(())
+            }),
+        },
+        Case {
+            seed:   "09-fd_datasync.json",
+            spec:   "preview1.witx",
+            assert: Box::new(|run| {
+                let action = run
+                    .prog
+                    .store()
+                    .trace()
+                    .last_call()
+                    .unwrap()
+                    .wrap_err("no last call")?
+                    .read()
+                    .unwrap();
+                let call = action.call().unwrap();
+
+                assert_eq!(call.errno, Some(0));
+
+                Ok(())
+            }),
+        },
     ];
 
     for (i, case) in cases.into_iter().enumerate() {

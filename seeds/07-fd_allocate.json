@@ -122,8 +122,8 @@
                 "func": "fd_allocate",
                 "params": [
                     { "resource": 1 },
-                    { "value": { "builtin": { "u64": 0 } } },
-                    { "value": { "builtin": { "u64": 1 } } }
+                    { "value": { "u64": 0 } },
+                    { "value": { "u64": 1 } }
                 ]
             }
         }
