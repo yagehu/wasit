@@ -194,6 +194,26 @@ fn main() -> Result<(), eyre::Error> {
                 Ok(())
             }),
         },
+        Case {
+            seed:   "11-fd_fdstat_set_flags.json",
+            spec:   "preview1.witx",
+            assert: Box::new(|run| {
+                let action = run
+                    .prog
+                    .store()
+                    .trace()
+                    .last_call()
+                    .unwrap()
+                    .wrap_err("no last call")?
+                    .read()
+                    .unwrap();
+                let call = action.call().unwrap();
+
+                assert_eq!(call.errno, Some(0));
+
+                Ok(())
+            }),
+        },
     ];
 
     for (i, case) in cases.into_iter().enumerate() {
