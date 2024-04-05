@@ -122,8 +122,8 @@
                 "func": "fd_advise",
                 "params": [
                     { "resource": 1 },
-                    { "value": { "builtin": { "u64": 0 } } },
-                    { "value": { "builtin": { "u64": 0 } } },
+                    { "value": { "u64": 0 } },
+                    { "value": { "u64": 0 } },
                     { "value": { "variant": { "name": "normal" } } }
                 ]
             }

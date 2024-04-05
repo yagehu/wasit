@@ -185,6 +185,7 @@ impl ResourceOrValue {
 pub enum Value {
     S64(i64),
     U8(u8),
+    U64(u64),
 
     Handle(u32),
 
@@ -208,6 +209,7 @@ impl Value {
         match (ty, self) {
             | (_, Value::S64(i)) => WasiValue::S64(i),
             | (_, Value::U8(i)) => WasiValue::U8(i),
+            | (_, Value::U64(i)) => WasiValue::U64(i),
             | (_, Value::Handle(handle)) => WasiValue::Handle(handle),
             | (Defvaltype::Record(record_type), Value::Record(record)) => {
                 WasiValue::Record(WasiRecordValue {

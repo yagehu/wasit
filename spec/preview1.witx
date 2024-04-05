@@ -151,6 +151,25 @@
     )
   )
 
+  (typename $advice
+    (enum (@witx tag u8)
+      $normal
+      $sequential
+      $random
+      $willneed
+      $dontneed
+      $noreuse
+    )
+  )
+
+  (@interface func (export "fd_advise")
+    (param $fd $fd)
+    (param $offset $filesize)
+    (param $len $filesize)
+    (param $advice $advice)
+    (result $error (expected (error $errno)))
+  )
+
   (@interface func (export "fd_tell")
     (param $fd $fd)
     (result $error (expected $file_offset (error $errno)))

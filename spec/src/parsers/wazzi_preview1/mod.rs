@@ -307,7 +307,6 @@ impl<'a> TypeRef<'a> {
             Id::parse.map(Self::Symbolic),
             Type::parse.map(|ty| Self::Type(Box::new(ty))),
         ))
-        .cut()
         .context("type ref")
         .parse(input)
     }
@@ -403,7 +402,6 @@ impl<'a> Type<'a> {
             ResultType::parse.map(Self::Result),
             tag("string").value(Self::String),
         ))
-        .cut()
         .context("type")
         .parse(input)
     }
@@ -603,8 +601,12 @@ impl<'a> ResultType<'a> {
     fn parse(input: Span<'a>) -> nom::IResult<Span, Self, ErrorTree<Span>> {
         let (input, (_, ok, (_, error))) = paren(tuple((
             ws(tag("expected")),
-            ws(TypeRef::parse).opt(),
-            paren(pair(ws(tag("error")), ws(TypeRef::parse))),
+            ws(TypeRef::parse.context("ok type")).opt(),
+            ws(paren(pair(
+                ws(tag("error").context("error tag")),
+                ws(TypeRef::parse),
+            )))
+            .context("error type"),
         )))
         .context("result type")
         .parse(input)?;
