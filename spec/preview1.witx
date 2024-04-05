@@ -280,6 +280,29 @@
     (result $error (expected $size (error $errno)))
   )
 
+  (typename $preopentype
+    (enum (@witx tag u8)
+      $dir
+    )
+  )
+
+  (typename $prestat_dir
+    (record
+      (field $pr_name_len $size)
+    )
+  )
+
+  (typename $prestat
+    (union (@witx tag $preopentype)
+      $prestat_dir
+    )
+  )
+
+  (@interface func (export "fd_prestat_get")
+    (param $fd $fd)
+    (result $error (expected $prestat (error $errno)))
+  )
+
   (@interface func (export "fd_tell")
     (param $fd $fd)
     (result $error (expected $file_offset (error $errno)))

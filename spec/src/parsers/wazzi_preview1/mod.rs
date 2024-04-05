@@ -15,12 +15,11 @@ use nom_supreme::{
     ParserExt as _,
 };
 
+use super::Span;
 use crate::{
     package::{self, Defvaltype, Interface, Package},
     Error,
 };
-
-use super::Span;
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Document<'a> {
@@ -377,6 +376,7 @@ pub enum Type<'a> {
     // Container value types
     Record(Record<'a>),
     Enum(Enum<'a>),
+    Union(Union<'a>),
     List(List<'a>),
 
     Handle,
@@ -396,6 +396,7 @@ impl<'a> Type<'a> {
             tag("u64").value(Self::U64),
             Record::parse.map(Self::Record),
             Enum::parse.map(Self::Enum),
+            Union::parse.map(Self::Union),
             List::parse.map(Self::List),
             paren(tag("handle")).value(Self::Handle),
             Flags::parse.map(Self::Flags),
@@ -414,6 +415,7 @@ impl<'a> Type<'a> {
             | Type::U64 => Defvaltype::U64,
             | Type::Record(record) => Defvaltype::Record(record.into_package(interface)?),
             | Type::Enum(e) => Defvaltype::Variant(e.into()),
+            | Type::Union(union) => Defvaltype::Variant(union.into_package(interface)?),
             | Type::List(list) => Defvaltype::List(Box::new(list.into_package(interface)?)),
             | Type::Handle => Defvaltype::Handle,
             | Type::Flags(flags) => Defvaltype::Flags(package::FlagsType {
@@ -520,6 +522,69 @@ impl From<Enum<'_>> for package::Variant {
                 })
                 .collect(),
         }
+    }
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct Union<'a> {
+    pub tag:   Id<'a>,
+    pub cases: Vec<Id<'a>>,
+}
+
+impl<'a> Union<'a> {
+    fn parse(input: Span<'a>) -> nom::IResult<Span, Self, ErrorTree<Span>> {
+        let (input, (_, (_, _, tag), cases)) = paren(tuple((
+            ws(tag("union")),
+            ws(paren(tuple((
+                ws(tag("@witx")),
+                ws(tag("tag")),
+                ws(Id::parse),
+            )))),
+            ws(collect_separated_terminated(
+                Id::parse,
+                multispace1,
+                multispace0.terminated(char(')')).peek(),
+            )),
+        )))
+        .context("union")
+        .parse(input)?;
+
+        Ok((input, Self { tag, cases }))
+    }
+
+    fn into_package(self, interface: &Interface) -> Result<package::Variant, Error> {
+        let tag_def = interface
+            .get_resource_type(package::TypeidxBorrow::Symbolic(self.tag.name()))
+            .ok_or(Error::InvalidTypeidx(package::Typeidx::Symbolic(
+                self.tag.name().to_owned(),
+            )))?;
+        let tag_variant = match tag_def {
+            | Defvaltype::Variant(variant) => variant,
+            | _ => unreachable!(),
+        };
+
+        Ok(package::Variant {
+            tag_repr: tag_variant.tag_repr,
+            cases:    tag_variant
+                .cases
+                .iter()
+                .zip(self.cases)
+                .map(|(tag, case)| {
+                    interface
+                        .get_resource_type(package::TypeidxBorrow::Symbolic(case.name()))
+                        .ok_or(Error::InvalidTypeidx(package::Typeidx::Symbolic(
+                            case.name().to_owned(),
+                        )))?;
+
+                    Ok(package::VariantCase {
+                        name:    tag.name.clone(),
+                        payload: Some(package::Valtype::Typeidx(package::Typeidx::Symbolic(
+                            case.name().to_owned(),
+                        ))),
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        })
     }
 }
 
