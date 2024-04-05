@@ -227,6 +227,29 @@
     (result $error (expected (error $errno)))
   )
 
+  (typename $timestamp u64)
+  (typename $device u64)
+  (typename $inode u64)
+  (typename $linkcount u64)
+
+  (typename $filestat
+    (record
+      (field $dev $device)
+      (field $ino $inode)
+      (field $filetype $filetype)
+      (field $nlink $linkcount)
+      (field $size $filesize)
+      (field $atim $timestamp)
+      (field $mtim $timestamp)
+      (field $ctim $timestamp)
+    )
+  )
+
+  (@interface func (export "fd_filestat_get")
+    (param $fd $fd)
+    (result $error (expected $filestat (error $errno)))
+  )
+
   (@interface func (export "fd_tell")
     (param $fd $fd)
     (result $error (expected $file_offset (error $errno)))
