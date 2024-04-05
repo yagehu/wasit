@@ -78,13 +78,24 @@ impl ResourceContext {
                     self.register_resource_rec(interface, &member.ty, member_value, resource_id)?;
                 }
             },
-            | (Defvaltype::Variant(_), _) => todo!(),
+            | (Defvaltype::Variant(variant), Value::Variant(variant_value)) => {
+                let case = &variant.cases[variant_value.case_idx as usize];
+
+                if let Some(payload_type) = &case.payload {
+                    self.register_resource_rec(
+                        interface,
+                        payload_type,
+                        variant_value.payload.unwrap(),
+                        None,
+                    )?;
+                }
+            },
             | (Defvaltype::Handle, _) => (),
-            | (Defvaltype::Flags(_), _) => todo!(),
+            | (Defvaltype::Flags(_), _) => (),
             | (Defvaltype::Tuple(_), _) => todo!(),
             | (Defvaltype::Result(_), _) => todo!(),
             | (Defvaltype::String, _) => todo!(),
-            | (Defvaltype::Record(_), _) => panic!(),
+            | (Defvaltype::Record(_), _) | (Defvaltype::Variant(_), _) => panic!(),
         }
 
         Ok(())

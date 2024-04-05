@@ -53,7 +53,16 @@ impl Value {
                 }))
             },
             | Defvaltype::Handle => Self::Handle(0),
-            | Defvaltype::Flags(_) => todo!(),
+            | Defvaltype::Flags(flags) => Self::Flags(FlagsValue {
+                members: flags
+                    .members
+                    .iter()
+                    .map(|member| FlagsMember {
+                        name:  member.clone(),
+                        value: false,
+                    })
+                    .collect(),
+            }),
             | Defvaltype::Tuple(_) => todo!(),
             | Defvaltype::Result(_) => todo!(),
             | Defvaltype::String => todo!(),

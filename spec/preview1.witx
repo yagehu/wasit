@@ -187,6 +187,33 @@
     (result $error (expected (error $errno)))
   )
 
+  (typename $filetype
+    (enum (@witx tag u8)
+      $unknown
+      $block_device
+      $character_device
+      $directory
+      $regular_file
+      $socket_dgram
+      $socket_stream
+      $symbolic_link
+    )
+  )
+
+  (typename $fdstat
+    (record
+      (field $fs_filetype $filetype)
+      (field $fs_flags $fdflags)
+      (field $fs_rights_base $rights)
+      (field $fs_rights_inheriting $rights)
+    )
+  )
+
+  (@interface func (export "fd_fdstat_get")
+    (param $fd $fd)
+    (result $error (expected $fdstat (error $errno)))
+  )
+
   (@interface func (export "fd_tell")
     (param $fd $fd)
     (result $error (expected $file_offset (error $errno)))

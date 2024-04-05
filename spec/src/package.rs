@@ -309,9 +309,9 @@ impl Defvaltype {
             | Defvaltype::S64 | Defvaltype::U64 => 8,
             | Defvaltype::List(_) => 8,
             | Defvaltype::Record(record) => record.mem_size(interface),
-            | Defvaltype::Variant(_) => todo!(),
+            | Defvaltype::Variant(variant) => variant.mem_size(interface),
             | Defvaltype::Handle => 4,
-            | Defvaltype::Flags(_) => todo!(),
+            | Defvaltype::Flags(flags) => flags.mem_size(),
             | Defvaltype::Tuple(_) => todo!(),
             | Defvaltype::Result(_) => todo!(),
             | Defvaltype::String => todo!(),
@@ -325,9 +325,9 @@ impl Defvaltype {
             | Defvaltype::S64 | Defvaltype::U64 => 8,
             | Defvaltype::List(_) => 4,
             | Defvaltype::Record(record) => record.alignment(interface),
-            | Defvaltype::Variant(_) => todo!(),
+            | Defvaltype::Variant(variant) => variant.alignment(interface),
             | Defvaltype::Handle => 4,
-            | Defvaltype::Flags(_) => todo!(),
+            | Defvaltype::Flags(flags) => flags.alignment(),
             | Defvaltype::Tuple(_) => todo!(),
             | Defvaltype::Result(_) => todo!(),
             | Defvaltype::String => todo!(),
@@ -456,6 +456,16 @@ pub struct VariantCase {
 pub struct FlagsType {
     pub repr:    IntRepr,
     pub members: Vec<String>,
+}
+
+impl FlagsType {
+    pub fn mem_size(&self) -> u32 {
+        self.repr.mem_size()
+    }
+
+    pub fn alignment(&self) -> u32 {
+        self.repr.alignment()
+    }
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
