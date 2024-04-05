@@ -370,6 +370,7 @@ impl<'a> Annotation<'a> {
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum Type<'a> {
     // Fundamental numerical value types
+    S64,
     U8,
     U32,
     U64,
@@ -390,6 +391,7 @@ pub enum Type<'a> {
 impl<'a> Type<'a> {
     fn parse(input: Span<'a>) -> nom::IResult<Span, Self, ErrorTree<Span>> {
         alt((
+            tag("s64").value(Self::S64),
             tag("u8").value(Self::U8),
             tag("u32").value(Self::U32),
             tag("u64").value(Self::U64),
@@ -408,6 +410,7 @@ impl<'a> Type<'a> {
 
     fn into_package(self, interface: &package::Interface) -> Result<Defvaltype, Error> {
         Ok(match self {
+            | Type::S64 => Defvaltype::S64,
             | Type::U8 => Defvaltype::U8,
             | Type::U32 => Defvaltype::U32,
             | Type::U64 => Defvaltype::U64,
@@ -622,6 +625,7 @@ impl<'a> ResultType<'a> {
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum Repr {
+    U8,
     U16,
     U32,
     U64,
@@ -630,6 +634,7 @@ pub enum Repr {
 impl Repr {
     fn parse(input: Span) -> nom::IResult<Span, Self, ErrorTree<Span>> {
         let (input, repr) = alt((
+            tag("u8").value(Self::U8),
             tag("u16").value(Self::U16),
             tag("u32").value(Self::U32),
             tag("u64").value(Self::U64),
@@ -642,9 +647,10 @@ impl Repr {
     }
 }
 
-impl From<Repr> for package::Repr {
+impl From<Repr> for package::IntRepr {
     fn from(value: Repr) -> Self {
         match value {
+            | Repr::U8 => Self::U8,
             | Repr::U16 => Self::U16,
             | Repr::U32 => Self::U32,
             | Repr::U64 => Self::U64,
@@ -870,7 +876,7 @@ mod tests {
                             ty,
                             annotations: _,
                         })
-                            if matches!(ty, Type::Record(members))
+                            if matches!(ty, Type::Record(_members))
                     ));
                 }),
             },

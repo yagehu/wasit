@@ -113,13 +113,15 @@ static void set_ptr_value(void * ptr, const Value * value) {
         }
         case VALUE__WHICH_HANDLE: * (uint32_t *) ptr = value->handle; break;
         case VALUE__WHICH_ARRAY: {
-            * (void **) ptr = calloc(value->array->n_items, value->array->item_size);
+            * (void **) ptr = calloc(1, value->array->n_items * value->array->item_size + sizeof(uint32_t));
 
             for (int i = 0; i < value->array->n_items; i++)
                 set_ptr_value(
                     (* (uint8_t **) ptr) + (i * value->array->item_size),
                     value->array->items[i]
                 );
+
+            * (uint32_t *) ((void **) ptr + 1) = value->array->n_items;
 
             break;
         }
@@ -532,7 +534,7 @@ static void value_free(Value * value) {
     free(value);
 }
 
-static void * value_ptr_new(const Value * value, int32_t * len) {
+static void * value_ptr_new(const Value * value) {
     void * ptr = NULL;
 
     switch (value->which_case) {
@@ -550,8 +552,8 @@ static void * value_ptr_new(const Value * value, int32_t * len) {
             break;
         }
         case VALUE__WHICH_STRING: {
-            ptr = calloc(1, sizeof(char *));
-            * len = value->string.len;
+            ptr = calloc(1, sizeof(char *) + sizeof(uint32_t));
+            * (uint32_t *) ((char **) ptr + 1) = value->string.len;
 
             break;
         }
@@ -568,8 +570,8 @@ static void * value_ptr_new(const Value * value, int32_t * len) {
         }
         case VALUE__WHICH_HANDLE: ptr = calloc(1, sizeof(int32_t)); break;
         case VALUE__WHICH_ARRAY: {
-            ptr = malloc(sizeof(void *));
-            * len = value->array->n_items;
+            ptr = malloc(sizeof(void *) + sizeof(uint32_t));
+            * (uint32_t *) ((void **) ptr + 1) = value->array->n_items;
 
             break;
         }
@@ -615,8 +617,8 @@ static void handle_call(Request__Call * call) {
     switch (call->func) {
         case _WASI_FUNC_IS_INT_SIZE: fail("unreachable");
         case WASI_FUNC__ARGS_GET: {
-            void * p0_argv_ptr = value_ptr_new(call->params[0], NULL);
-            void * p1_argv_buf_ptr = value_ptr_new(call->params[1], NULL);
+            void * p0_argv_ptr = value_ptr_new(call->params[0]);
+            void * p1_argv_buf_ptr = value_ptr_new(call->params[1]);
             int32_t p0_argv = (int32_t) (* (void **) p0_argv_ptr);
             int32_t p1_argv_buf = (int32_t) (* (void **) p1_argv_buf_ptr);
 
@@ -634,8 +636,8 @@ static void handle_call(Request__Call * call) {
             break;
         }
         case WASI_FUNC__ARGS_SIZES_GET: {
-            void * r0_argv_size_ptr = value_ptr_new(call->results[0], NULL);
-            void * r1_argv_buf_size_ptr = value_ptr_new(call->results[1], NULL);
+            void * r0_argv_size_ptr = value_ptr_new(call->results[0]);
+            void * r1_argv_buf_size_ptr = value_ptr_new(call->results[1]);
             int32_t r0_argv_size = (int32_t) r0_argv_size_ptr;
             int32_t r1_argv_buf_size = (int32_t) r1_argv_buf_size_ptr;
 
@@ -653,8 +655,8 @@ static void handle_call(Request__Call * call) {
             break;
         }
         case WASI_FUNC__ENVIRON_GET: {
-            void * p0_environ_ptr = value_ptr_new(call->params[0], NULL);
-            void * p1_environ_buf_ptr = value_ptr_new(call->params[1], NULL);
+            void * p0_environ_ptr = value_ptr_new(call->params[0]);
+            void * p1_environ_buf_ptr = value_ptr_new(call->params[1]);
             int32_t p0_environ = * (int32_t *) p0_environ_ptr;
             int32_t p1_environ_buf = * (int32_t *) p1_environ_buf_ptr;
 
@@ -672,8 +674,8 @@ static void handle_call(Request__Call * call) {
             break;
         }
         case WASI_FUNC__ENVIRON_SIZES_GET: {
-            void * r0_environ_size_ptr = value_ptr_new(call->results[0], NULL);
-            void * r1_environ_buf_size_ptr = value_ptr_new(call->results[1], NULL);
+            void * r0_environ_size_ptr = value_ptr_new(call->results[0]);
+            void * r1_environ_buf_size_ptr = value_ptr_new(call->results[1]);
             int32_t r0_environ_size = (int32_t) r0_environ_size_ptr;
             int32_t r1_environ_buf_size = (int32_t) r1_environ_buf_size_ptr;
 
@@ -691,8 +693,8 @@ static void handle_call(Request__Call * call) {
             break;
         }
         case WASI_FUNC__CLOCK_RES_GET: {
-            void * p0_id_ptr = value_ptr_new(call->params[0], NULL);
-            void * r0_clock_res_ptr = value_ptr_new(call->results[0], NULL);
+            void * p0_id_ptr = value_ptr_new(call->params[0]);
+            void * r0_clock_res_ptr = value_ptr_new(call->results[0]);
             int32_t p0_id = * (int32_t *) p0_id_ptr;
             int32_t r0_clock_res = (int32_t) r0_clock_res_ptr;
 
@@ -710,9 +712,9 @@ static void handle_call(Request__Call * call) {
             break;
         }
         case WASI_FUNC__CLOCK_TIME_GET: {
-            void * p0_id_ptr = value_ptr_new(call->params[0], NULL);
-            void * p1_precision_ptr = value_ptr_new(call->params[1], NULL);
-            void * r0_timestamp_ptr = value_ptr_new(call->results[0], NULL);
+            void * p0_id_ptr = value_ptr_new(call->params[0]);
+            void * p1_precision_ptr = value_ptr_new(call->params[1]);
+            void * r0_timestamp_ptr = value_ptr_new(call->results[0]);
             int32_t p0_id = * (int32_t *) p0_id_ptr;
             int64_t p1_precision = * (int64_t *) p1_precision_ptr;
             int32_t r0_timestamp = (int32_t) r0_timestamp_ptr;
@@ -733,10 +735,10 @@ static void handle_call(Request__Call * call) {
             break;
         }
         case WASI_FUNC__FD_ADVISE: {
-            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
-            void * p1_offset_ptr = value_ptr_new(call->params[1], NULL);
-            void * p2_len_ptr = value_ptr_new(call->params[2], NULL);
-            void * p3_advice_ptr = value_ptr_new(call->params[3], NULL);
+            void * p0_fd_ptr = value_ptr_new(call->params[0]);
+            void * p1_offset_ptr = value_ptr_new(call->params[1]);
+            void * p2_len_ptr = value_ptr_new(call->params[2]);
+            void * p3_advice_ptr = value_ptr_new(call->params[3]);
             int32_t p0_fd = * (int32_t *) p0_fd_ptr;
             int64_t p1_offset = * (int64_t *) p1_offset_ptr;
             int64_t p2_len = * (int64_t *) p2_len_ptr;
@@ -760,9 +762,9 @@ static void handle_call(Request__Call * call) {
             break;
         }
         case WASI_FUNC__FD_ALLOCATE: {
-            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
-            void * p1_offset_ptr = value_ptr_new(call->params[1], NULL);
-            void * p2_len_ptr = value_ptr_new(call->params[2], NULL);
+            void * p0_fd_ptr = value_ptr_new(call->params[0]);
+            void * p1_offset_ptr = value_ptr_new(call->params[1]);
+            void * p2_len_ptr = value_ptr_new(call->params[2]);
             int32_t p0_fd = * (int32_t *) p0_fd_ptr;
             int64_t p1_offset = * (int64_t *) p1_offset_ptr;
             int64_t p2_len = * (int64_t *) p2_len_ptr;
@@ -783,7 +785,7 @@ static void handle_call(Request__Call * call) {
             break;
         }
         case WASI_FUNC__FD_CLOSE: {
-            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
+            void * p0_fd_ptr = value_ptr_new(call->params[0]);
             int32_t p0_fd = * (int32_t *) p0_fd_ptr;
 
             response.errno_some = __imported_wasi_snapshot_preview1_fd_close(p0_fd);
@@ -796,7 +798,7 @@ static void handle_call(Request__Call * call) {
             break;
         }
         case WASI_FUNC__FD_DATASYNC: {
-            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
+            void * p0_fd_ptr = value_ptr_new(call->params[0]);
             int32_t p0_fd = * (int32_t *) p0_fd_ptr;
 
             response.errno_some = __imported_wasi_snapshot_preview1_fd_datasync(p0_fd);
@@ -809,8 +811,8 @@ static void handle_call(Request__Call * call) {
             break;
         }
         case WASI_FUNC__FD_FDSTAT_GET: {
-            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
-            void * r0_fdstat_ptr = value_ptr_new(call->results[0], NULL);
+            void * p0_fd_ptr = value_ptr_new(call->params[0]);
+            void * r0_fdstat_ptr = value_ptr_new(call->results[0]);
             int32_t p0_fd = * (int32_t *) p0_fd_ptr;
             int32_t r0_fdstat = (int32_t) r0_fdstat_ptr;
 
@@ -825,8 +827,8 @@ static void handle_call(Request__Call * call) {
             break;
         }
         case WASI_FUNC__FD_FDSTAT_SET_FLAGS: {
-            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
-            void * p1_flags_ptr = value_ptr_new(call->params[1], NULL);
+            void * p0_fd_ptr = value_ptr_new(call->params[0]);
+            void * p1_flags_ptr = value_ptr_new(call->params[1]);
             int32_t p0_fd = * (int32_t *) p0_fd_ptr;
             int32_t p1_flags = * (uint16_t *) p1_flags_ptr;
 
@@ -844,9 +846,9 @@ static void handle_call(Request__Call * call) {
             break;
         }
         case WASI_FUNC__FD_FDSTAT_SET_RIGHTS: {
-            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
-            void * p1_fs_rights_base_ptr = value_ptr_new(call->params[1], NULL);
-            void * p2_fs_rights_inheriting_ptr = value_ptr_new(call->params[2], NULL);
+            void * p0_fd_ptr = value_ptr_new(call->params[0]);
+            void * p1_fs_rights_base_ptr = value_ptr_new(call->params[1]);
+            void * p2_fs_rights_inheriting_ptr = value_ptr_new(call->params[2]);
             int32_t p0_fd = * (int32_t *) p0_fd_ptr;
             int64_t p1_fs_rights_base = * (uint64_t *) p1_fs_rights_base_ptr;
             int64_t p2_fs_rights_inheriting = * (uint64_t *) p2_fs_rights_inheriting_ptr;
@@ -867,8 +869,8 @@ static void handle_call(Request__Call * call) {
             break;
         }
         case WASI_FUNC__FD_FILESTAT_GET: {
-            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
-            void * r0_filestat_ptr = value_ptr_new(call->results[0], NULL);
+            void * p0_fd_ptr = value_ptr_new(call->params[0]);
+            void * r0_filestat_ptr = value_ptr_new(call->results[0]);
             int32_t p0_fd = * (int32_t *) p0_fd_ptr;
             int32_t r0_filestat = (int32_t) r0_filestat_ptr;
 
@@ -883,8 +885,8 @@ static void handle_call(Request__Call * call) {
             break;
         }
         case WASI_FUNC__FD_FILESTAT_SET_SIZE: {
-            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
-            void * p1_size_ptr = value_ptr_new(call->params[1], NULL);
+            void * p0_fd_ptr = value_ptr_new(call->params[0]);
+            void * p1_size_ptr = value_ptr_new(call->params[1]);
             int32_t p0_fd = * (int32_t *) p0_fd_ptr;
             int64_t p1_size = * (int64_t *) p1_size_ptr;
 
@@ -899,10 +901,10 @@ static void handle_call(Request__Call * call) {
             break;
         }
         case WASI_FUNC__FD_FILESTAT_SET_TIMES: {
-            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
-            void * p1_atim_ptr = value_ptr_new(call->params[1], NULL);
-            void * p2_mtim_ptr = value_ptr_new(call->params[2], NULL);
-            void * p3_fst_flags_ptr = value_ptr_new(call->params[3], NULL);
+            void * p0_fd_ptr = value_ptr_new(call->params[0]);
+            void * p1_atim_ptr = value_ptr_new(call->params[1]);
+            void * p2_mtim_ptr = value_ptr_new(call->params[2]);
+            void * p3_fst_flags_ptr = value_ptr_new(call->params[3]);
             int32_t p0_fd = * (int32_t *) p0_fd_ptr;
             int64_t p1_atim = * (int64_t *) p1_atim_ptr;
             int64_t p2_mtim = * (int64_t *) p2_mtim_ptr;
@@ -926,14 +928,15 @@ static void handle_call(Request__Call * call) {
             break;
         }
         case WASI_FUNC__FD_PREAD: {
-            int32_t p1_iovs_len = 0;
-            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
-            void * p1_iovs_ptr = value_ptr_new(call->params[1], &p1_iovs_len);
-            void * p2_offset_ptr = value_ptr_new(call->params[2], NULL);
-            void * r0_size_ptr = value_ptr_new(call->results[0], NULL);
+            void * p0_fd_ptr = value_ptr_new(call->params[0]);
+            void * p1_iovs_ptr = value_ptr_new(call->params[1]);
+            void * p2_offset_ptr = value_ptr_new(call->params[2]);
+            void * r0_size_ptr = value_ptr_new(call->results[0]);
             int32_t p0_fd = * (int32_t *) p0_fd_ptr;
             int64_t p2_offset = * (int64_t *) p2_offset_ptr;
             int32_t r0_size = (int32_t) r0_size_ptr;
+
+            uint32_t p1_iovs_len = * (uint32_t *) (((void **) p1_iovs_ptr) + 1);
 
             int iovs_idx = 0;
             __wasi_size_t to_read = 0;
@@ -988,8 +991,8 @@ static void handle_call(Request__Call * call) {
             break;
         }
         case WASI_FUNC__FD_PRESTAT_GET: {
-            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
-            void * r0_prestat_ptr = value_ptr_new(call->results[0], NULL);
+            void * p0_fd_ptr = value_ptr_new(call->params[0]);
+            void * r0_prestat_ptr = value_ptr_new(call->results[0]);
             int32_t p0_fd = * (int32_t *) p0_fd_ptr;
             int32_t r0_prestat = (int32_t) r0_prestat_ptr;
 
@@ -1004,9 +1007,9 @@ static void handle_call(Request__Call * call) {
             break;
         }
         case WASI_FUNC__FD_PRESTAT_DIR_NAME: {
-            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
-            void * p1_path_ptr = value_ptr_new(call->params[1], NULL);
-            void * p2_path_len_ptr = value_ptr_new(call->params[2], NULL);
+            void * p0_fd_ptr = value_ptr_new(call->params[0]);
+            void * p1_path_ptr = value_ptr_new(call->params[1]);
+            void * p2_path_len_ptr = value_ptr_new(call->params[2]);
             int32_t p0_fd = * (int32_t *) p0_fd_ptr;
             int32_t p1_path = * (int32_t *) p1_path_ptr;
             int32_t p2_path_len = * (int32_t *) p2_path_len_ptr;
@@ -1027,14 +1030,14 @@ static void handle_call(Request__Call * call) {
             break;
         }
         case WASI_FUNC__FD_PWRITE: {
-            int32_t p1_iovs_len = 0;
-            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
-            void * p1_iovs_ptr = value_ptr_new(call->params[1], &p1_iovs_len);
-            void * p2_offset_ptr = value_ptr_new(call->params[2], NULL);
-            void * r0_size_ptr = value_ptr_new(call->results[0], NULL);
+            void * p0_fd_ptr = value_ptr_new(call->params[0]);
+            void * p1_iovs_ptr = value_ptr_new(call->params[1]);
+            void * p2_offset_ptr = value_ptr_new(call->params[2]);
+            void * r0_size_ptr = value_ptr_new(call->results[0]);
             int32_t p0_fd = * (int32_t *) p0_fd_ptr;
             int64_t p2_offset = * (int64_t *) p2_offset_ptr;
             int32_t r0_size = (int32_t) r0_size_ptr;
+            uint32_t p1_iovs_len = * (uint32_t *) (((void **) p1_iovs_ptr) + 1);
 
             int iovs_idx = 0;
             __wasi_size_t to_write = 0;
@@ -1091,12 +1094,13 @@ static void handle_call(Request__Call * call) {
             break;
         }
         case WASI_FUNC__FD_READ: {
-            int32_t p1_iovs_len = 0;
-            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
-            void * p1_iovs_ptr = value_ptr_new(call->params[1], &p1_iovs_len);
-            void * r0_size_ptr = value_ptr_new(call->results[0], NULL);
+            void * p0_fd_ptr = value_ptr_new(call->params[0]);
+            void * p1_iovs_ptr = value_ptr_new(call->params[1]);
+            void * r0_size_ptr = value_ptr_new(call->results[0]);
             int32_t p0_fd = * (int32_t *) p0_fd_ptr;
             int32_t r0_size = (int32_t) r0_size_ptr;
+            uint32_t p1_iovs_len = * (uint32_t *) (((void **) p1_iovs_ptr) + 1);
+            fprintf(stderr, "whoa p1_iovs_len %d\n", p1_iovs_len);
 
             int iovs_idx = 0;
             __wasi_size_t to_read = 0;
@@ -1149,11 +1153,11 @@ static void handle_call(Request__Call * call) {
             break;
         }
         case WASI_FUNC__FD_READDIR: {
-            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
-            void * p1_buf_ptr = value_ptr_new(call->params[1], NULL);
-            void * p2_buf_len_ptr = value_ptr_new(call->params[2], NULL);
-            void * p3_cookie_ptr = value_ptr_new(call->params[3], NULL);
-            void * r0_size_ptr = value_ptr_new(call->results[0], NULL);
+            void * p0_fd_ptr = value_ptr_new(call->params[0]);
+            void * p1_buf_ptr = value_ptr_new(call->params[1]);
+            void * p2_buf_len_ptr = value_ptr_new(call->params[2]);
+            void * p3_cookie_ptr = value_ptr_new(call->params[3]);
+            void * r0_size_ptr = value_ptr_new(call->results[0]);
             int32_t p0_fd = * (int32_t *) p0_fd_ptr;
             int32_t p1_buf = * (int32_t *) p1_buf_ptr;
             int32_t p2_buf_len = * (int32_t *) p2_buf_len_ptr;
@@ -1180,8 +1184,8 @@ static void handle_call(Request__Call * call) {
             break;
         }
         case WASI_FUNC__FD_RENUMBER: {
-            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
-            void * p1_to_ptr = value_ptr_new(call->params[1], NULL);
+            void * p0_fd_ptr = value_ptr_new(call->params[0]);
+            void * p1_to_ptr = value_ptr_new(call->params[1]);
             int32_t p0_fd = * (int32_t *) p0_fd_ptr;
             int32_t p1_to = * (int32_t *) p1_to_ptr;
 
@@ -1199,10 +1203,10 @@ static void handle_call(Request__Call * call) {
             break;
         }
         case WASI_FUNC__FD_SEEK: {
-            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
-            void * p1_offset_ptr = value_ptr_new(call->params[1], NULL);
-            void * p2_whence_ptr = value_ptr_new(call->params[2], NULL);
-            void * r0_offset_ptr = value_ptr_new(call->results[0], NULL);
+            void * p0_fd_ptr = value_ptr_new(call->params[0]);
+            void * p1_offset_ptr = value_ptr_new(call->params[1]);
+            void * p2_whence_ptr = value_ptr_new(call->params[2]);
+            void * r0_offset_ptr = value_ptr_new(call->results[0]);
             int32_t p0_fd = * (int32_t *) p0_fd_ptr;
             int64_t p1_offset = * (int64_t *) p1_offset_ptr;
             int32_t p2_whence = * (uint8_t *) p2_whence_ptr;
@@ -1226,7 +1230,7 @@ static void handle_call(Request__Call * call) {
             break;
         }
         case WASI_FUNC__FD_SYNC: {
-            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
+            void * p0_fd_ptr = value_ptr_new(call->params[0]);
             int32_t p0_fd = * (int32_t *) p0_fd_ptr;
 
             response.errno_some = __imported_wasi_snapshot_preview1_fd_sync(p0_fd);
@@ -1239,8 +1243,8 @@ static void handle_call(Request__Call * call) {
             break;
         }
         case WASI_FUNC__FD_TELL: {
-            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
-            void * r0_offset_ptr = value_ptr_new(call->results[0], NULL);
+            void * p0_fd_ptr = value_ptr_new(call->params[0]);
+            void * r0_offset_ptr = value_ptr_new(call->results[0]);
             int32_t p0_fd = * (int32_t *) p0_fd_ptr;
             int32_t r0_offset = (int32_t) r0_offset_ptr;
 
@@ -1255,12 +1259,12 @@ static void handle_call(Request__Call * call) {
             break;
         }
         case WASI_FUNC__FD_WRITE: {
-            int32_t p1_iovs_len = 0;
-            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
-            void * p1_iovs_ptr = value_ptr_new(call->params[1], &p1_iovs_len);
-            void * r0_size_ptr = value_ptr_new(call->results[0], NULL);
+            void * p0_fd_ptr = value_ptr_new(call->params[0]);
+            void * p1_iovs_ptr = value_ptr_new(call->params[1]);
+            void * r0_size_ptr = value_ptr_new(call->results[0]);
             int32_t p0_fd = * (int32_t *) p0_fd_ptr;
             int32_t r0_size = (int32_t) r0_size_ptr;
+            uint32_t p1_iovs_len = * (uint32_t *) (((void **) p1_iovs_ptr) + 1);
 
             int iovs_idx = 0;
             __wasi_size_t to_write = 0;
@@ -1312,11 +1316,11 @@ static void handle_call(Request__Call * call) {
             break;
         }
         case WASI_FUNC__PATH_CREATE_DIRECTORY: {
-            int32_t p1_path_len = 0;
-            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
-            void * p1_path_ptr = value_ptr_new(call->params[1], &p1_path_len);
+            void * p0_fd_ptr = value_ptr_new(call->params[0]);
+            void * p1_path_ptr = value_ptr_new(call->params[1]);
             int32_t p0_fd = * (int32_t *) p0_fd_ptr;
             int32_t p1_path = * (int32_t *) p1_path_ptr;
+            uint32_t p1_path_len = * (uint32_t *) (((void **) p1_path_ptr) + 1);
 
             response.errno_some = __imported_wasi_snapshot_preview1_path_create_directory(
                 p0_fd,
@@ -1333,15 +1337,15 @@ static void handle_call(Request__Call * call) {
             break;
         }
         case WASI_FUNC__PATH_FILESTAT_GET: {
-            int32_t p2_path_len = 0;
-            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
-            void * p1_flags_ptr = value_ptr_new(call->params[1], NULL);
-            void * p2_path_ptr = value_ptr_new(call->params[2], &p2_path_len);
-            void * r0_filestat_ptr = value_ptr_new(call->results[0], NULL);
+            void * p0_fd_ptr = value_ptr_new(call->params[0]);
+            void * p1_flags_ptr = value_ptr_new(call->params[1]);
+            void * p2_path_ptr = value_ptr_new(call->params[2]);
+            void * r0_filestat_ptr = value_ptr_new(call->results[0]);
             int32_t p0_fd = * (int32_t *) p0_fd_ptr;
             int32_t p1_flags = * (int32_t *) p1_flags_ptr;
             int32_t p2_path = * (int32_t *) p2_path_ptr;
             int32_t r0_filestat = (int32_t) r0_filestat_ptr;
+            uint32_t p2_path_len = * (uint32_t *) (((void **) p2_path_ptr) + 1);
 
             response.errno_some = __imported_wasi_snapshot_preview1_path_filestat_get(
                 p0_fd,
@@ -1362,19 +1366,19 @@ static void handle_call(Request__Call * call) {
             break;
         }
         case WASI_FUNC__PATH_FILESTAT_SET_TIMES: {
-            int32_t p2_path_len = 0;
-            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
-            void * p1_flags_ptr = value_ptr_new(call->params[1], NULL);
-            void * p2_path_ptr = value_ptr_new(call->params[2], &p2_path_len);
-            void * p3_atim_ptr = value_ptr_new(call->params[3], NULL);
-            void * p4_mtim_ptr = value_ptr_new(call->params[4], NULL);
-            void * p5_fst_flags_ptr = value_ptr_new(call->params[5], NULL);
+            void * p0_fd_ptr = value_ptr_new(call->params[0]);
+            void * p1_flags_ptr = value_ptr_new(call->params[1]);
+            void * p2_path_ptr = value_ptr_new(call->params[2]);
+            void * p3_atim_ptr = value_ptr_new(call->params[3]);
+            void * p4_mtim_ptr = value_ptr_new(call->params[4]);
+            void * p5_fst_flags_ptr = value_ptr_new(call->params[5]);
             int32_t p0_fd = * (int32_t *) p0_fd_ptr;
             int32_t p1_flags = * (int32_t *) p1_flags_ptr;
             int32_t p2_path = * (int32_t *) p2_path_ptr;
             int64_t p3_atim = * (int64_t *) p3_atim_ptr;
             int64_t p4_mtim = * (int64_t *) p4_mtim_ptr;
             int32_t p5_fst_flags = * (uint16_t *) p5_fst_flags_ptr;
+            uint32_t p2_path_len = * (uint32_t *) (((void **) p2_path_ptr) + 1);
 
             response.errno_some = __imported_wasi_snapshot_preview1_path_filestat_set_times(
                 p0_fd,
@@ -1399,18 +1403,18 @@ static void handle_call(Request__Call * call) {
             break;
         }
         case WASI_FUNC__PATH_LINK: {
-            int32_t p2_old_path_len = 0;
-            int32_t p4_new_path_len = 0;
-            void * p0_old_fd_ptr = value_ptr_new(call->params[0], NULL);
-            void * p1_old_flags_ptr = value_ptr_new(call->params[1], NULL);
-            void * p2_old_path_ptr = value_ptr_new(call->params[2], &p2_old_path_len);
-            void * p3_new_fd_ptr = value_ptr_new(call->params[3], NULL);
-            void * p4_new_path_ptr = value_ptr_new(call->params[4], &p4_new_path_len);
+            void * p0_old_fd_ptr = value_ptr_new(call->params[0]);
+            void * p1_old_flags_ptr = value_ptr_new(call->params[1]);
+            void * p2_old_path_ptr = value_ptr_new(call->params[2]);
+            void * p3_new_fd_ptr = value_ptr_new(call->params[3]);
+            void * p4_new_path_ptr = value_ptr_new(call->params[4]);
             int32_t p0_old_fd = * (int32_t *) p0_old_fd_ptr;
             int32_t p1_old_flags = * (int32_t *) p1_old_flags_ptr;
             int32_t p2_old_path = * (int32_t *) p2_old_path_ptr;
             int32_t p3_new_fd = * (int32_t *) p3_new_fd_ptr;
             int32_t p4_new_path = * (int32_t *) p4_new_path_ptr;
+            uint32_t p2_old_path_len = * (uint32_t *) (((void **) p2_old_path_ptr) + 1);
+            uint32_t p4_new_path_len = * (uint32_t *) (((void **) p4_new_path_ptr) + 1);
 
             response.errno_some = __imported_wasi_snapshot_preview1_path_link(
                 p0_old_fd,
@@ -1434,15 +1438,14 @@ static void handle_call(Request__Call * call) {
             break;
         }
         case WASI_FUNC__PATH_OPEN: {
-            int32_t p2_path_len = 0;
-            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
-            void * p1_dirflags_ptr = value_ptr_new(call->params[1], NULL);
-            void * p2_path_ptr = value_ptr_new(call->params[2], &p2_path_len);
-            void * p3_oflags_ptr = value_ptr_new(call->params[3], NULL);
-            void * p4_fs_rights_base_ptr = value_ptr_new(call->params[4], NULL);
-            void * p5_fs_rights_inheriting_ptr = value_ptr_new(call->params[5], NULL);
-            void * p6_fdflags_ptr = value_ptr_new(call->params[6], NULL);
-            void * r0_fd_ptr = value_ptr_new(call->results[0], NULL);
+            void * p0_fd_ptr = value_ptr_new(call->params[0]);
+            void * p1_dirflags_ptr = value_ptr_new(call->params[1]);
+            void * p2_path_ptr = value_ptr_new(call->params[2]);
+            void * p3_oflags_ptr = value_ptr_new(call->params[3]);
+            void * p4_fs_rights_base_ptr = value_ptr_new(call->params[4]);
+            void * p5_fs_rights_inheriting_ptr = value_ptr_new(call->params[5]);
+            void * p6_fdflags_ptr = value_ptr_new(call->params[6]);
+            void * r0_fd_ptr = value_ptr_new(call->results[0]);
             int32_t p0_fd = * (int32_t *) p0_fd_ptr;
             int32_t p1_dirflags = * (int32_t *) p1_dirflags_ptr;
             int32_t p2_path = (int32_t) * (void **) p2_path_ptr;
@@ -1451,6 +1454,7 @@ static void handle_call(Request__Call * call) {
             int64_t p5_fs_rights_inheriting = * (int64_t *) p5_fs_rights_inheriting_ptr;
             int32_t p6_fdflags = * (int16_t *) p6_fdflags_ptr;
             int32_t r0_fd = (int32_t) r0_fd_ptr;
+            uint32_t p2_path_len = * (uint32_t *) (((void **) p2_path_ptr) + 1);
 
             response.errno_some = __imported_wasi_snapshot_preview1_path_open(
                 p0_fd,
@@ -1480,11 +1484,11 @@ static void handle_call(Request__Call * call) {
         }
         case WASI_FUNC__PATH_READLINK: fail("path_readlink unimplemented");
         case WASI_FUNC__PATH_REMOVE_DIRECTORY: {
-            int32_t p1_path_len = 0;
-            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
-            void * p1_path_ptr = value_ptr_new(call->params[1], &p1_path_len);
+            void * p0_fd_ptr = value_ptr_new(call->params[0]);
+            void * p1_path_ptr = value_ptr_new(call->params[1]);
             int32_t p0_fd = * (int32_t *) p0_fd_ptr;
             int32_t p1_path = * (int32_t *) p1_path_ptr;
+            uint32_t p1_path_len = * (uint32_t *) (((void **) p1_path_ptr) + 1);
 
             response.errno_some = __imported_wasi_snapshot_preview1_path_remove_directory(
                 p0_fd,
@@ -1501,16 +1505,16 @@ static void handle_call(Request__Call * call) {
             break;
         }
         case WASI_FUNC__PATH_RENAME: {
-            int32_t p1_old_path_len = 0;
-            int32_t p3_new_path_len = 0;
-            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
-            void * p1_old_path_ptr = value_ptr_new(call->params[1], &p1_old_path_len);
-            void * p2_new_fd_ptr = value_ptr_new(call->params[2], NULL);
-            void * p3_new_path_ptr = value_ptr_new(call->params[3], &p3_new_path_len);
+            void * p0_fd_ptr = value_ptr_new(call->params[0]);
+            void * p1_old_path_ptr = value_ptr_new(call->params[1]);
+            void * p2_new_fd_ptr = value_ptr_new(call->params[2]);
+            void * p3_new_path_ptr = value_ptr_new(call->params[3]);
             int32_t p0_fd = * (int32_t *) p0_fd_ptr;
             int32_t p1_old_path = * (int32_t *) p1_old_path_ptr;
             int32_t p2_new_fd = * (int32_t *) p2_new_fd_ptr;
             int32_t p3_new_path = * (int32_t *) p3_new_path_ptr;
+            uint32_t p1_old_path_len = * (uint32_t *) (((void **) p1_old_path_ptr) + 1);
+            uint32_t p3_new_path_len = * (uint32_t *) (((void **) p3_new_path_ptr) + 1);
 
             response.errno_some = __imported_wasi_snapshot_preview1_path_rename(
                 p0_fd,
@@ -1532,14 +1536,14 @@ static void handle_call(Request__Call * call) {
             break;
         }
         case WASI_FUNC__PATH_SYMLINK: {
-            int32_t p0_old_path_len = 0;
-            int32_t p2_new_path_len = 0;
-            void * p0_old_path_ptr = value_ptr_new(call->params[0], &p0_old_path_len);
-            void * p1_fd_ptr = value_ptr_new(call->params[1], NULL);
-            void * p2_new_path_ptr = value_ptr_new(call->params[2], &p2_new_path_len);
+            void * p0_old_path_ptr = value_ptr_new(call->params[0]);
+            void * p1_fd_ptr = value_ptr_new(call->params[1]);
+            void * p2_new_path_ptr = value_ptr_new(call->params[2]);
             int32_t p0_old_path = * (int32_t *) p0_old_path_ptr;
             int32_t p1_fd = * (int32_t *) p1_fd_ptr;
             int32_t p2_new_path = * (int32_t *) p2_new_path_ptr;
+            uint32_t p0_old_path_len = * (uint32_t *) (((void **) p0_old_path_ptr) + 1);
+            uint32_t p2_new_path_len = * (uint32_t *) (((void **) p2_new_path_ptr) + 1);
 
             response.errno_some = __imported_wasi_snapshot_preview1_path_symlink(
                 p0_old_path,
@@ -1559,11 +1563,11 @@ static void handle_call(Request__Call * call) {
             break;
         }
         case WASI_FUNC__PATH_UNLINK_FILE: {
-            int32_t p1_path_len = 0;
-            void * p0_fd_ptr = value_ptr_new(call->params[0], NULL);
-            void * p1_path_ptr = value_ptr_new(call->params[1], &p1_path_len);
+            void * p0_fd_ptr = value_ptr_new(call->params[0]);
+            void * p1_path_ptr = value_ptr_new(call->params[1]);
             int32_t p0_fd = * (int32_t *) p0_fd_ptr;
             int32_t p1_path = * (int32_t *) p1_path_ptr;
+            uint32_t p1_path_len = * (uint32_t *) (((void **) p1_path_ptr) + 1);
 
             response.errno_some = __imported_wasi_snapshot_preview1_path_unlink_file(
                 p0_fd,

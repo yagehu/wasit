@@ -68,8 +68,9 @@ impl ResourceContext {
             .wrap_err("invalid valtype")?;
 
         match (def, value) {
-            | (Defvaltype::U8, _) => (),
-            | (Defvaltype::U32, _) => (),
+            | (Defvaltype::S64, _)
+            | (Defvaltype::U8, _)
+            | (Defvaltype::U32, _)
             | (Defvaltype::U64, _) => (),
             | (Defvaltype::List(_), _) => todo!(),
             | (Defvaltype::Record(record), Value::Record(record_value)) => {

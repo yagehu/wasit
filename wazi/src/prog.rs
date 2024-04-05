@@ -137,12 +137,19 @@ impl Prog {
             .end_call(Call {
                 func: func.name.clone(),
                 errno,
-                params: response
+                params: func
                     .params
-                    .into_iter()
-                    .map(|param| Value::from_pb(param))
+                    .iter()
+                    .zip(response.params)
+                    .map(|(param_spec, param)| {
+                        Value::from_pb(param, interface, &param_spec.valtype)
+                    })
                     .collect(),
-                results: response.results.into_iter().map(Value::from_pb).collect(),
+                results: result_valtypes
+                    .iter()
+                    .zip(response.results)
+                    .map(|(valtype, result)| Value::from_pb(result, interface, valtype))
+                    .collect(),
             })
             .wrap_err("failed to end call")?;
 

@@ -9,6 +9,7 @@ use wazzi_wasi_component_model::value::{
     RecordValue as WasiRecordValue,
     StringValue,
     Value as WasiValue,
+    VariantValue as WasiVariantValue,
 };
 
 use crate::{prog::Prog, resource_ctx::ResourceContext};
@@ -58,7 +59,9 @@ impl Seed {
                     );
                 },
                 | Action::Call(call) => {
-                    let func_spec = interface.function(&call.func).wrap_err("func not found")?;
+                    let func_spec = interface
+                        .function(&call.func)
+                        .wrap_err(format!("func {} not found", call.func))?;
                     let result_valtypes = func_spec.unpack_expected_result();
                     let params = func_spec
                         .params
@@ -180,12 +183,14 @@ impl ResourceOrValue {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum Value {
+    S64(i64),
     U8(u8),
 
     Handle(u32),
 
     // Container types
     Record(RecordValue),
+    Variant(VariantValue),
     List(Vec<ResourceOrValue>),
 
     // Specialized types
@@ -201,6 +206,7 @@ impl Value {
         ty: &Defvaltype,
     ) -> WasiValue {
         match (ty, self) {
+            | (_, Value::S64(i)) => WasiValue::S64(i),
             | (_, Value::U8(i)) => WasiValue::U8(i),
             | (_, Value::Handle(handle)) => WasiValue::Handle(handle),
             | (Defvaltype::Record(record_type), Value::Record(record)) => {
@@ -216,6 +222,31 @@ impl Value {
                         })
                         .collect(),
                 })
+            },
+            | (Defvaltype::Variant(variant_type), Value::Variant(variant)) => {
+                let (case_idx, case_type) = variant_type
+                    .cases
+                    .iter()
+                    .enumerate()
+                    .find(|(_i, case)| case.name == variant.name)
+                    .unwrap();
+
+                WasiValue::Variant(Box::new(WasiVariantValue {
+                    case_idx:  case_idx as u32,
+                    case_name: variant.name,
+                    payload:   variant.payload.map(|payload| match *payload {
+                        | ResourceOrValue::Resource(id) => {
+                            resource_ctx.get_resource(id).unwrap().value
+                        },
+                        | ResourceOrValue::Value(value) => value.into_wasi_value(
+                            interface,
+                            resource_ctx,
+                            &interface
+                                .resolve_valtype(case_type.payload.as_ref().unwrap())
+                                .unwrap(),
+                        ),
+                    }),
+                }))
             },
             | (Defvaltype::List(list_type), Value::List(elements)) => {
                 let mut list = Vec::with_capacity(elements.len());
@@ -247,50 +278,11 @@ impl Value {
                     .collect(),
             }),
             | (_, Value::String(string)) => WasiValue::String(string),
-            | (_, Value::Record(_)) | (_, Value::List(_)) => panic!(),
+            | (_, Value::Record(_)) | (_, Value::Variant(_)) | (_, Value::List(_)) => panic!(),
         }
     }
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
-#[serde(rename_all = "snake_case")]
-pub enum BuiltinValue {
-    Char(char),
-    U8(u8),
-    U32(u32),
-    U64(u64),
-    S64(i64),
-}
-
-impl From<BuiltinValue> for executor_pb::value::Builtin {
-    fn from(x: BuiltinValue) -> Self {
-        let which = match x {
-            | BuiltinValue::Char(c) => executor_pb::value::builtin::Which::Char(c as u32),
-            | BuiltinValue::U8(i) => executor_pb::value::builtin::Which::U8(i.into()),
-            | BuiltinValue::U32(i) => executor_pb::value::builtin::Which::U32(i),
-            | BuiltinValue::U64(i) => executor_pb::value::builtin::Which::U64(i),
-            | BuiltinValue::S64(i) => executor_pb::value::builtin::Which::S64(i),
-        };
-
-        Self {
-            which:          Some(which),
-            special_fields: Default::default(),
-        }
-    }
-}
-
-impl From<executor_pb::value::Builtin> for BuiltinValue {
-    fn from(x: executor_pb::value::Builtin) -> Self {
-        match x.which.unwrap() {
-            | executor_pb::value::builtin::Which::Char(i) => Self::Char(char::from_u32(i).unwrap()),
-            | executor_pb::value::builtin::Which::U8(i) => Self::U8(i as u8),
-            | executor_pb::value::builtin::Which::U32(i) => Self::U32(i),
-            | executor_pb::value::builtin::Which::U64(i) => Self::U64(i),
-            | executor_pb::value::builtin::Which::S64(i) => Self::S64(i),
-            | _ => panic!(),
-        }
-    }
-}
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct RecordValue(pub Vec<RecordMemberValue>);

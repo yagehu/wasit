@@ -83,6 +83,8 @@
 
   (typename $size u32)
 
+  (typename $filesize u64)
+
   (typename $fd (handle))
 
   (typename $fdflags
@@ -152,6 +154,36 @@
   (@interface func (export "fd_tell")
     (param $fd $fd)
     (result $error (expected $file_offset (error $errno)))
+  )
+
+  (typename $filedelta s64)
+
+  (typename $whence
+    (enum (@witx tag u8)
+      $set
+      $cur
+      $end
+    )
+  )
+
+  (typename $iovec
+    (record
+      (field $buf (list u8))
+    )
+  )
+  (typename $iovec_array (list $iovec))
+
+  (@interface func (export "fd_read")
+    (param $fd $fd)
+    (param $iovs $iovec_array)
+    (result $error (expected $size (error $errno)))
+  )
+
+  (@interface func (export "fd_seek")
+    (param $fd $fd)
+    (param $offset $filedelta)
+    (param $whence $whence)
+    (result $error (expected $filesize (error $errno)))
   )
 
   (typename $ciovec

@@ -14,6 +14,7 @@ use wazzi_executor::ExecutorRunner;
 use wazzi_runners::Wasmtime;
 use wazzi_spec::{package::Package, parsers::Span};
 use wazzi_store::RuntimeStore;
+use wazzi_wasi_component_model::value::Value;
 
 fn main() -> Result<(), eyre::Error> {
     struct Case {
@@ -40,7 +41,7 @@ fn main() -> Result<(), eyre::Error> {
                     .unwrap();
                 let call = action.call().unwrap();
 
-                assert_eq!(call.errno, Some(0));
+                assert_eq!(call.errno, Some(0), "{}", run.stderr);
                 assert!(run.base_dir.path().join("a").exists());
 
                 Ok(())
@@ -63,6 +64,32 @@ fn main() -> Result<(), eyre::Error> {
 
                 assert_eq!(call.errno, Some(0));
                 assert!(run.base_dir.path().join("a").exists());
+
+                Ok(())
+            }),
+        },
+        Case {
+            seed:   "05-read_after_write.json",
+            spec:   "preview1.witx",
+            assert: Box::new(|run| {
+                let action = run
+                    .prog
+                    .store()
+                    .trace()
+                    .last_call()
+                    .unwrap()
+                    .wrap_err("no last call")?
+                    .read()
+                    .unwrap();
+                let call = action.call().unwrap();
+
+                assert_eq!(call.errno, Some(0));
+                assert!(
+                    matches!(call.results.last().unwrap(), &Value::U32(1)),
+                    "{:?}\n{}",
+                    call.results,
+                    run.stderr
+                );
 
                 Ok(())
             }),
@@ -146,7 +173,13 @@ pub fn run(seed: Seed, spec_name: &str) -> Result<RunInstance, eyre::Error> {
 
         let result = rx.recv_timeout(Duration::from_millis(60000));
         let prog = match result {
-            | Ok(result) => result?,
+            | Ok(result) => {
+                if result.is_err() {
+                    let s = String::from_utf8(stderr.lock().unwrap().to_vec()).unwrap();
+                    eprintln!("{s}");
+                }
+                result?
+            },
             | Err(err) => {
                 executor.kill();
                 let s = String::from_utf8(stderr.lock().unwrap().to_vec()).unwrap();

@@ -126,17 +126,9 @@
                                                 "name": "buf",
                                                 "value": {
                                                     "value": {
-                                                        "const_pointer": [
-                                                            { "value": { "builtin": { "u8": 97 } } }
+                                                        "list": [
+                                                            { "value": { "u8": 97 } }
                                                         ]
-                                                    }
-                                                }
-                                            },
-                                            {
-                                                "name": "buf_len",
-                                                "value": {
-                                                    "value": {
-                                                        "builtin": { "u32": 1 }
                                                     }
                                                 }
                                             }
@@ -157,7 +149,7 @@
                 "func": "fd_seek",
                 "params": [
                     { "resource": 1 },
-                    { "value": { "builtin": { "s64": 0 } } },
+                    { "value": { "s64": 0 } },
                     { "value": { "variant": { "name": "set" } } }
                 ],
                 "results": [ { "resource": 3 } ]
@@ -176,11 +168,9 @@
                                         "record": [
                                             {
                                                 "name": "buf",
-                                                "value": { "value": { "pointer": { "alloc_from_resource": 2 } } }
-                                            },
-                                            {
-                                                "name": "buf_len",
-                                                "value": { "resource": 2 }
+                                                "value": { "value": { "list": [
+                                                    { "value": { "u8": 0 } }
+                                                ] } }
                                             }
                                         ]
                                     }

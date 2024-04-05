@@ -152,9 +152,7 @@ impl Interface {
                 },
             },
             | Valtype::Defvaltype(defvaltype) => match defvaltype {
-                | Defvaltype::U8 => (),
-                | Defvaltype::U32 => (),
-                | Defvaltype::U64 => (),
+                | Defvaltype::S64 | Defvaltype::U8 | Defvaltype::U32 | Defvaltype::U64 => (),
                 | Defvaltype::List(list) => self.rec_validate_valtype(&list.element)?,
                 | Defvaltype::Record(_record) => todo!(),
                 | Defvaltype::Variant(variant) => {
@@ -263,6 +261,19 @@ pub enum Valtype {
     Defvaltype(Defvaltype),
 }
 
+impl Valtype {
+    pub fn mem_size(&self, interface: &Interface) -> u32 {
+        interface.resolve_valtype(self).unwrap().mem_size(interface)
+    }
+
+    pub fn alignment(&self, interface: &Interface) -> u32 {
+        interface
+            .resolve_valtype(self)
+            .unwrap()
+            .alignment(interface)
+    }
+}
+
 #[derive(PartialEq, Eq, Clone, Debug)]
 struct Resource {
     node_idx: NodeIndex,
@@ -272,6 +283,7 @@ struct Resource {
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum Defvaltype {
     // Fundamental numerical value types
+    S64,
     U8,
     U32,
     U64,
@@ -290,13 +302,13 @@ pub enum Defvaltype {
 }
 
 impl Defvaltype {
-    pub fn mem_size(&self) -> u32 {
+    pub fn mem_size(&self, interface: &Interface) -> u32 {
         match self {
             | Defvaltype::U8 => 1,
             | Defvaltype::U32 => 4,
-            | Defvaltype::U64 => 8,
-            | Defvaltype::List(_) => todo!(),
-            | Defvaltype::Record(_) => todo!(),
+            | Defvaltype::S64 | Defvaltype::U64 => 8,
+            | Defvaltype::List(_) => 8,
+            | Defvaltype::Record(record) => record.mem_size(interface),
             | Defvaltype::Variant(_) => todo!(),
             | Defvaltype::Handle => 4,
             | Defvaltype::Flags(_) => todo!(),
@@ -310,8 +322,8 @@ impl Defvaltype {
         match self {
             | Defvaltype::U8 => 1,
             | Defvaltype::U32 => 4,
-            | Defvaltype::U64 => 8,
-            | Defvaltype::List(_) => todo!(),
+            | Defvaltype::S64 | Defvaltype::U64 => 8,
+            | Defvaltype::List(_) => 4,
             | Defvaltype::Record(record) => record.alignment(interface),
             | Defvaltype::Variant(_) => todo!(),
             | Defvaltype::Handle => 4,
@@ -334,6 +346,21 @@ pub struct Record {
 }
 
 impl Record {
+    pub fn mem_size(&self, interface: &Interface) -> u32 {
+        let mut size: u32 = 0;
+        let alignment = self.alignment(interface);
+
+        for member in &self.members {
+            let valtype = interface.resolve_valtype(&member.ty).unwrap();
+            let alignment = valtype.alignment(interface);
+
+            size = size.div_ceil(alignment) * alignment;
+            size += valtype.mem_size(interface);
+        }
+
+        size.div_ceil(alignment) * alignment
+    }
+
     pub fn alignment(&self, interface: &Interface) -> u32 {
         self.members
             .iter()
@@ -357,7 +384,7 @@ impl Record {
 
             offset = offset.div_ceil(alignment) * alignment;
             layout.push(RecordMemberLayout { offset });
-            offset += def.mem_size();
+            offset += def.mem_size(interface);
         }
 
         layout
@@ -377,8 +404,46 @@ pub struct RecordMemberLayout {
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Variant {
-    pub tag_repr: Repr,
+    pub tag_repr: IntRepr,
     pub cases:    Vec<VariantCase>,
+}
+
+impl Variant {
+    pub fn alignment(&self, interface: &Interface) -> u32 {
+        self.tag_repr
+            .alignment()
+            .max(self.max_case_alignment(interface))
+    }
+
+    pub fn mem_size(&self, interface: &Interface) -> u32 {
+        let mut size = self.tag_repr.mem_size();
+
+        size = align_to(size, self.max_case_alignment(interface));
+        size += self
+            .cases
+            .iter()
+            .filter_map(|case| case.payload.as_ref())
+            .map(|payload| payload.mem_size(interface))
+            .max()
+            .unwrap_or(0);
+
+        align_to(size, self.alignment(interface))
+    }
+
+    pub fn payload_offset(&self, interface: &Interface) -> u32 {
+        let size = self.tag_repr.mem_size();
+
+        align_to(size, self.max_case_alignment(interface))
+    }
+
+    fn max_case_alignment(&self, interface: &Interface) -> u32 {
+        self.cases
+            .iter()
+            .filter_map(|case| case.payload.as_ref())
+            .map(|payload| payload.alignment(interface))
+            .max()
+            .unwrap_or(1)
+    }
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -389,7 +454,7 @@ pub struct VariantCase {
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct FlagsType {
-    pub repr:    Repr,
+    pub repr:    IntRepr,
     pub members: Vec<String>,
 }
 
@@ -400,10 +465,31 @@ pub struct ResultType {
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
-pub enum Repr {
+pub enum IntRepr {
+    U8,
     U16,
     U32,
     U64,
+}
+
+impl IntRepr {
+    pub fn alignment(&self) -> u32 {
+        match self {
+            | IntRepr::U8 => 1,
+            | IntRepr::U16 => 2,
+            | IntRepr::U32 => 4,
+            | IntRepr::U64 => 8,
+        }
+    }
+
+    pub fn mem_size(&self) -> u32 {
+        match self {
+            | IntRepr::U8 => 1,
+            | IntRepr::U16 => 2,
+            | IntRepr::U32 => 4,
+            | IntRepr::U64 => 8,
+        }
+    }
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -414,4 +500,8 @@ pub enum Node {
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum Edge {
     Fulfills,
+}
+
+fn align_to(ptr: u32, alignment: u32) -> u32 {
+    ptr.div_ceil(alignment) * alignment
 }
