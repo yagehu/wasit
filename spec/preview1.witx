@@ -344,6 +344,15 @@
     (result $error (expected $size (error $errno)))
   )
 
+  (typename $dircookie u64)
+
+  (@interface func (export "fd_readdir")
+    (param $fd $fd)
+    (param $buf (list u8))
+    (param $cookie $dircookie)
+    (result $error (expected $size (error $errno)))
+  )
+
   (@interface func (export "fd_seek")
     (param $fd $fd)
     (param $offset $filedelta)
