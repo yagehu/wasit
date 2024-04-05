@@ -280,7 +280,9 @@ impl Value {
                     .collect(),
             }),
             | (_, Value::String(string)) => WasiValue::String(string),
-            | (_, Value::Record(_)) | (_, Value::Variant(_)) | (_, Value::List(_)) => panic!(),
+            | (_, Value::Record(_)) | (_, Value::Variant(_)) | (_, Value::List(_)) => {
+                panic!("{:?}", ty)
+            },
         }
     }
 }

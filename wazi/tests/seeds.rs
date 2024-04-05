@@ -334,6 +334,26 @@ fn main() -> Result<(), eyre::Error> {
                 Ok(())
             }),
         },
+        Case {
+            seed:   "18-fd_prestat_dir_name.json",
+            spec:   "preview1.witx",
+            assert: Box::new(|run| {
+                let action = run
+                    .prog
+                    .store()
+                    .trace()
+                    .last_call()
+                    .unwrap()
+                    .wrap_err("no last call")?
+                    .read()
+                    .unwrap();
+                let call = action.call().unwrap();
+
+                assert_eq!(call.errno, Some(37));
+
+                Ok(())
+            }),
+        },
     ];
 
     for (i, case) in cases.into_iter().enumerate() {
@@ -413,7 +433,13 @@ pub fn run(seed: Seed, spec_name: &str) -> Result<RunInstance, eyre::Error> {
 
         let result = rx.recv_timeout(Duration::from_millis(60000));
         let prog = match result {
-            | Ok(result) => result?,
+            | Ok(result) => {
+                if result.is_err() {
+                    let s = String::from_utf8(stderr.lock().unwrap().to_vec()).unwrap();
+                    eprintln!("{s}");
+                }
+                result?
+            },
             | Err(err) => {
                 executor.kill();
                 let s = String::from_utf8(stderr.lock().unwrap().to_vec()).unwrap();

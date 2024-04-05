@@ -303,6 +303,12 @@
     (result $error (expected $prestat (error $errno)))
   )
 
+  (@interface func (export "fd_prestat_dir_name")
+    (param $fd $fd)
+    (param $path (list u8))
+    (result $error (expected (error $errno)))
+  )
+
   (@interface func (export "fd_tell")
     (param $fd $fd)
     (result $error (expected $file_offset (error $errno)))
