@@ -353,6 +353,12 @@
     (result $error (expected $size (error $errno)))
   )
 
+  (@interface func (export "fd_renumber")
+    (param $fd $fd)
+    (param $to $fd)
+    (result $error (expected (error $errno)))
+  )
+
   (@interface func (export "fd_seek")
     (param $fd $fd)
     (param $offset $filedelta)
