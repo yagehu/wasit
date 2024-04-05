@@ -122,8 +122,8 @@
                 "func": "fd_filestat_set_times",
                 "params": [
                     { "resource": 1 },
-                    { "value": { "builtin": { "u64": 1 } } },
-                    { "value": { "builtin": { "u64": 2 } } },
+                    { "value": { "u64": 1 } },
+                    { "value": { "u64": 2 } },
                     {
                         "value": {
                             "flags": [

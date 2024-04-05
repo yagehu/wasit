@@ -256,6 +256,23 @@
     (result $error (expected (error $errno)))
   )
 
+  (typename $fstflags
+    (flags (@witx repr u16)
+      $atim
+      $atim_now
+      $mtim
+      $mtim_now
+    )
+  )
+
+  (@interface func (export "fd_filestat_set_times")
+    (param $fd $fd)
+    (param $atim $timestamp)
+    (param $mtim $timestamp)
+    (param $fst_flags $fstflags)
+    (result $error (expected (error $errno)))
+  )
+
   (@interface func (export "fd_tell")
     (param $fd $fd)
     (result $error (expected $file_offset (error $errno)))
