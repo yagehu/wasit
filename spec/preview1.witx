@@ -220,6 +220,13 @@
     (result $error (expected (error $errno)))
   )
 
+  (@interface func (export "fd_fdstat_set_rights")
+    (param $fd $fd)
+    (param $fs_rights_base $rights)
+    (param $fs_rights_inheriting $rights)
+    (result $error (expected (error $errno)))
+  )
+
   (@interface func (export "fd_tell")
     (param $fd $fd)
     (result $error (expected $file_offset (error $errno)))
