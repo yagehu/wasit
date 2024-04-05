@@ -132,16 +132,12 @@
                                                 "name": "buf",
                                                 "value": {
                                                     "value": {
-                                                        "const_pointer": [
-                                                            { "value": { "builtin": { "u8": 97 } } },
-                                                            { "value": { "builtin": { "u8": 98 } } }
+                                                        "list": [
+                                                            { "value": { "u8": 97 } },
+                                                            { "value": { "u8": 98 } }
                                                         ]
                                                     }
                                                 }
-                                            },
-                                            {
-                                                "name": "buf_len",
-                                                "value": { "value": { "builtin": { "u32": 2 } } }
                                             }
                                         ]
                                     }
@@ -168,16 +164,12 @@
                                                 "name": "buf",
                                                 "value": {
                                                     "value": {
-                                                        "const_pointer": [
-                                                            { "value": { "builtin": { "u8": 97 } } },
-                                                            { "value": { "builtin": { "u8": 98 } } }
+                                                        "list": [
+                                                            { "value": { "u8": 97 } },
+                                                            { "value": { "u8": 98 } }
                                                         ]
                                                     }
                                                 }
-                                            },
-                                            {
-                                                "name": "buf_len",
-                                                "value": { "value": { "builtin": { "u32": 2 } } }
                                             }
                                         ]
                                     }
@@ -185,7 +177,7 @@
                             ]
                         }
                     },
-                    { "value": { "builtin": { "u64": 0 } } }
+                    { "value": { "u64": 0 } }
                 ],
                 "results": [ { "resource": 3 } ]
             }

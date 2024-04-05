@@ -354,6 +354,26 @@ fn main() -> Result<(), eyre::Error> {
                 Ok(())
             }),
         },
+        Case {
+            seed:   "19-fd_pwrite.json",
+            spec:   "preview1.witx",
+            assert: Box::new(|run| {
+                let action = run
+                    .prog
+                    .store()
+                    .trace()
+                    .last_call()
+                    .unwrap()
+                    .wrap_err("no last call")?
+                    .read()
+                    .unwrap();
+                let call = action.call().unwrap();
+
+                assert_eq!(call.errno, Some(0));
+
+                Ok(())
+            }),
+        },
     ];
 
     for (i, case) in cases.into_iter().enumerate() {
@@ -435,6 +455,7 @@ pub fn run(seed: Seed, spec_name: &str) -> Result<RunInstance, eyre::Error> {
         let prog = match result {
             | Ok(result) => {
                 if result.is_err() {
+                    executor.kill();
                     let s = String::from_utf8(stderr.lock().unwrap().to_vec()).unwrap();
                     eprintln!("{s}");
                 }

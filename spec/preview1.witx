@@ -309,6 +309,13 @@
     (result $error (expected (error $errno)))
   )
 
+  (@interface func (export "fd_pwrite")
+    (param $fd $fd)
+    (param $iovs $ciovec_array)
+    (param $offset $filesize)
+    (result $error (expected $size (error $errno)))
+  )
+
   (@interface func (export "fd_tell")
     (param $fd $fd)
     (result $error (expected $file_offset (error $errno)))
