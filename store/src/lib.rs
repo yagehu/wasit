@@ -67,28 +67,57 @@ impl RunStore {
     pub fn write_data(&self, data: &[u8]) -> Result<(), io::Error> {
         fs::write(self.path.join("data"), data)
     }
+
+    pub fn runtimes(&self) -> Result<impl Iterator<Item = RuntimeStore> + '_, io::Error> {
+        Ok(self
+            .runtimes
+            .iter()
+            .map(|runtime| RuntimeStore::resume(&self.runtimes_dir.join(runtime)))
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter())
+    }
 }
 
 #[derive(Debug)]
 pub struct RuntimeStore {
     pub path: PathBuf,
+    pub base: PathBuf,
 
     version_path: PathBuf,
     trace:        TraceStore,
 }
 
 impl RuntimeStore {
+    pub fn resume(path: &Path) -> Result<Self, io::Error> {
+        fs::create_dir_all(path)?;
+
+        let path = path.canonicalize()?;
+        let base = path.join("base");
+        let version_path = path.join("version");
+        let trace = TraceStore::resume(&path.join("trace"))?;
+
+        Ok(Self {
+            path,
+            base,
+            version_path,
+            trace,
+        })
+    }
+
     pub fn new(path: &Path, version: &str) -> Result<Self, io::Error> {
         fs::create_dir_all(path)?;
 
         let path = path.canonicalize()?;
+        let base = path.join("base");
         let version_path = path.join("version");
         let trace = TraceStore::new(&path.join("trace"))?;
 
+        fs::create_dir_all(&base)?;
         fs::write(&version_path, version)?;
 
         Ok(Self {
             path,
+            base,
             version_path,
             trace,
         })
@@ -111,6 +140,34 @@ pub struct TraceStore {
 }
 
 impl TraceStore {
+    pub fn resume(path: &Path) -> Result<Self, io::Error> {
+        fs::create_dir_all(path)?;
+
+        let path = path.canonicalize()?;
+        let mut next = 0;
+
+        for entry in fs::read_dir(&path)? {
+            let entry = entry?;
+            let idx = match entry
+                .file_name()
+                .to_string_lossy()
+                .to_string()
+                .parse::<usize>()
+            {
+                | Ok(idx) => idx,
+                | Err(_) => continue,
+            };
+
+            next = next.max(idx + 1);
+        }
+
+        Ok(Self {
+            path,
+            next,
+            recording: None,
+        })
+    }
+
     pub fn new(path: &Path) -> Result<Self, io::Error> {
         fs::create_dir(path)?;
 

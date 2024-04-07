@@ -62,6 +62,7 @@ tracing = "0.1"
 tracing-bunyan-formatter = "0.3"
 tracing-error = "0.2"
 tracing-subscriber = "0.3"
+walkdir = "2"
 
 [package]
 name = "wazzi"

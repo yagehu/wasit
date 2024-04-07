@@ -9,12 +9,12 @@ use std::{
     time::Duration,
 };
 use tempfile::{tempdir, TempDir};
-use wazi::{prog::Prog, seed::Seed};
 use wazzi_executor::ExecutorRunner;
 use wazzi_runners::Wasmtime;
 use wazzi_spec::{package::Package, parsers::Span};
 use wazzi_store::RuntimeStore;
 use wazzi_wasi_component_model::value::Value;
+use wazzi_wazi::{prog::Prog, seed::Seed};
 
 fn main() -> Result<(), eyre::Error> {
     struct Case {

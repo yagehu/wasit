@@ -1,7 +1,13 @@
 use std::{
     fs,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        mpsc,
+        Arc,
+        Condvar,
+        Mutex,
+    },
     thread,
     time::Duration,
 };
@@ -9,7 +15,8 @@ use std::{
 use arbitrary::Unstructured;
 use color_eyre::eyre::{self, eyre as err, Context};
 use rand::{thread_rng, RngCore};
-use tracing::{debug, info};
+use tracing::info;
+use walkdir::WalkDir;
 use wazzi_executor::ExecutorRunner;
 use wazzi_runners::WasiRunner;
 use wazzi_spec::parsers::Span;
@@ -60,6 +67,10 @@ impl Fuzzer {
 
         thread::scope(|scope| -> Result<(), eyre::Error> {
             let mut threads = Vec::with_capacity(self.runtimes.len());
+            let n_live_threads = Arc::new(AtomicUsize::new(self.runtimes.len()));
+            let pair = Arc::new((Mutex::new((0, 0usize)), Condvar::new()));
+            let cancel = Arc::new(AtomicBool::new(false));
+            let (tx, rx) = mpsc::channel();
 
             for runtime in &self.runtimes {
                 let runtime_store = run_store
@@ -71,10 +82,13 @@ impl Fuzzer {
                     thread::Builder::new()
                         .name(runtime.name.to_owned())
                         .spawn_scoped(scope, {
+                            let n_live_threads = n_live_threads.clone();
+                            let pair = pair.clone();
                             let main_thread = main_thread.clone();
                             let seed = self.seed.clone();
                             let spec = spec.clone();
                             let mut u = Unstructured::new(&data);
+                            let tx = tx.clone();
 
                             move || -> Result<(), eyre::Error> {
                                 let wake_main = |err| {
@@ -82,12 +96,6 @@ impl Fuzzer {
 
                                     err
                                 };
-                                let base_dir = runtime_store.path.join("base");
-
-                                fs::create_dir(&base_dir)
-                                    .wrap_err("failed to create base dir")
-                                    .map_err(wake_main)?;
-
                                 let stderr_file = fs::OpenOptions::new()
                                     .write(true)
                                     .create_new(true)
@@ -98,7 +106,7 @@ impl Fuzzer {
                                     runtime.runner.as_ref(),
                                     executor_bin(),
                                     runtime_store.path.clone(),
-                                    Some(base_dir),
+                                    Some(runtime_store.base.clone()),
                                 )
                                 .run(Arc::new(Mutex::new(stderr_file)))
                                 .wrap_err("failed to run executor")
@@ -109,8 +117,27 @@ impl Fuzzer {
                                     .wrap_err("failed to execute seed")
                                     .map_err(wake_main)?;
 
+                                tx.send(()).wrap_err("failed to send done to differ")?;
+
                                 loop {
                                     prog.call_arbitrary(&mut u, &spec)?;
+
+                                    let (mu, cond) = &*pair;
+                                    let mut ct = mu.lock().unwrap();
+                                    let generation = ct.1;
+
+                                    ct.0 += 1;
+
+                                    if ct.0 == n_live_threads.load(Ordering::SeqCst) {
+                                        ct.0 = 0;
+                                        ct.1 = ct.1.wrapping_add(1);
+                                        tx.send(()).wrap_err("failed to send done to differ")?;
+                                        cond.notify_all();
+                                    }
+
+                                    let _state = cond
+                                        .wait_while(ct, |(_n, gen)| generation == *gen)
+                                        .unwrap();
                                 }
                             }
                         })
@@ -118,10 +145,61 @@ impl Fuzzer {
                 ));
             }
 
+            let t = thread::Builder::new()
+                .name("differ".to_owned())
+                .spawn_scoped(scope, {
+                    let runtimes = run_store
+                        .runtimes()
+                        .wrap_err("failed to resume runtimes")?
+                        .collect::<Vec<_>>();
+                    let cancel = cancel.clone();
+
+                    move || -> Result<(), eyre::Error> {
+                        while let Ok(_done) = rx.recv() {
+                            'outer: for (i, runtime_0) in runtimes.iter().enumerate() {
+                                if i == runtimes.len() - 1 {
+                                    break;
+                                }
+
+                                for j in (i + 1)..runtimes.len() {
+                                    let runtime_1 = runtimes.get(j).unwrap();
+                                    let runtime_0_walk =
+                                        WalkDir::new(&runtime_0.base).sort_by_file_name();
+                                    let runtime_1_walk =
+                                        WalkDir::new(&runtime_1.base).sort_by_file_name();
+
+                                    for (a, b) in
+                                        runtime_0_walk.into_iter().zip(runtime_1_walk.into_iter())
+                                    {
+                                        let a = a.wrap_err("failed to read dir entry")?;
+                                        let b = b.wrap_err("failed to read dir entry")?;
+
+                                        if a.depth() != b.depth()
+                                            || a.file_type() != b.file_type()
+                                            || a.file_name() != b.file_name()
+                                            || (a.file_type().is_file()
+                                                && fs::read(a.path())? != fs::read(b.path())?)
+                                        {
+                                            tracing::warn!(
+                                                runtime_0 = %runtime_0.base.display(),
+                                                runtime_1 = %runtime_1.base.display(),
+                                                "Fs diff found."
+                                            );
+                                            cancel.store(true, Ordering::SeqCst);
+                                            break 'outer;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        panic!("differ thread exit");
+                    }
+                })
+                .wrap_err("failed to spawn differ thread")?;
+
             // Loop until some thread finishes.
             loop {
-                info!("Checking for finished threads.",);
-
                 let mut finished = Vec::new();
 
                 for (i, t) in threads.iter().enumerate() {
@@ -129,6 +207,8 @@ impl Fuzzer {
                         finished.push(i);
                     }
                 }
+
+                n_live_threads.fetch_sub(finished.len(), Ordering::SeqCst);
 
                 for i in finished.into_iter().rev() {
                     let (_runtime, t) = threads.remove(i);

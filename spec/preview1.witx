@@ -177,11 +177,6 @@
     (result $error (expected (error $errno)))
   )
 
-  (@interface func (export "fd_close")
-    (param $fd $fd)
-    (result $error (expected (error $errno)))
-  )
-
   (@interface func (export "fd_datasync")
     (param $fd $fd)
     (result $error (expected (error $errno)))
