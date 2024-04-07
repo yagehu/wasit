@@ -10,9 +10,10 @@ use color_eyre::eyre::{self, Context as _};
 use tracing_bunyan_formatter::BunyanFormattingLayer;
 use tracing_error::ErrorLayer;
 use tracing_subscriber::layer::SubscriberExt as _;
-use wazzi_fuzzer::{store::FuzzStore, Fuzzer, Runtime};
+use wazzi_fuzzer::{Fuzzer, Runtime};
 use wazzi_runners::{Node, Wamr, Wasmedge, Wasmer, Wasmtime};
-use wazzi_wasi::seed::Seed;
+use wazzi_store::FuzzStore;
+use wazzi_wazi::seed::Seed;
 
 #[derive(Parser, Debug, Clone)]
 struct Cmd {
@@ -78,10 +79,13 @@ fn main() -> Result<(), eyre::Error> {
             },
         ],
     );
-    let store = FuzzStore::new(&results_root).wrap_err("failed to initialize fuzz store")?;
+    let mut store = FuzzStore::new(&results_root).wrap_err("failed to init fuzz store")?;
 
     fuzzer
-        .fuzz_loop(&store, initial_data.as_ref().map(|bytes| bytes.as_slice()))
+        .fuzz_loop(
+            &mut store,
+            initial_data.as_ref().map(|bytes| bytes.as_slice()),
+        )
         .wrap_err("fuzz loop error")?;
 
     Ok(())

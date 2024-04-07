@@ -17,7 +17,7 @@ pub struct FuzzStore {
 
 impl FuzzStore {
     pub fn new(path: &Path) -> Result<Self, io::Error> {
-        fs::create_dir(path)?;
+        fs::create_dir_all(path)?;
 
         let path = path.canonicalize()?;
 
@@ -63,11 +63,16 @@ impl RunStore {
 
         Ok(store)
     }
+
+    pub fn write_data(&self, data: &[u8]) -> Result<(), io::Error> {
+        fs::write(self.path.join("data"), data)
+    }
 }
 
 #[derive(Debug)]
 pub struct RuntimeStore {
-    path:         PathBuf,
+    pub path: PathBuf,
+
     version_path: PathBuf,
     trace:        TraceStore,
 }
@@ -145,11 +150,20 @@ impl TraceStore {
         Ok(Some(ActionStore::from_path(&self.action_path(idx))?))
     }
 
-    pub fn begin_call(&mut self) -> Result<(), io::Error> {
+    pub fn begin_call(&mut self, before: Call) -> Result<(), io::Error> {
         let idx = self.next;
         let dir = self.action_path(idx);
 
         fs::create_dir(&dir)?;
+        serde_json::to_writer_pretty(
+            BufWriter::new(
+                fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(dir.join(ActionStore::BEFORE_JSON_PATH))?,
+            ),
+            &before,
+        )?;
 
         self.recording = Some(idx);
 
@@ -186,6 +200,7 @@ pub struct ActionStore {
 }
 
 impl ActionStore {
+    const BEFORE_JSON_PATH: &'static str = "before.json";
     const CALL_JSON_PATH: &'static str = "call.json";
     const DECL_JSON_PATH: &'static str = "decl.json";
 

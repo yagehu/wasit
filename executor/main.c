@@ -194,7 +194,7 @@ static void free_ptr_value(void * ptr, const Value * value) {
                     value->array->items[i]
                 );
 
-            free(ptr);
+            // free(ptr);
 
             break;
         }
@@ -942,9 +942,10 @@ static void handle_call(Request__Call * call) {
             __wasi_size_t to_read = 0;
             __wasi_size_t n_read  = 0;
 
-
             for (int i = 0; i < p1_iovs_len; i++)
                 to_read += (* (__wasi_iovec_t **) p1_iovs_ptr)[i].buf_len;
+
+            fprintf(stderr, "pread to read %lu\n", to_read);
 
             __wasi_iovec_t iovs_curr = (* (__wasi_iovec_t **) p1_iovs_ptr)[iovs_idx];
 
@@ -1041,7 +1042,6 @@ static void handle_call(Request__Call * call) {
             __wasi_size_t to_write = 0;
             __wasi_size_t written  = 0;
 
-
             for (int i = 0; i < p1_iovs_len; i++)
                 to_write += (* (__wasi_ciovec_t **) p1_iovs_ptr)[i].buf_len;
 
@@ -1109,6 +1109,7 @@ static void handle_call(Request__Call * call) {
             __wasi_iovec_t iovs_curr = (* (__wasi_iovec_t **) p1_iovs_ptr)[iovs_idx];
 
             while (n_read < to_read) {
+                fprintf(stderr, "read nread %lu\n", n_read);
 
                 response.errno_some = __imported_wasi_snapshot_preview1_fd_read(
                     p0_fd,
@@ -1126,6 +1127,8 @@ static void handle_call(Request__Call * call) {
                 }
 
                 __wasi_size_t read_this_time = * (__wasi_size_t *) r0_size_ptr;
+
+                if (read_this_time == 0) break;
 
                 n_read += read_this_time;
 

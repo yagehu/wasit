@@ -68,6 +68,13 @@ impl Interface {
         self.functions.get(name)
     }
 
+    pub fn resource_by_name(&self, idx: TypeidxBorrow) -> Option<&Resource> {
+        self.resources.get(match idx {
+            | TypeidxBorrow::Numeric(i) => i as usize,
+            | TypeidxBorrow::Symbolic(name) => *self.resource_names.get(name)?,
+        })
+    }
+
     pub fn resources(&self) -> impl Iterator<Item = &Resource> {
         self.resources.iter()
     }
@@ -288,8 +295,9 @@ impl Valtype {
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Resource {
+    pub def: Defvaltype,
+
     node_idx: NodeIndex,
-    def:      Defvaltype,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]

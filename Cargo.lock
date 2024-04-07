@@ -1720,25 +1720,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "wazi"
-version = "0.1.0"
-dependencies = [
- "arbitrary",
- "color-eyre",
- "eyre",
- "serde",
- "serde_json",
- "tempfile",
- "wazzi-compile-time",
- "wazzi-executor",
- "wazzi-executor-pb-rust",
- "wazzi-runners",
- "wazzi-spec",
- "wazzi-store",
- "wazzi-wasi-component-model",
-]
-
-[[package]]
 name = "wazzi"
 version = "0.1.0"
 dependencies = [
@@ -1751,7 +1732,8 @@ dependencies = [
  "tracing-subscriber",
  "wazzi-fuzzer",
  "wazzi-runners",
- "wazzi-wasi",
+ "wazzi-store",
+ "wazzi-wazi",
 ]
 
 [[package]]
@@ -1803,8 +1785,9 @@ dependencies = [
  "tracing",
  "wazzi-executor",
  "wazzi-runners",
- "wazzi-wasi",
- "wazzi-witx",
+ "wazzi-spec",
+ "wazzi-store",
+ "wazzi-wazi",
 ]
 
 [[package]]
@@ -1868,6 +1851,26 @@ dependencies = [
  "serde",
  "wazzi-executor-pb-rust",
  "wazzi-spec",
+]
+
+[[package]]
+name = "wazzi-wazi"
+version = "0.1.0"
+dependencies = [
+ "arbitrary",
+ "color-eyre",
+ "eyre",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tracing",
+ "wazzi-compile-time",
+ "wazzi-executor",
+ "wazzi-executor-pb-rust",
+ "wazzi-runners",
+ "wazzi-spec",
+ "wazzi-store",
+ "wazzi-wasi-component-model",
 ]
 
 [[package]]

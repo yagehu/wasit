@@ -1,5 +1,6 @@
 use arbitrary::Unstructured;
 use eyre::{Context, ContextCompat};
+use tracing::debug;
 use wazzi_executor::RunningExecutor;
 use wazzi_spec::package::{Function, Interface, Package};
 use wazzi_store::{Call, RuntimeStore};
@@ -96,7 +97,12 @@ impl Prog {
     ) -> Result<(), eyre::Error> {
         self.store
             .trace_mut()
-            .begin_call()
+            .begin_call(Call {
+                func:    func.name.clone(),
+                errno:   None,
+                params:  params.clone(),
+                results: results.clone(),
+            })
             .wrap_err("failed to begin recording call")?;
 
         let result_valtypes = func.unpack_expected_result();
@@ -157,13 +163,36 @@ impl Prog {
         Ok(())
     }
 
-    pub fn call_arbitrary(&self, spec: &Package, u: &mut Unstructured) -> Result<(), eyre::Error> {
+    pub fn call_arbitrary(
+        &mut self,
+        u: &mut Unstructured,
+        spec: &Package,
+    ) -> Result<(), eyre::Error> {
         let interface = u.choose(spec.interfaces())?;
         let functions = interface.functions().collect::<Vec<_>>();
         let function = *u.choose(&functions)?;
+        let result_valtypes = function.unpack_expected_result();
         let mut params = Vec::with_capacity(function.params.len());
+        let mut results = Vec::with_capacity(result_valtypes.len());
 
-        for param_type in &function.params {}
+        debug!("Calling func {}", function.name);
+
+        for param_type in &function.params {
+            let param = self
+                .resource_ctx
+                .arbitrary_value_from_valtype(u, interface, &param_type.valtype)
+                .wrap_err("failed to get arbitrary param value")?;
+
+            params.push(param);
+        }
+
+        for result_valtype in &result_valtypes {
+            let def = interface
+                .resolve_valtype(result_valtype)
+                .wrap_err("failed to resolve valtype")?;
+
+            results.push(Value::zero_value_from_spec(interface, &def));
+        }
 
         self.call(interface, function, params, results)
     }

@@ -1,7 +1,3 @@
-extern crate wazzi_witx as witx;
-
-pub mod store;
-
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -11,14 +7,14 @@ use std::{
 };
 
 use arbitrary::Unstructured;
-use color_eyre::eyre::{self, Context};
+use color_eyre::eyre::{self, eyre as err, Context};
 use rand::{thread_rng, RngCore};
-use tracing::info;
+use tracing::{debug, info};
 use wazzi_executor::ExecutorRunner;
 use wazzi_runners::WasiRunner;
-use wazzi_wasi::{seed::Seed, store::ExecutionStore};
-
-use crate::store::FuzzStore;
+use wazzi_spec::parsers::Span;
+use wazzi_store::FuzzStore;
+use wazzi_wazi::seed::Seed;
 
 #[derive(Clone, Debug)]
 pub struct Fuzzer {
@@ -36,29 +32,40 @@ impl Fuzzer {
 
     pub fn fuzz_loop(
         &mut self,
-        store: &FuzzStore,
+        store: &mut FuzzStore,
         initial_data: Option<&[u8]>,
     ) -> Result<(), eyre::Error> {
         let main_thread = thread::current();
         let data = match initial_data {
             | Some(initial_data) => initial_data.to_vec(),
             | None => {
-                let mut data = vec![0u8; 65536];
+                let mut data = vec![0u8; 1048576];
 
                 thread_rng().fill_bytes(&mut data);
 
                 data
             },
         };
+        let mut run_store = store.new_run().wrap_err("failed to init run store")?;
 
-        store
-            .write_seed_data(&data)
-            .wrap_err("failed to write seed data")?;
+        run_store
+            .write_data(&data)
+            .wrap_err("failed to write data")?;
+
+        let spec = fs::read_to_string(PathBuf::from("spec").join("preview1.witx"))
+            .wrap_err("failed to read spec to string")?;
+        let doc = wazzi_spec::parsers::wazzi_preview1::Document::parse(Span::new(&spec))
+            .map_err(|_| err!("failed to parse spec"))?;
+        let spec = doc.into_package().wrap_err("failed to process spec")?;
 
         thread::scope(|scope| -> Result<(), eyre::Error> {
             let mut threads = Vec::with_capacity(self.runtimes.len());
 
             for runtime in &self.runtimes {
+                let runtime_store = run_store
+                    .new_runtime(runtime.name, &get_commit_id(&runtime.repo).unwrap())
+                    .wrap_err("failed to init runtime store")?;
+
                 threads.push((
                     runtime.clone(),
                     thread::Builder::new()
@@ -66,6 +73,7 @@ impl Fuzzer {
                         .spawn_scoped(scope, {
                             let main_thread = main_thread.clone();
                             let seed = self.seed.clone();
+                            let spec = spec.clone();
                             let mut u = Unstructured::new(&data);
 
                             move || -> Result<(), eyre::Error> {
@@ -74,13 +82,8 @@ impl Fuzzer {
 
                                     err
                                 };
+                                let base_dir = runtime_store.path.join("base");
 
-                                let result_dir = store.path().join(&runtime.name);
-                                let base_dir = result_dir.join("base");
-
-                                fs::create_dir(&result_dir)
-                                    .wrap_err("failed to create result dir")
-                                    .map_err(wake_main)?;
                                 fs::create_dir(&base_dir)
                                     .wrap_err("failed to create base dir")
                                     .map_err(wake_main)?;
@@ -88,33 +91,26 @@ impl Fuzzer {
                                 let stderr_file = fs::OpenOptions::new()
                                     .write(true)
                                     .create_new(true)
-                                    .open(&result_dir.join("stderr"))
+                                    .open(&runtime_store.path.join("stderr"))
                                     .wrap_err("failed to open stderr file")
                                     .map_err(wake_main)?;
                                 let executor = ExecutorRunner::new(
                                     runtime.runner.as_ref(),
                                     executor_bin(),
-                                    result_dir.clone(),
+                                    runtime_store.path.clone(),
                                     Some(base_dir),
                                 )
                                 .run(Arc::new(Mutex::new(stderr_file)))
                                 .wrap_err("failed to run executor")
                                 .map_err(wake_main)?;
-                                let store = ExecutionStore::new(
-                                    &result_dir,
-                                    &get_commit_id(&runtime.repo).unwrap(),
-                                    executor.pid(),
-                                )
-                                .wrap_err("failed to initialize execution store")
-                                .map_err(wake_main)?;
                                 let mut prog = seed
                                     .clone()
-                                    .execute(&spec(), store, executor.clone())
+                                    .execute(&spec, executor, runtime_store)
                                     .wrap_err("failed to execute seed")
                                     .map_err(wake_main)?;
 
                                 loop {
-                                    prog.call_arbitrary(&mut u, &spec()).unwrap();
+                                    prog.call_arbitrary(&mut u, &spec)?;
                                 }
                             }
                         })
@@ -124,6 +120,8 @@ impl Fuzzer {
 
             // Loop until some thread finishes.
             loop {
+                info!("Checking for finished threads.",);
+
                 let mut finished = Vec::new();
 
                 for (i, t) in threads.iter().enumerate() {
@@ -164,19 +162,6 @@ pub struct Runtime {
     pub name:   &'static str,
     pub repo:   PathBuf,
     pub runner: Arc<dyn WasiRunner>,
-}
-
-pub fn spec() -> witx::Document {
-    let dir = PathBuf::from(".")
-        .join("spec")
-        .join("preview1")
-        .join("witx");
-
-    witx::load(&[
-        dir.join("typenames.witx"),
-        dir.join("wasi_snapshot_preview1.witx"),
-    ])
-    .unwrap()
 }
 
 fn executor_bin() -> PathBuf {
