@@ -2,11 +2,11 @@ use arbitrary::Unstructured;
 use eyre::{Context, ContextCompat};
 use tracing::debug;
 use wazzi_executor::RunningExecutor;
-use wazzi_spec::package::{Function, Interface, Package};
+use wazzi_spec::package::{Function, Interface, Package, Valtype};
 use wazzi_store::{Call, RuntimeStore};
-use wazzi_wasi_component_model::value::Value;
+use wazzi_wasi_component_model::value::ValueMeta;
 
-use crate::resource_ctx::ResourceContext;
+use crate::{resource_ctx::ResourceContext, seed::ResultSpec};
 
 fn pb_func(name: &str) -> executor_pb::WasiFunc {
     use executor_pb::WasiFunc::*;
@@ -92,8 +92,10 @@ impl Prog {
         &mut self,
         interface: &Interface,
         func: &Function,
-        params: Vec<Value>,
-        results: Vec<Value>,
+        params: Vec<ValueMeta>,
+        results: Vec<ValueMeta>,
+        result_valtypes: &[Valtype],
+        result_specs: Option<&[ResultSpec]>,
     ) -> Result<(), eyre::Error> {
         self.store
             .trace_mut()
@@ -111,7 +113,7 @@ impl Prog {
             params:         func
                 .params
                 .iter()
-                .zip(params)
+                .zip(params.clone())
                 .map(|(param, v)| -> Result<_, eyre::Error> {
                     let def = interface
                         .resolve_valtype(&param.valtype)
@@ -122,7 +124,7 @@ impl Prog {
                 .collect::<Result<_, _>>()?,
             results:        result_valtypes
                 .iter()
-                .zip(results)
+                .zip(results.clone())
                 .map(|(result_valtype, v)| -> Result<_, eyre::Error> {
                     let def = interface
                         .resolve_valtype(&result_valtype)
@@ -138,6 +140,34 @@ impl Prog {
             | executor_pb::response::call::Errno_option::ErrnoNone(_) => None,
             | _ => panic!(),
         };
+        let mut results_after = response
+            .results
+            .iter()
+            .zip(result_valtypes.iter())
+            .zip(results.iter())
+            .map(|((result, result_valtype), before)| {
+                ValueMeta::from_pb(result.to_owned(), interface, result_valtype, before)
+            })
+            .collect::<Vec<_>>();
+
+        if errno.is_none() || errno.unwrap() == 0 {
+            for (i, (result, valtype)) in results_after
+                .iter_mut()
+                .zip(result_valtypes.iter())
+                .enumerate()
+            {
+                let id = match result_specs {
+                    | Some(result_specs) => match result_specs.get(i).unwrap() {
+                        | ResultSpec::Resource(id) => Some(*id),
+                        | ResultSpec::Ignore => continue,
+                    },
+                    | None => None,
+                };
+
+                self.resource_ctx
+                    .register_resource_rec(interface, valtype, result, id)?;
+            }
+        }
 
         self.store
             .trace_mut()
@@ -148,15 +178,12 @@ impl Prog {
                     .params
                     .iter()
                     .zip(response.params)
-                    .map(|(param_spec, param)| {
-                        Value::from_pb(param, interface, &param_spec.valtype)
+                    .zip(params)
+                    .map(|((param_spec, param), before_param)| {
+                        ValueMeta::from_pb(param, interface, &param_spec.valtype, &before_param)
                     })
                     .collect(),
-                results: result_valtypes
-                    .iter()
-                    .zip(response.results)
-                    .map(|(valtype, result)| Value::from_pb(result, interface, valtype))
-                    .collect(),
+                results: results_after,
             })
             .wrap_err("failed to end call")?;
 
@@ -187,13 +214,9 @@ impl Prog {
         }
 
         for result_valtype in &result_valtypes {
-            let def = interface
-                .resolve_valtype(result_valtype)
-                .wrap_err("failed to resolve valtype")?;
-
-            results.push(Value::zero_value_from_spec(interface, &def));
+            results.push(ValueMeta::zero_value_from_spec(interface, &result_valtype));
         }
 
-        self.call(interface, function, params, results)
+        self.call(interface, function, params, results, &result_valtypes, None)
     }
 }

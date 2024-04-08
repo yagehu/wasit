@@ -10,6 +10,7 @@ use wazzi_wasi_component_model::value::{
     RecordValue,
     StringValue,
     Value,
+    ValueMeta,
     VariantValue,
 };
 
@@ -38,8 +39,12 @@ impl ResourceContext {
         }
     }
 
-    pub fn new_resource(&mut self, ty: &str, value: Value) {
-        self.register_resource(ty, value, self.next_id);
+    pub fn new_resource(&mut self, ty: &str, value: Value) -> u64 {
+        let id = self.next_id;
+
+        self.register_resource(ty, value, id);
+
+        id
     }
 
     pub fn register_resource(&mut self, ty: &str, value: Value, id: ResourceId) {
@@ -60,13 +65,18 @@ impl ResourceContext {
         &mut self,
         interface: &Interface,
         valtype: &Valtype,
-        value: Value,
+        value: &mut ValueMeta,
         resource_id: Option<u64>,
     ) -> Result<(), eyre::Error> {
         match valtype {
             | Valtype::Typeidx(Typeidx::Symbolic(name)) => match resource_id {
-                | Some(resource_id) => self.register_resource(name, value.clone(), resource_id),
-                | None => self.new_resource(name, value.clone()),
+                | Some(resource_id) => {
+                    self.register_resource(name, value.value.clone(), resource_id);
+                    value.resource_id = Some(resource_id);
+                },
+                | None => {
+                    value.resource_id = Some(self.new_resource(name, value.value.clone()));
+                },
             },
             | _ => (),
         };
@@ -75,14 +85,18 @@ impl ResourceContext {
             .resolve_valtype(valtype)
             .wrap_err("invalid valtype")?;
 
-        match (def, value) {
+        match (def, &mut value.value) {
             | (Defvaltype::S64, _)
             | (Defvaltype::U8, _)
             | (Defvaltype::U32, _)
             | (Defvaltype::U64, _) => (),
             | (Defvaltype::List(_), _) => todo!(),
             | (Defvaltype::Record(record), Value::Record(record_value)) => {
-                for (member, member_value) in record.members.iter().zip(record_value.members) {
+                for (member, member_value) in record
+                    .members
+                    .into_iter()
+                    .zip(record_value.members.iter_mut())
+                {
                     self.register_resource_rec(interface, &member.ty, member_value, resource_id)?;
                 }
             },
@@ -93,7 +107,7 @@ impl ResourceContext {
                     self.register_resource_rec(
                         interface,
                         payload_type,
-                        variant_value.payload.unwrap(),
+                        variant_value.payload.as_mut().unwrap(),
                         None,
                     )?;
                 }
@@ -202,7 +216,7 @@ impl ResourceContext {
         u: &mut Unstructured,
         interface: &Interface,
         resource_name: &str,
-    ) -> Result<Value, eyre::Error> {
+    ) -> Result<ValueMeta, eyre::Error> {
         let resource = interface
             .resource_by_name(TypeidxBorrow::Symbolic(resource_name))
             .wrap_err("resource not found in spec")?;
@@ -213,14 +227,23 @@ impl ResourceContext {
                 let randomly_generate = u.ratio(9, 10)?;
 
                 if randomly_generate {
-                    return self.arbitrary_value(u, interface, &resource.def);
+                    return Ok(ValueMeta {
+                        value:       self.arbitrary_value(u, interface, &resource.def)?,
+                        resource_id: None,
+                    });
                 }
 
                 let resource_id = *u.choose(&pool)?;
 
-                Ok(self.map.get(&resource_id).unwrap().clone())
+                Ok(ValueMeta {
+                    value:       self.map.get(&resource_id).unwrap().clone(),
+                    resource_id: Some(resource_id),
+                })
             },
-            | None => self.arbitrary_value(u, interface, &resource.def),
+            | None => Ok(ValueMeta {
+                value:       self.arbitrary_value(u, interface, &resource.def)?,
+                resource_id: None,
+            }),
         }
     }
 
@@ -229,13 +252,16 @@ impl ResourceContext {
         u: &mut Unstructured,
         interface: &Interface,
         valtype: &Valtype,
-    ) -> Result<Value, eyre::Error> {
+    ) -> Result<ValueMeta, eyre::Error> {
         match valtype {
             | Valtype::Typeidx(typeidx) => match typeidx {
                 | Typeidx::Numeric(_) => todo!(),
                 | Typeidx::Symbolic(name) => self.arbitrary_resource_value(u, interface, name),
             },
-            | Valtype::Defvaltype(def) => self.arbitrary_value(u, interface, def),
+            | Valtype::Defvaltype(def) => Ok(ValueMeta {
+                value:       self.arbitrary_value(u, interface, def)?,
+                resource_id: None,
+            }),
         }
     }
 }

@@ -2,6 +2,13 @@ use serde::{Deserialize, Serialize};
 use wazzi_spec::package::{Defvaltype, Interface, Valtype};
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct ValueMeta {
+    pub value:       Value,
+    pub resource_id: Option<u64>,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum Value {
     S64(i64),
@@ -13,64 +20,63 @@ pub enum Value {
     // Container types
     Record(RecordValue),
     Variant(Box<VariantValue>),
-    List(Vec<Value>),
+    List(Vec<ValueMeta>),
 
     Flags(FlagsValue),
     String(StringValue),
 }
 
-impl Value {
-    pub fn zero_value_from_spec(interface: &Interface, def: &Defvaltype) -> Self {
-        match def {
-            | Defvaltype::S64 => Self::S64(0),
-            | Defvaltype::U8 => Self::U8(0),
-            | Defvaltype::U32 => Self::U32(0),
-            | Defvaltype::U64 => Self::U64(0),
-            | Defvaltype::List(_) => todo!(),
-            | Defvaltype::Record(record) => Self::Record(RecordValue {
-                members: record
-                    .members
-                    .iter()
-                    .map(|member| {
-                        Self::zero_value_from_spec(
-                            interface,
-                            &interface.resolve_valtype(&member.ty).unwrap(),
-                        )
-                    })
-                    .collect(),
-            }),
-            | Defvaltype::Variant(variant) => {
-                let case = &variant.cases[0];
+impl ValueMeta {
+    pub fn zero_value_from_spec(interface: &Interface, valtype: &Valtype) -> Self {
+        let def = interface.resolve_valtype(valtype).unwrap();
 
-                Self::Variant(Box::new(VariantValue {
-                    case_idx:  0,
-                    case_name: case.name.clone(),
-                    payload:   case
-                        .payload
-                        .as_ref()
-                        .map(|valtype| interface.resolve_valtype(valtype).unwrap())
-                        .map(|def| Self::zero_value_from_spec(interface, &def)),
-                }))
+        Self {
+            resource_id: None,
+            value:       match def {
+                | Defvaltype::S64 => Value::S64(0),
+                | Defvaltype::U8 => Value::U8(0),
+                | Defvaltype::U32 => Value::U32(0),
+                | Defvaltype::U64 => Value::U64(0),
+                | Defvaltype::List(_) => todo!(),
+                | Defvaltype::Record(record) => Value::Record(RecordValue {
+                    members: record
+                        .members
+                        .iter()
+                        .map(|member| Self::zero_value_from_spec(interface, &member.ty))
+                        .collect(),
+                }),
+                | Defvaltype::Variant(variant) => {
+                    let case = &variant.cases[0];
+
+                    Value::Variant(Box::new(VariantValue {
+                        case_idx:  0,
+                        case_name: case.name.clone(),
+                        payload:   case
+                            .payload
+                            .as_ref()
+                            .map(|valtype| Self::zero_value_from_spec(interface, valtype)),
+                    }))
+                },
+                | Defvaltype::Handle => Value::Handle(0),
+                | Defvaltype::Flags(flags) => Value::Flags(FlagsValue {
+                    members: flags
+                        .members
+                        .iter()
+                        .map(|member| FlagsMember {
+                            name:  member.clone(),
+                            value: false,
+                        })
+                        .collect(),
+                }),
+                | Defvaltype::Tuple(_) => todo!(),
+                | Defvaltype::Result(_) => todo!(),
+                | Defvaltype::String => todo!(),
             },
-            | Defvaltype::Handle => Self::Handle(0),
-            | Defvaltype::Flags(flags) => Self::Flags(FlagsValue {
-                members: flags
-                    .members
-                    .iter()
-                    .map(|member| FlagsMember {
-                        name:  member.clone(),
-                        value: false,
-                    })
-                    .collect(),
-            }),
-            | Defvaltype::Tuple(_) => todo!(),
-            | Defvaltype::Result(_) => todo!(),
-            | Defvaltype::String => todo!(),
         }
     }
 
     pub fn into_pb(self, interface: &Interface, def: &Defvaltype) -> executor_pb::Value {
-        let which = match (def, self) {
+        let which = match (def, self.value) {
             | (_, Value::S64(i)) => {
                 executor_pb::value::Which::Builtin(executor_pb::value::Builtin {
                     which:          Some(executor_pb::value::builtin::Which::S64(i.into())),
@@ -189,73 +195,103 @@ impl Value {
         }
     }
 
-    pub fn from_pb(x: executor_pb::Value, interface: &Interface, valtype: &Valtype) -> Self {
+    pub fn from_pb(
+        x: executor_pb::Value,
+        interface: &Interface,
+        valtype: &Valtype,
+        before: &ValueMeta,
+    ) -> Self {
         let def = interface.resolve_valtype(valtype).unwrap();
 
-        match (def, x.which.unwrap()) {
-            | (_, executor_pb::value::Which::Builtin(builtin)) => match builtin.which.unwrap() {
-                | executor_pb::value::builtin::Which::Char(_) => todo!(),
-                | executor_pb::value::builtin::Which::U8(i) => Self::U8(i as u8),
-                | executor_pb::value::builtin::Which::U32(i) => Self::U32(i),
-                | executor_pb::value::builtin::Which::U64(i) => Self::U64(i),
-                | executor_pb::value::builtin::Which::S64(i) => Self::S64(i),
-                | _ => todo!(),
-            },
-            | (_, executor_pb::value::Which::String(string)) => {
-                Self::String(StringValue::from(string))
-            },
-            | (_, executor_pb::value::Which::Bitflags(flags)) => Self::Flags(FlagsValue {
-                members: flags
-                    .members
-                    .into_iter()
-                    .map(|member| FlagsMember {
-                        name:  member.name,
-                        value: member.value,
-                    })
-                    .collect(),
-            }),
-            | (_, executor_pb::value::Which::Handle(handle)) => Self::Handle(handle),
-            | (Defvaltype::List(list), executor_pb::value::Which::Array(array)) => Self::List(
-                array
-                    .items
-                    .into_iter()
-                    .map(|item| Self::from_pb(item, interface, &list.element))
-                    .collect(),
-            ),
-            | (Defvaltype::Record(record_type), executor_pb::value::Which::Record(record)) => {
-                Self::Record(RecordValue {
+        Self {
+            resource_id: before.resource_id,
+            value:       match (def, x.which.unwrap(), &before.value) {
+                | (_, executor_pb::value::Which::Builtin(builtin), _) => {
+                    match builtin.which.unwrap() {
+                        | executor_pb::value::builtin::Which::Char(_) => todo!(),
+                        | executor_pb::value::builtin::Which::U8(i) => Value::U8(i as u8),
+                        | executor_pb::value::builtin::Which::U32(i) => Value::U32(i),
+                        | executor_pb::value::builtin::Which::U64(i) => Value::U64(i),
+                        | executor_pb::value::builtin::Which::S64(i) => Value::S64(i),
+                        | _ => todo!(),
+                    }
+                },
+                | (_, executor_pb::value::Which::String(string), _) => {
+                    Value::String(StringValue::from(string))
+                },
+                | (_, executor_pb::value::Which::Bitflags(flags), _) => Value::Flags(FlagsValue {
+                    members: flags
+                        .members
+                        .into_iter()
+                        .map(|member| FlagsMember {
+                            name:  member.name,
+                            value: member.value,
+                        })
+                        .collect(),
+                }),
+                | (_, executor_pb::value::Which::Handle(handle), _) => Value::Handle(handle),
+                | (
+                    Defvaltype::List(list),
+                    executor_pb::value::Which::Array(array),
+                    Value::List(before_items),
+                ) => Value::List(
+                    array
+                        .items
+                        .into_iter()
+                        .zip(before_items)
+                        .map(|(item, before)| {
+                            Self::from_pb(item, interface, &list.element, &before)
+                        })
+                        .collect(),
+                ),
+                | (
+                    Defvaltype::Record(record_type),
+                    executor_pb::value::Which::Record(record),
+                    Value::Record(before_record),
+                ) => Value::Record(RecordValue {
                     members: record_type
                         .members
                         .into_iter()
                         .zip(record.members)
-                        .map(|(member_type, member)| {
-                            Self::from_pb(*member.value.0.unwrap(), interface, &member_type.ty)
+                        .zip(before_record.members.iter())
+                        .map(|((member_type, member), before_member)| {
+                            Self::from_pb(
+                                *member.value.0.unwrap(),
+                                interface,
+                                &member_type.ty,
+                                before_member,
+                            )
                         })
                         .collect(),
-                })
-            },
-            | (_, executor_pb::value::Which::ConstPointer(_)) => todo!(),
-            | (_, executor_pb::value::Which::Pointer(_)) => todo!(),
-            | (Defvaltype::Variant(variant_type), executor_pb::value::Which::Variant(variant)) => {
-                let case = &variant_type.cases[variant.case_idx as usize];
+                }),
+                | (_, executor_pb::value::Which::ConstPointer(_), _) => todo!(),
+                | (_, executor_pb::value::Which::Pointer(_), _) => todo!(),
+                | (
+                    Defvaltype::Variant(variant_type),
+                    executor_pb::value::Which::Variant(variant),
+                    Value::Variant(before_variant),
+                ) => {
+                    let case = &variant_type.cases[variant.case_idx as usize];
 
-                Self::Variant(Box::new(VariantValue {
-                    case_idx:  variant.case_idx as u32,
-                    case_name: case.name.clone(),
-                    payload:   match variant.payload_option.unwrap() {
-                        | executor_pb::value::variant::Payload_option::PayloadSome(payload) => {
-                            Some(Self::from_pb(
-                                *payload,
-                                interface,
-                                case.payload.as_ref().unwrap(),
-                            ))
+                    Value::Variant(Box::new(VariantValue {
+                        case_idx:  variant.case_idx as u32,
+                        case_name: case.name.clone(),
+                        payload:   match variant.payload_option.unwrap() {
+                            | executor_pb::value::variant::Payload_option::PayloadSome(payload) => {
+                                Some(Self::from_pb(
+                                    *payload,
+                                    interface,
+                                    case.payload.as_ref().unwrap(),
+                                    before_variant.payload.as_ref().unwrap(),
+                                ))
+                            },
+                            | executor_pb::value::variant::Payload_option::PayloadNone(_) => None,
+                            | _ => unreachable!(),
                         },
-                        | executor_pb::value::variant::Payload_option::PayloadNone(_) => None,
-                        | _ => unreachable!(),
-                    },
-                }))
+                    }))
+                },
+                | _ => todo!(),
             },
-            | _ => todo!(),
         }
     }
 }
@@ -263,7 +299,7 @@ impl Value {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct RecordValue {
-    pub members: Vec<Value>,
+    pub members: Vec<ValueMeta>,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
@@ -271,7 +307,7 @@ pub struct RecordValue {
 pub struct VariantValue {
     pub case_idx:  u32,
     pub case_name: String,
-    pub payload:   Option<Value>,
+    pub payload:   Option<ValueMeta>,
 }
 
 impl VariantValue {

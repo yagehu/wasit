@@ -7,7 +7,7 @@ use std::{
 
 use eyre::{Context, ContextCompat as _};
 use serde::{Deserialize, Serialize};
-use wazzi_wasi_component_model::value::Value;
+use wazzi_wasi_component_model::value::{Value, ValueMeta};
 
 #[derive(Clone, Debug)]
 pub struct FuzzStore {
@@ -319,8 +319,8 @@ impl Action {
 pub struct Call {
     pub func:    String,
     pub errno:   Option<i32>,
-    pub params:  Vec<Value>,
-    pub results: Vec<Value>,
+    pub params:  Vec<ValueMeta>,
+    pub results: Vec<ValueMeta>,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]

@@ -9,6 +9,7 @@ use wazzi_wasi_component_model::value::{
     RecordValue as WasiRecordValue,
     StringValue,
     Value as WasiValue,
+    ValueMeta,
     VariantValue as WasiVariantValue,
 };
 
@@ -82,41 +83,11 @@ impl Seed {
                         params,
                         result_valtypes
                             .iter()
-                            .map(|valtype| interface.resolve_valtype(valtype).unwrap())
-                            .map(|def| WasiValue::zero_value_from_spec(interface, &def))
+                            .map(|valtype| ValueMeta::zero_value_from_spec(interface, &valtype))
                             .collect(),
+                        &result_valtypes,
+                        Some(call.results.as_slice()),
                     )?;
-
-                    let action = prog
-                        .store_mut()
-                        .trace_mut()
-                        .last_action()
-                        .wrap_err("failed to get last action")?
-                        .wrap_err("trace is empty")?
-                        .read()
-                        .wrap_err("failed to read action from store")?;
-                    let call_result = match action {
-                        | wazzi_store::Action::Call(call) => call,
-                        | wazzi_store::Action::Decl(_) => todo!(),
-                    };
-
-                    for ((result_valtype, result), result_spec) in result_valtypes
-                        .iter()
-                        .zip(call_result.results)
-                        .zip(call.results)
-                    {
-                        let id = match result_spec {
-                            | ResultSpec::Resource(id) => Some(id),
-                            | ResultSpec::Ignore => None,
-                        };
-
-                        prog.resource_ctx_mut().register_resource_rec(
-                            interface,
-                            &result_valtype,
-                            result,
-                            id,
-                        )?;
-                    }
                 },
             }
         }
@@ -172,10 +143,16 @@ impl ResourceOrValue {
         interface: &Interface,
         resource_ctx: &ResourceContext,
         def: &Defvaltype,
-    ) -> WasiValue {
+    ) -> ValueMeta {
         match self {
-            | Self::Resource(id) => resource_ctx.get_resource(id).unwrap().value,
-            | Self::Value(value) => value.into_wasi_value(interface, resource_ctx, def),
+            | Self::Resource(id) => ValueMeta {
+                value:       resource_ctx.get_resource(id).unwrap().value,
+                resource_id: Some(id),
+            },
+            | Self::Value(value) => ValueMeta {
+                value:       value.into_wasi_value(interface, resource_ctx, def),
+                resource_id: None,
+            },
         }
     }
 }
@@ -236,17 +213,14 @@ impl Value {
                 WasiValue::Variant(Box::new(WasiVariantValue {
                     case_idx:  case_idx as u32,
                     case_name: variant.name,
-                    payload:   variant.payload.map(|payload| match *payload {
-                        | ResourceOrValue::Resource(id) => {
-                            resource_ctx.get_resource(id).unwrap().value
-                        },
-                        | ResourceOrValue::Value(value) => value.into_wasi_value(
+                    payload:   variant.payload.map(|payload| {
+                        payload.into_prog_value(
                             interface,
                             resource_ctx,
                             &interface
                                 .resolve_valtype(case_type.payload.as_ref().unwrap())
                                 .unwrap(),
-                        ),
+                        )
                     }),
                 }))
             },
@@ -254,18 +228,10 @@ impl Value {
                 let mut list = Vec::with_capacity(elements.len());
 
                 for element in elements {
-                    let element = match element {
-                        | ResourceOrValue::Resource(id) => {
-                            resource_ctx.get_resource(id).unwrap().value
-                        },
-                        | ResourceOrValue::Value(value) => {
-                            let item_def = interface.resolve_valtype(&list_type.element).unwrap();
+                    let def = interface.resolve_valtype(&list_type.element).unwrap();
+                    let item = element.into_prog_value(interface, resource_ctx, &def);
 
-                            value.into_wasi_value(interface, resource_ctx, &item_def)
-                        },
-                    };
-
-                    list.push(element);
+                    list.push(item);
                 }
 
                 WasiValue::List(list)
