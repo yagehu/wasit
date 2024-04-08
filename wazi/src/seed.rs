@@ -1,4 +1,4 @@
-use eyre::{self, eyre as err, Context, ContextCompat};
+use eyre::{self, eyre as err, ContextCompat};
 use serde::{Deserialize, Serialize};
 use wazzi_executor::RunningExecutor;
 use wazzi_spec::package::{Defvaltype, Interface, Package, TypeidxBorrow};
@@ -85,7 +85,6 @@ impl Seed {
                             .iter()
                             .map(|valtype| ValueMeta::zero_value_from_spec(interface, &valtype))
                             .collect(),
-                        &result_valtypes,
                         Some(call.results.as_slice()),
                     )?;
                 },

@@ -2,7 +2,7 @@ use arbitrary::Unstructured;
 use eyre::{Context, ContextCompat};
 use tracing::debug;
 use wazzi_executor::RunningExecutor;
-use wazzi_spec::package::{Function, Interface, Package, Valtype};
+use wazzi_spec::package::{Function, Interface, Package};
 use wazzi_store::{Call, RuntimeStore};
 use wazzi_wasi_component_model::value::ValueMeta;
 
@@ -94,7 +94,6 @@ impl Prog {
         func: &Function,
         params: Vec<ValueMeta>,
         results: Vec<ValueMeta>,
-        result_valtypes: &[Valtype],
         result_specs: Option<&[ResultSpec]>,
     ) -> Result<(), eyre::Error> {
         self.store
@@ -217,6 +216,6 @@ impl Prog {
             results.push(ValueMeta::zero_value_from_spec(interface, &result_valtype));
         }
 
-        self.call(interface, function, params, results, &result_valtypes, None)
+        self.call(interface, function, params, results, None)
     }
 }
