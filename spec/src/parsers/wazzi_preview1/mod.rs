@@ -242,25 +242,56 @@ impl<'a> Func<'a> {
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
+pub enum StateEffect {
+    Write,
+}
+
+impl StateEffect {
+    fn parse(input: Span) -> nom::IResult<Span, Self, ErrorTree<Span>> {
+        let (input, (_, _)) = paren(pair(ws(tag("@state")), ws(tag("write"))))
+            .context("state effect")
+            .parse(input)?;
+
+        Ok((input, Self::Write))
+    }
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct FuncParam<'a> {
-    pub name: Id<'a>,
-    pub tref: TypeRef<'a>,
+    pub name:         Id<'a>,
+    pub tref:         TypeRef<'a>,
+    pub state_effect: Option<StateEffect>,
 }
 
 impl<'a> FuncParam<'a> {
     fn parse(input: Span<'a>) -> nom::IResult<Span, Self, ErrorTree<Span>> {
-        let (input, (_, name, tref)) =
-            paren(tuple((ws(tag("param")), ws(Id::parse), ws(TypeRef::parse))))
-                .context("func param")
-                .parse(input)?;
+        let (input, (_, name, tref, state_effect)) = paren(tuple((
+            ws(tag("param")),
+            ws(Id::parse),
+            ws(TypeRef::parse),
+            ws(StateEffect::parse).opt(),
+        )))
+        .context("func param")
+        .parse(input)?;
 
-        Ok((input, Self { name, tref }))
+        Ok((
+            input,
+            Self {
+                name,
+                tref,
+                state_effect,
+            },
+        ))
     }
 
     fn into_package(self, interface: &package::Interface) -> Result<package::FunctionParam, Error> {
         Ok(package::FunctionParam {
-            name:    self.name.name().to_owned(),
-            valtype: self.tref.into_package(interface)?,
+            name:         self.name.name().to_owned(),
+            valtype:      self.tref.into_package(interface)?,
+            state_effect: match self.state_effect {
+                | Some(StateEffect::Write) => package::StateEffect::Write,
+                | None => package::StateEffect::Read,
+            },
         })
     }
 }
@@ -286,8 +317,9 @@ impl<'a> FuncResult<'a> {
 
     fn into_package(self, interface: &package::Interface) -> Result<package::FunctionParam, Error> {
         Ok(package::FunctionParam {
-            name:    self.name.name().to_owned(),
-            valtype: self.tref.into_package(interface)?,
+            name:         self.name.name().to_owned(),
+            valtype:      self.tref.into_package(interface)?,
+            state_effect: package::StateEffect::Write,
         })
     }
 }
@@ -946,6 +978,10 @@ mod tests {
                             if matches!(ty, Type::Record(_members))
                     ));
                 }),
+            },
+            Case {
+                input:  include_str!("testdata/06.witx"),
+                assert: Box::new(|doc| {}),
             },
         ];
 

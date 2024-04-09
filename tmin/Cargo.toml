@@ -1,0 +1,19 @@
+[package]
+name = "wazzi-tmin"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+wazzi-fuzzer.workspace = true
+wazzi-runners.workspace = true
+wazzi-store.workspace = true
+wazzi-wazi.workspace = true
+
+clap.workspace = true
+color-eyre.workspace = true
+petgraph.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-error.workspace = true
+tracing-subscriber.workspace = true

@@ -36,36 +36,63 @@ impl FuzzStore {
 #[derive(Clone, Debug)]
 pub struct RunStore {
     path:         PathBuf,
+    data:         PathBuf,
     runtimes_dir: PathBuf,
     runtimes:     HashSet<String>,
 }
 
 impl RunStore {
+    pub fn resume(path: &Path) -> Result<Self, io::Error> {
+        let path = path.canonicalize()?;
+        let data = path.join("data");
+        let runtimes_dir = path.join("runtimes");
+        let mut runtimes = HashSet::new();
+
+        for entry in fs::read_dir(&runtimes_dir)? {
+            let entry = entry?;
+
+            runtimes.insert(entry.file_name().into_string().unwrap());
+        }
+
+        Ok(Self {
+            path,
+            data,
+            runtimes_dir,
+            runtimes,
+        })
+    }
+
     pub fn new(path: &Path) -> Result<Self, io::Error> {
         fs::create_dir(path)?;
 
         let path = path.canonicalize()?;
+        let data = path.join("data");
         let runtimes_dir = path.join("runtimes");
 
         fs::create_dir(&runtimes_dir)?;
 
         Ok(Self {
             path,
+            data,
             runtimes_dir,
             runtimes: Default::default(),
         })
     }
 
-    pub fn new_runtime(&mut self, name: &str, version: &str) -> Result<RuntimeStore, io::Error> {
-        let store = RuntimeStore::new(&self.runtimes_dir.join(name), version)?;
+    pub fn new_runtime(&mut self, name: String, version: &str) -> Result<RuntimeStore, io::Error> {
+        let store = RuntimeStore::new(&self.runtimes_dir.join(&name), version)?;
 
-        self.runtimes.insert(name.to_owned());
+        self.runtimes.insert(name);
 
         Ok(store)
     }
 
     pub fn write_data(&self, data: &[u8]) -> Result<(), io::Error> {
-        fs::write(self.path.join("data"), data)
+        fs::write(&self.data, data)
+    }
+
+    pub fn data(&self) -> Result<Vec<u8>, io::Error> {
+        fs::read(&self.data)
     }
 
     pub fn runtimes(&self) -> Result<impl Iterator<Item = RuntimeStore> + '_, io::Error> {
@@ -83,6 +110,7 @@ pub struct RuntimeStore {
     pub path: PathBuf,
     pub base: PathBuf,
 
+    name:         String,
     version_path: PathBuf,
     trace:        TraceStore,
 }
@@ -93,12 +121,20 @@ impl RuntimeStore {
 
         let path = path.canonicalize()?;
         let base = path.join("base");
+        let name = path
+            .components()
+            .last()
+            .unwrap()
+            .as_os_str()
+            .to_string_lossy()
+            .to_string();
         let version_path = path.join("version");
         let trace = TraceStore::resume(&path.join("trace"))?;
 
         Ok(Self {
             path,
             base,
+            name,
             version_path,
             trace,
         })
@@ -109,6 +145,13 @@ impl RuntimeStore {
 
         let path = path.canonicalize()?;
         let base = path.join("base");
+        let name = path
+            .components()
+            .last()
+            .unwrap()
+            .as_os_str()
+            .to_string_lossy()
+            .to_string();
         let version_path = path.join("version");
         let trace = TraceStore::new(&path.join("trace"))?;
 
@@ -118,9 +161,14 @@ impl RuntimeStore {
         Ok(Self {
             path,
             base,
+            name,
             version_path,
             trace,
         })
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
     }
 
     pub fn trace(&self) -> &TraceStore {
@@ -141,8 +189,6 @@ pub struct TraceStore {
 
 impl TraceStore {
     pub fn resume(path: &Path) -> Result<Self, io::Error> {
-        fs::create_dir_all(path)?;
-
         let path = path.canonicalize()?;
         let mut next = 0;
 
@@ -248,6 +294,13 @@ impl TraceStore {
 
     fn action_path(&self, idx: usize) -> PathBuf {
         self.path.join(format!("{:04}", idx))
+    }
+
+    pub fn actions(&self) -> Result<Vec<ActionStore>, io::Error> {
+        (0..self.next)
+            .map(|idx| self.action_path(idx))
+            .map(|path| ActionStore::from_path(&path))
+            .collect::<Result<_, _>>()
     }
 }
 

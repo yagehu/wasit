@@ -240,8 +240,15 @@ impl Function {
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct FunctionParam {
-    pub name:    String,
-    pub valtype: Valtype,
+    pub name:         String,
+    pub valtype:      Valtype,
+    pub state_effect: StateEffect,
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub enum StateEffect {
+    Read,
+    Write,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]

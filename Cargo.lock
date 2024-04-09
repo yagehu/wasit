@@ -1823,6 +1823,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "wazzi-tmin"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "color-eyre",
+ "petgraph",
+ "serde_json",
+ "tracing",
+ "tracing-error",
+ "tracing-subscriber",
+ "wazzi-fuzzer",
+ "wazzi-runners",
+ "wazzi-store",
+ "wazzi-wazi",
+]
+
+[[package]]
 name = "wazzi-wasi"
 version = "0.1.0"
 dependencies = [

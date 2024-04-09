@@ -74,7 +74,10 @@ impl Fuzzer {
 
             for runtime in &self.runtimes {
                 let runtime_store = run_store
-                    .new_runtime(runtime.name, &get_commit_id(&runtime.repo).unwrap())
+                    .new_runtime(
+                        runtime.name.to_owned(),
+                        &get_commit_id(&runtime.repo).unwrap(),
+                    )
                     .wrap_err("failed to init runtime store")?;
 
                 threads.push((

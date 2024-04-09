@@ -15,6 +15,7 @@ members = [
     "spec",
     "store",
     "strace",
+    "tmin",
     "wasi",
     "wasi-sdk/build",
     "wazi",
@@ -42,6 +43,7 @@ wazzi-witx.path = "witx"
 
 arbitrary = "1"
 cc = "*"
+clap = { version = "4", features = ["derive"] }
 color-eyre = "0.6"
 eyre = "0.6"
 git2 = "0.18.2"
@@ -61,7 +63,7 @@ thiserror = "1"
 tracing = "0.1"
 tracing-bunyan-formatter = "0.3"
 tracing-error = "0.2"
-tracing-subscriber = "0.3"
+tracing-subscriber = { version = "0.3", features = ["fmt"] }
 walkdir = "2"
 
 [package]
