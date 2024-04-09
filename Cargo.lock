@@ -1835,6 +1835,7 @@ dependencies = [
  "tracing-subscriber",
  "wazzi-fuzzer",
  "wazzi-runners",
+ "wazzi-spec",
  "wazzi-store",
  "wazzi-wazi",
 ]

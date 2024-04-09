@@ -4,8 +4,15 @@ use wazzi_spec::package::{Defvaltype, Interface, Valtype};
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct ValueMeta {
-    pub value:       Value,
-    pub resource_id: Option<u64>,
+    pub value:    Value,
+    pub resource: Option<ResourceMeta>,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct ResourceMeta {
+    pub id:   u64,
+    pub name: String,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
@@ -31,8 +38,8 @@ impl ValueMeta {
         let def = interface.resolve_valtype(valtype).unwrap();
 
         Self {
-            resource_id: None,
-            value:       match def {
+            resource: None,
+            value:    match def {
                 | Defvaltype::S64 => Value::S64(0),
                 | Defvaltype::U8 => Value::U8(0),
                 | Defvaltype::U32 => Value::U32(0),
@@ -204,8 +211,8 @@ impl ValueMeta {
         let def = interface.resolve_valtype(valtype).unwrap();
 
         Self {
-            resource_id: before.resource_id,
-            value:       match (def, x.which.unwrap(), &before.value) {
+            resource: before.resource.clone(),
+            value:    match (def, x.which.unwrap(), &before.value) {
                 | (_, executor_pb::value::Which::Builtin(builtin), _) => {
                     match builtin.which.unwrap() {
                         | executor_pb::value::builtin::Which::Char(_) => todo!(),

@@ -1,12 +1,13 @@
 use eyre::{self, eyre as err, ContextCompat};
 use serde::{Deserialize, Serialize};
 use wazzi_executor::RunningExecutor;
-use wazzi_spec::package::{Defvaltype, Interface, Package, TypeidxBorrow};
+use wazzi_spec::package::{Defvaltype, Interface, Package, Typeidx, TypeidxBorrow, Valtype};
 use wazzi_store::RuntimeStore;
 use wazzi_wasi_component_model::value::{
     FlagsMember,
     FlagsValue as WasiFlagsValue,
     RecordValue as WasiRecordValue,
+    ResourceMeta,
     StringValue,
     Value as WasiValue,
     ValueMeta,
@@ -69,11 +70,11 @@ impl Seed {
                         .iter()
                         .zip(call.params)
                         .map(|(param_type, rv)| -> Result<_, eyre::Error> {
-                            let def = interface
-                                .resolve_valtype(&param_type.valtype)
-                                .ok_or(err!("failed to resolve valtype"))?;
-
-                            Ok(rv.into_prog_value(interface, prog.resource_ctx(), &def))
+                            Ok(rv.into_prog_value(
+                                interface,
+                                prog.resource_ctx(),
+                                &param_type.valtype,
+                            ))
                         })
                         .collect::<Result<Vec<_>, _>>()?;
 
@@ -141,17 +142,27 @@ impl ResourceOrValue {
         self,
         interface: &Interface,
         resource_ctx: &ResourceContext,
-        def: &Defvaltype,
+        valtype: &Valtype,
     ) -> ValueMeta {
-        match self {
-            | Self::Resource(id) => ValueMeta {
-                value:       resource_ctx.get_resource(id).unwrap().value,
-                resource_id: Some(id),
+        match (self, valtype) {
+            | (Self::Resource(id), Valtype::Typeidx(Typeidx::Symbolic(resource_name))) => {
+                ValueMeta {
+                    value:    resource_ctx.get_resource(id).unwrap().value,
+                    resource: Some(ResourceMeta {
+                        id,
+                        name: resource_name.to_owned(),
+                    }),
+                }
             },
-            | Self::Value(value) => ValueMeta {
-                value:       value.into_wasi_value(interface, resource_ctx, def),
-                resource_id: None,
+            | (Self::Value(value), _) => ValueMeta {
+                value:    value.into_wasi_value(
+                    interface,
+                    resource_ctx,
+                    &interface.resolve_valtype(valtype).unwrap(),
+                ),
+                resource: None,
             },
+            | _ => unreachable!(),
         }
     }
 }
@@ -194,9 +205,9 @@ impl Value {
                         .iter()
                         .zip(record.0)
                         .map(|(member_type, member)| {
-                            let def = interface.resolve_valtype(&member_type.ty).unwrap();
-
-                            member.value.into_prog_value(interface, resource_ctx, &def)
+                            member
+                                .value
+                                .into_prog_value(interface, resource_ctx, &member_type.ty)
                         })
                         .collect(),
                 })
@@ -216,9 +227,7 @@ impl Value {
                         payload.into_prog_value(
                             interface,
                             resource_ctx,
-                            &interface
-                                .resolve_valtype(case_type.payload.as_ref().unwrap())
-                                .unwrap(),
+                            case_type.payload.as_ref().unwrap(),
                         )
                     }),
                 }))
@@ -227,8 +236,7 @@ impl Value {
                 let mut list = Vec::with_capacity(elements.len());
 
                 for element in elements {
-                    let def = interface.resolve_valtype(&list_type.element).unwrap();
-                    let item = element.into_prog_value(interface, resource_ctx, &def);
+                    let item = element.into_prog_value(interface, resource_ctx, &list_type.element);
 
                     list.push(item);
                 }

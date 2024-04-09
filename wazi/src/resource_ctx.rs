@@ -8,6 +8,7 @@ use wazzi_wasi_component_model::value::{
     FlagsMember,
     FlagsValue,
     RecordValue,
+    ResourceMeta,
     StringValue,
     Value,
     ValueMeta,
@@ -72,10 +73,16 @@ impl ResourceContext {
             | Valtype::Typeidx(Typeidx::Symbolic(name)) => match resource_id {
                 | Some(resource_id) => {
                     self.register_resource(name, value.value.clone(), resource_id);
-                    value.resource_id = Some(resource_id);
+                    value.resource = Some(ResourceMeta {
+                        id:   resource_id,
+                        name: name.clone(),
+                    });
                 },
                 | None => {
-                    value.resource_id = Some(self.new_resource(name, value.value.clone()));
+                    value.resource = Some(ResourceMeta {
+                        id:   self.new_resource(name, value.value.clone()),
+                        name: name.clone(),
+                    });
                 },
             },
             | _ => (),
@@ -228,21 +235,24 @@ impl ResourceContext {
 
                 if randomly_generate {
                     return Ok(ValueMeta {
-                        value:       self.arbitrary_value(u, interface, &resource.def)?,
-                        resource_id: None,
+                        value:    self.arbitrary_value(u, interface, &resource.def)?,
+                        resource: None,
                     });
                 }
 
                 let resource_id = *u.choose(&pool)?;
 
                 Ok(ValueMeta {
-                    value:       self.map.get(&resource_id).unwrap().clone(),
-                    resource_id: Some(resource_id),
+                    value:    self.map.get(&resource_id).unwrap().clone(),
+                    resource: Some(ResourceMeta {
+                        id:   resource_id,
+                        name: resource_name.to_owned(),
+                    }),
                 })
             },
             | None => Ok(ValueMeta {
-                value:       self.arbitrary_value(u, interface, &resource.def)?,
-                resource_id: None,
+                value:    self.arbitrary_value(u, interface, &resource.def)?,
+                resource: None,
             }),
         }
     }
@@ -259,8 +269,8 @@ impl ResourceContext {
                 | Typeidx::Symbolic(name) => self.arbitrary_resource_value(u, interface, name),
             },
             | Valtype::Defvaltype(def) => Ok(ValueMeta {
-                value:       self.arbitrary_value(u, interface, def)?,
-                resource_id: None,
+                value:    self.arbitrary_value(u, interface, def)?,
+                resource: None,
             }),
         }
     }
