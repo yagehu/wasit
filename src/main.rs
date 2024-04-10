@@ -1,13 +1,12 @@
 use std::{
     fs,
-    io::stderr,
+    io::{self, stderr},
     path::{Path, PathBuf},
     sync::Arc,
 };
 
 use clap::Parser;
 use color_eyre::eyre::{self, Context as _};
-use tracing_bunyan_formatter::BunyanFormattingLayer;
 use tracing_error::ErrorLayer;
 use tracing_subscriber::layer::SubscriberExt as _;
 use wazzi_fuzzer::{Fuzzer, Runtime};
@@ -26,7 +25,11 @@ fn main() -> Result<(), eyre::Error> {
     tracing::subscriber::set_global_default(
         tracing_subscriber::Registry::default()
             .with(ErrorLayer::default())
-            .with(BunyanFormattingLayer::new("wazzi".to_owned(), stderr)),
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_writer(io::stderr)
+                    .pretty(),
+            ),
     )
     .wrap_err("failed to configure tracing")?;
 
@@ -55,7 +58,9 @@ fn main() -> Result<(), eyre::Error> {
             Runtime {
                 name:   "node",
                 repo:   runtimes_dir.join("node"),
-                runner: Arc::new(Node::new(Path::new("node"))),
+                runner: Arc::new(Node::new(Path::new(
+                    "/home/huyage/src/wazzi/runtimes/node/node",
+                ))),
             },
             Runtime {
                 name:   "wamr",

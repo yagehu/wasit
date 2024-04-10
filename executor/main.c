@@ -1048,8 +1048,7 @@ static void handle_call(Request__Call * call) {
             __wasi_ciovec_t iovs_curr = (* (__wasi_ciovec_t **) p1_iovs_ptr)[iovs_idx];
 
             while (written < to_write) {
-                fprintf(stderr, "attemping write %lu/%lu buf_len %lu @ %llu\n", written, to_write, iovs_curr.buf_len, p2_offset + written);
-                response.errno_some = __imported_wasi_snapshot_preview1_fd_pread(
+                response.errno_some = __imported_wasi_snapshot_preview1_fd_pwrite(
                     p0_fd,
                     (int32_t) &iovs_curr,
                     p1_iovs_len - iovs_idx,
@@ -1066,8 +1065,6 @@ static void handle_call(Request__Call * call) {
                 }
 
                 __wasi_size_t written_this_time = * (__wasi_size_t *) r0_size_ptr;
-
-                fprintf(stderr, "written this time %lu\n", written_this_time);
 
                 written += written_this_time;
 
