@@ -148,7 +148,7 @@ impl Fuzzer {
                 ));
             }
 
-            let t = thread::Builder::new()
+            thread::Builder::new()
                 .name("differ".to_owned())
                 .spawn_scoped(scope, {
                     let runtimes = run_store
