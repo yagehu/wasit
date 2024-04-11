@@ -15,7 +15,6 @@ use std::{
 use arbitrary::Unstructured;
 use color_eyre::eyre::{self, eyre as err, Context};
 use rand::{thread_rng, RngCore};
-use tracing::info;
 use walkdir::WalkDir;
 use wazzi_executor::ExecutorRunner;
 use wazzi_runners::WasiRunner;
@@ -68,7 +67,8 @@ impl Fuzzer {
         thread::scope(|scope| -> Result<(), eyre::Error> {
             let mut threads = Vec::with_capacity(self.runtimes.len());
             let n_live_threads = Arc::new(AtomicUsize::new(self.runtimes.len()));
-            let pair = Arc::new((Mutex::new((0, 0usize)), Condvar::new()));
+            let pause_pair = Arc::new((Mutex::new((0, 0usize)), Condvar::new()));
+            let resume_pair = Arc::new((Mutex::new((false, 0usize)), Condvar::new()));
             let cancel = Arc::new(AtomicBool::new(false));
             let (tx, rx) = mpsc::channel();
 
@@ -86,12 +86,14 @@ impl Fuzzer {
                         .name(runtime.name.to_owned())
                         .spawn_scoped(scope, {
                             let n_live_threads = n_live_threads.clone();
-                            let pair = pair.clone();
+                            let pause_pair = pause_pair.clone();
+                            let resume_pair = resume_pair.clone();
                             let main_thread = main_thread.clone();
                             let seed = self.seed.clone();
                             let spec = spec.clone();
                             let mut u = Unstructured::new(&data);
                             let tx = tx.clone();
+                            let cancel = cancel.clone();
 
                             move || -> Result<(), eyre::Error> {
                                 let wake_main = |err| {
@@ -119,28 +121,67 @@ impl Fuzzer {
                                     .execute(&spec, executor, runtime_store)
                                     .wrap_err("failed to execute seed")
                                     .map_err(wake_main)?;
+                                let (pause_mu, pause_cond) = &*pause_pair;
+                                let mut pause_state = pause_mu.lock().unwrap();
+                                let pause_generation = pause_state.1;
 
-                                tx.send(()).wrap_err("failed to send done to differ")?;
+                                pause_state.0 += 1;
+
+                                if pause_state.0 == n_live_threads.load(Ordering::SeqCst) {
+                                    pause_state.0 = 0;
+                                    pause_state.1 = pause_state.1.wrapping_add(1);
+                                    tx.send(()).wrap_err("failed to send done to differ")?;
+                                    pause_cond.notify_all();
+                                }
+
+                                let pause_state = pause_cond
+                                    .wait_while(pause_state, |(n, generation)| {
+                                        *n != n_live_threads.load(Ordering::SeqCst)
+                                            && pause_generation == *generation
+                                    })
+                                    .unwrap();
+
+                                drop(pause_state);
+
+                                if cancel.load(Ordering::SeqCst) {
+                                    return Ok(());
+                                }
 
                                 loop {
+                                    let (resume_mu, resume_cond) = &*resume_pair;
+                                    let resume_state = resume_mu.lock().unwrap();
+                                    let resume_generation = resume_state.1;
+                                    let resume_state = resume_cond
+                                        .wait_while(resume_state, |(resume, generation)| {
+                                            !*resume && *generation == resume_generation
+                                        })
+                                        .unwrap();
+
+                                    drop(resume_state);
+
                                     prog.call_arbitrary(&mut u, &spec)?;
 
-                                    let (mu, cond) = &*pair;
-                                    let mut ct = mu.lock().unwrap();
+                                    let (pause_mu, pause_cond) = &*pause_pair;
+                                    let mut ct = pause_mu.lock().unwrap();
                                     let generation = ct.1;
 
                                     ct.0 += 1;
 
                                     if ct.0 == n_live_threads.load(Ordering::SeqCst) {
+                                        resume_mu.lock().unwrap().0 = false;
                                         ct.0 = 0;
                                         ct.1 = ct.1.wrapping_add(1);
                                         tx.send(()).wrap_err("failed to send done to differ")?;
-                                        cond.notify_all();
+                                        pause_cond.notify_all();
                                     }
 
-                                    let _state = cond
+                                    let _state = pause_cond
                                         .wait_while(ct, |(_n, gen)| generation == *gen)
                                         .unwrap();
+
+                                    if cancel.load(Ordering::SeqCst) {
+                                        return Ok(());
+                                    }
                                 }
                             }
                         })
@@ -151,21 +192,53 @@ impl Fuzzer {
             thread::Builder::new()
                 .name("differ".to_owned())
                 .spawn_scoped(scope, {
-                    let runtimes = run_store
-                        .runtimes()
-                        .wrap_err("failed to resume runtimes")?
-                        .collect::<Vec<_>>();
                     let cancel = cancel.clone();
 
                     move || -> Result<(), eyre::Error> {
                         while let Ok(_done) = rx.recv() {
+                            let runtimes = run_store
+                                .runtimes()
+                                .wrap_err("failed to resume runtimes")?
+                                .collect::<Vec<_>>();
+
                             'outer: for (i, runtime_0) in runtimes.iter().enumerate() {
                                 if i == runtimes.len() - 1 {
                                     break;
                                 }
 
+                                let call_0 = runtime_0
+                                    .trace()
+                                    .last_call()
+                                    .wrap_err("failed to get last call")?
+                                    .unwrap()
+                                    .read_call()
+                                    .wrap_err("failed to read action")?
+                                    .unwrap();
+
                                 for j in (i + 1)..runtimes.len() {
                                     let runtime_1 = runtimes.get(j).unwrap();
+                                    let call_1 = runtime_1
+                                        .trace()
+                                        .last_call()
+                                        .wrap_err("failed to get last call")?
+                                        .unwrap()
+                                        .read_call()
+                                        .wrap_err("failed to read action")?
+                                        .unwrap();
+
+                                    if call_0.errno != call_1.errno {
+                                        tracing::warn!(
+                                            runtime_a = runtime_0.name(),
+                                            runtime_b = runtime_1.name(),
+                                            runtime_a_errno = call_0.errno,
+                                            runtime_b_errno = call_1.errno,
+                                            "Errno diff found!"
+                                        );
+
+                                        cancel.store(true, Ordering::SeqCst);
+                                        break 'outer;
+                                    }
+
                                     let runtime_0_walk =
                                         WalkDir::new(&runtime_0.base).sort_by_file_name();
                                     let runtime_1_walk =
@@ -183,17 +256,19 @@ impl Fuzzer {
                                             || (a.file_type().is_file()
                                                 && fs::read(a.path())? != fs::read(b.path())?)
                                         {
-                                            tracing::warn!(
-                                                runtime_0 = %runtime_0.base.display(),
-                                                runtime_1 = %runtime_1.base.display(),
-                                                "Fs diff found."
-                                            );
                                             cancel.store(true, Ordering::SeqCst);
                                             break 'outer;
                                         }
                                     }
                                 }
                             }
+
+                            let (resume_mu, resume_cond) = &*resume_pair;
+                            let mut resume_state = resume_mu.lock().unwrap();
+
+                            resume_state.0 = true;
+                            resume_state.1 = resume_state.1.wrapping_add(1);
+                            resume_cond.notify_all();
                         }
 
                         panic!("differ thread exit");
@@ -218,7 +293,7 @@ impl Fuzzer {
                     let name = t.thread().name().map(ToOwned::to_owned);
                     let result = t.join().unwrap();
 
-                    info!(
+                    tracing::info!(
                         result = ?result,
                         "Thread {} finished. {} still running.",
                         name.unwrap_or_else(|| format!("{i}")),

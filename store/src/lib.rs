@@ -7,7 +7,7 @@ use std::{
 
 use eyre::{Context, ContextCompat as _};
 use serde::{Deserialize, Serialize};
-use wazzi_wasi_component_model::value::{Value, ValueMeta};
+use wazzi_wasi_component_model::value::ValueMeta;
 
 #[derive(Clone, Debug)]
 pub struct FuzzStore {
@@ -226,8 +226,15 @@ impl TraceStore {
         })
     }
 
+    pub fn count(&self) -> usize {
+        self.next
+    }
+
     pub fn last_call(&self) -> Result<Option<ActionStore>, io::Error> {
+        let t = std::thread::current();
+
         if self.next == 0 {
+            eprintln!("whoa: None");
             return Ok(None);
         }
 
@@ -344,6 +351,13 @@ impl ActionStore {
             ))
             .wrap_err("failed to deserialize decl")?,
         ))
+    }
+
+    pub fn read_call(&self) -> Result<Option<Call>, eyre::Error> {
+        match self.read()? {
+            | Action::Call(call) => Ok(Some(call)),
+            | Action::Decl(_) => Ok(None),
+        }
     }
 
     pub fn is_call(&self) -> bool {

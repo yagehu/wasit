@@ -96,6 +96,12 @@ impl Prog {
         results: Vec<ValueMeta>,
         result_specs: Option<&[ResultSpec]>,
     ) -> Result<(), eyre::Error> {
+        tracing::debug!(
+            count = self.store.trace().count(),
+            func = func.name,
+            "Calling func."
+        );
+
         self.store
             .trace_mut()
             .begin_call(Call {
@@ -200,8 +206,6 @@ impl Prog {
         let result_valtypes = function.unpack_expected_result();
         let mut params = Vec::with_capacity(function.params.len());
         let mut results = Vec::with_capacity(result_valtypes.len());
-
-        debug!("Calling func {}", function.name);
 
         for param_type in &function.params {
             let param = self

@@ -1076,8 +1076,6 @@ static void handle_call(Request__Call * call) {
 
                 iovs_curr.buf += written_this_time;
                 iovs_curr.buf_len -= written_this_time;
-
-                fprintf(stderr, "buf_len %lu iovs_idx %d written %lu\n", iovs_curr.buf_len, iovs_idx, written);
             }
 
             * (int32_t *) r0_size_ptr = written;
