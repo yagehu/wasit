@@ -14,3 +14,7 @@ runtimes:
     version: 04600507844bae978239531c8e6265d410aefe6d
   wasmtime:
     version: 4f2d634ca4291a09003eaba26f989cd544c1a289
+
+tmin:
+  original_sequence_len: 201
+  minimized_len: 2
