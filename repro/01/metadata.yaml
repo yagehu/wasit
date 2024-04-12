@@ -1,7 +1,7 @@
 report: https://github.com/wasmerio/wasmer/issues/4556
 
 wazzi:
-  version:
+  version: 004cdf6c25c6de22e57b0b3d7d11ed5fe5d32ca7
 
 runtimes:
   node:
