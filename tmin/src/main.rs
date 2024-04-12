@@ -30,6 +30,9 @@ struct Cmd {
 
     #[arg()]
     workspace: PathBuf,
+
+    #[arg()]
+    action_idx: usize,
 }
 
 /// Communication relation.
@@ -198,12 +201,12 @@ fn main() -> Result<(), eyre::Error> {
         }
     }
 
-    let last_call_idx = calls.len() - 1;
-    let last_call_node_idx = *call_node_map.get(&last_call_idx).unwrap();
+    let action_idx = cmd.action_idx;
+    let last_call_node_idx = *call_node_map.get(&action_idx).unwrap();
     let mut min_calls = Vec::new();
     let mut to_remove = HashSet::new();
 
-    for i in 0..last_call_idx {
+    for i in 0..action_idx {
         let call_node_idx = *call_node_map.get(&i).unwrap();
 
         if petgraph::algo::has_path_connecting(&graph, call_node_idx, last_call_node_idx, None) {
@@ -211,6 +214,12 @@ fn main() -> Result<(), eyre::Error> {
         } else {
             to_remove.insert(call_node_idx);
         }
+    }
+
+    for i in (action_idx + 1)..calls.len() {
+        let call_node_idx = *call_node_map.get(&i).unwrap();
+
+        to_remove.insert(call_node_idx);
     }
 
     min_calls.push(calls.last().unwrap().clone());
