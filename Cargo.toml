@@ -47,6 +47,7 @@ clap = { version = "4", features = ["derive"] }
 color-eyre = "0.6"
 eyre = "0.6"
 git2 = "0.18.2"
+itertools = "0.12"
 nix = { version = "0.28", features = ["process", "signal"] }
 nom = "7"
 nom_locate = "4"

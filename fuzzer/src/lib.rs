@@ -14,6 +14,7 @@ use std::{
 
 use arbitrary::Unstructured;
 use color_eyre::eyre::{self, eyre as err, Context};
+use itertools::{EitherOrBoth, Itertools};
 use rand::{thread_rng, RngCore};
 use walkdir::WalkDir;
 use wazzi_executor::ExecutorRunner;
@@ -143,10 +144,6 @@ impl Fuzzer {
 
                                 drop(pause_state);
 
-                                if cancel.load(Ordering::SeqCst) {
-                                    return Ok(());
-                                }
-
                                 loop {
                                     let (resume_mu, resume_cond) = &*resume_pair;
                                     let resume_state = resume_mu.lock().unwrap();
@@ -158,6 +155,10 @@ impl Fuzzer {
                                         .unwrap();
 
                                     drop(resume_state);
+
+                                    if cancel.load(Ordering::SeqCst) {
+                                        return Ok(());
+                                    }
 
                                     prog.call_arbitrary(&mut u, &spec)?;
 
@@ -202,10 +203,6 @@ impl Fuzzer {
                                 .collect::<Vec<_>>();
 
                             'outer: for (i, runtime_0) in runtimes.iter().enumerate() {
-                                if i == runtimes.len() - 1 {
-                                    break;
-                                }
-
                                 let call_0 = runtime_0
                                     .trace()
                                     .last_call()
@@ -226,38 +223,59 @@ impl Fuzzer {
                                         .wrap_err("failed to read action")?
                                         .unwrap();
 
-                                    if call_0.errno != call_1.errno {
-                                        tracing::warn!(
-                                            runtime_a = runtime_0.name(),
-                                            runtime_b = runtime_1.name(),
-                                            runtime_a_errno = call_0.errno,
-                                            runtime_b_errno = call_1.errno,
-                                            "Errno diff found!"
-                                        );
+                                    match (call_0.errno, call_1.errno) {
+                                        | (None, None) => {},
+                                        | (Some(errno_0), Some(errno_1))
+                                            if errno_0 == 0 && errno_1 == 0
+                                                || errno_0 != 0 && errno_1 != 0 => {},
+                                        | _ => {
+                                            tracing::warn!(
+                                                runtime_a = runtime_0.name(),
+                                                runtime_b = runtime_1.name(),
+                                                runtime_a_errno = call_0.errno,
+                                                runtime_b_errno = call_1.errno,
+                                                "Errno diff found!"
+                                            );
 
-                                        cancel.store(true, Ordering::SeqCst);
-                                        break 'outer;
-                                    }
-
-                                    let runtime_0_walk =
-                                        WalkDir::new(&runtime_0.base).sort_by_file_name();
-                                    let runtime_1_walk =
-                                        WalkDir::new(&runtime_1.base).sort_by_file_name();
-
-                                    for (a, b) in
-                                        runtime_0_walk.into_iter().zip(runtime_1_walk.into_iter())
-                                    {
-                                        let a = a.wrap_err("failed to read dir entry")?;
-                                        let b = b.wrap_err("failed to read dir entry")?;
-
-                                        if a.depth() != b.depth()
-                                            || a.file_type() != b.file_type()
-                                            || a.file_name() != b.file_name()
-                                            || (a.file_type().is_file()
-                                                && fs::read(a.path())? != fs::read(b.path())?)
-                                        {
                                             cancel.store(true, Ordering::SeqCst);
                                             break 'outer;
+                                        },
+                                    }
+
+                                    let runtime_0_walk = WalkDir::new(&runtime_0.base)
+                                        .sort_by_file_name()
+                                        .min_depth(1)
+                                        .into_iter();
+                                    let runtime_1_walk = WalkDir::new(&runtime_1.base)
+                                        .sort_by_file_name()
+                                        .min_depth(1)
+                                        .into_iter();
+
+                                    for pair in runtime_0_walk.zip_longest(runtime_1_walk) {
+                                        match pair {
+                                            | EitherOrBoth::Both(a, b) => {
+                                                let a = a.wrap_err("failed to read dir entry")?;
+                                                let b = b.wrap_err("failed to read dir entry")?;
+
+                                                if a.depth() != b.depth()
+                                                    || a.file_type() != b.file_type()
+                                                    || a.file_name() != b.file_name()
+                                                    || (a.file_type().is_file()
+                                                        && fs::read(a.path())?
+                                                            != fs::read(b.path())?)
+                                                {
+                                                    tracing::warn!("Fs diff found.");
+
+                                                    cancel.store(true, Ordering::SeqCst);
+                                                    break 'outer;
+                                                }
+                                            },
+                                            | EitherOrBoth::Left(_) | EitherOrBoth::Right(_) => {
+                                                tracing::warn!("Fs diff found.");
+
+                                                cancel.store(true, Ordering::SeqCst);
+                                                break 'outer;
+                                            },
                                         }
                                     }
                                 }

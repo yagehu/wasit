@@ -945,12 +945,12 @@ static void handle_call(Request__Call * call) {
             for (int i = 0; i < p1_iovs_len; i++)
                 to_read += (* (__wasi_iovec_t **) p1_iovs_ptr)[i].buf_len;
 
-            __wasi_iovec_t iovs_curr = (* (__wasi_iovec_t **) p1_iovs_ptr)[iovs_idx];
+            __wasi_iovec_t * iovs_curr = &(* (__wasi_iovec_t **) p1_iovs_ptr)[iovs_idx];
 
             while (n_read < to_read) {
                 response.errno_some = __imported_wasi_snapshot_preview1_fd_pread(
                     p0_fd,
-                    (int32_t) &iovs_curr,
+                    (int32_t) iovs_curr,
                     p1_iovs_len - iovs_idx,
                     p2_offset + n_read,
                     r0_size
@@ -970,13 +970,11 @@ static void handle_call(Request__Call * call) {
 
                 n_read += read_this_time;
 
-                while (n_read < to_read && read_this_time >= iovs_curr.buf_len) {
-                    read_this_time -= iovs_curr.buf_len;
+                while (n_read < to_read && read_this_time >= iovs_curr->buf_len) {
+                    read_this_time -= iovs_curr->buf_len;
                     iovs_idx += 1;
+                    iovs_curr = &(* (__wasi_iovec_t **) p1_iovs_ptr)[iovs_idx];
                 }
-
-                iovs_curr.buf += read_this_time;
-                iovs_curr.buf_len -= read_this_time;
             }
 
             * (int32_t *) r0_size_ptr = n_read;
@@ -1045,12 +1043,12 @@ static void handle_call(Request__Call * call) {
             for (int i = 0; i < p1_iovs_len; i++)
                 to_write += (* (__wasi_ciovec_t **) p1_iovs_ptr)[i].buf_len;
 
-            __wasi_ciovec_t iovs_curr = (* (__wasi_ciovec_t **) p1_iovs_ptr)[iovs_idx];
+            __wasi_ciovec_t * iovs_curr = & (* (__wasi_ciovec_t **) p1_iovs_ptr)[iovs_idx];
 
             while (written < to_write) {
                 response.errno_some = __imported_wasi_snapshot_preview1_fd_pwrite(
                     p0_fd,
-                    (int32_t) &iovs_curr,
+                    (int32_t) iovs_curr,
                     p1_iovs_len - iovs_idx,
                     p2_offset + written,
                     r0_size
@@ -1068,14 +1066,11 @@ static void handle_call(Request__Call * call) {
 
                 written += written_this_time;
 
-                while (written < to_write && written_this_time >= iovs_curr.buf_len) {
-                    written_this_time -= iovs_curr.buf_len;
+                while (written < to_write && written_this_time >= iovs_curr->buf_len) {
+                    written_this_time -= iovs_curr->buf_len;
                     iovs_idx += 1;
-                    iovs_curr = (* (__wasi_ciovec_t **) p1_iovs_ptr)[iovs_idx];
+                    iovs_curr = &(* (__wasi_ciovec_t **) p1_iovs_ptr)[iovs_idx];
                 }
-
-                iovs_curr.buf += written_this_time;
-                iovs_curr.buf_len -= written_this_time;
             }
 
             * (int32_t *) r0_size_ptr = written;
@@ -1107,12 +1102,12 @@ static void handle_call(Request__Call * call) {
             for (int i = 0; i < p1_iovs_len; i++)
                 to_read += (* (__wasi_iovec_t **) p1_iovs_ptr + i)->buf_len;
 
-            __wasi_iovec_t iovs_curr = (* (__wasi_iovec_t **) p1_iovs_ptr)[iovs_idx];
+            __wasi_iovec_t * iovs_curr = &(* (__wasi_iovec_t **) p1_iovs_ptr)[iovs_idx];
 
             while (n_read < to_read) {
                 response.errno_some = __imported_wasi_snapshot_preview1_fd_read(
                     p0_fd,
-                    (int32_t) &iovs_curr,
+                    (int32_t) iovs_curr,
                     p1_iovs_len - iovs_idx,
                     r0_size
                 );
@@ -1131,13 +1126,11 @@ static void handle_call(Request__Call * call) {
 
                 n_read += read_this_time;
 
-                while (n_read < to_read && read_this_time >= iovs_curr.buf_len) {
-                    read_this_time -= iovs_curr.buf_len;
+                while (n_read < to_read && read_this_time >= iovs_curr->buf_len) {
+                    read_this_time -= iovs_curr->buf_len;
                     iovs_idx += 1;
+                    iovs_curr = &(* (__wasi_iovec_t **) p1_iovs_ptr)[iovs_idx];
                 }
-
-                iovs_curr.buf += read_this_time;
-                iovs_curr.buf_len -= read_this_time;
             }
 
             * (int32_t *) r0_size_ptr = n_read;
@@ -1270,12 +1263,13 @@ static void handle_call(Request__Call * call) {
             for (int i = 0; i < p1_iovs_len; i++)
                 to_write += (* (__wasi_ciovec_t **) p1_iovs_ptr + i)->buf_len;
 
-            __wasi_ciovec_t iovs_curr = (* (__wasi_ciovec_t **) p1_iovs_ptr)[iovs_idx];
+            __wasi_ciovec_t * iovs_curr = &(* (__wasi_ciovec_t **) p1_iovs_ptr)[iovs_idx];
 
             while (written < to_write) {
+                fprintf(stderr, "iovs ptr %d\n", (uint32_t) iovs_curr);
                 response.errno_some = __imported_wasi_snapshot_preview1_fd_write(
                     p0_fd,
-                    (int32_t) &iovs_curr,
+                    (int32_t) iovs_curr,
                     p1_iovs_len - iovs_idx,
                     r0_size
                 );
@@ -1292,14 +1286,20 @@ static void handle_call(Request__Call * call) {
 
                 written += written_this_time;
 
-                while (written < to_write && written_this_time >= iovs_curr.buf_len) {
-                    written_this_time -= iovs_curr.buf_len;
+                fprintf(stderr, "to_write %lu written %lu\n", to_write, written);
+
+                while (written < to_write && written_this_time >= iovs_curr->buf_len) {
+                    fprintf(stderr, "written_this_time %lu\n", written_this_time);
+
+                    written_this_time -= iovs_curr->buf_len;
                     iovs_idx += 1;
-                    iovs_curr = (* (__wasi_ciovec_t **) p1_iovs_ptr)[iovs_idx];
+                    iovs_curr = &(* (__wasi_ciovec_t **) p1_iovs_ptr)[iovs_idx];
                 }
 
-                iovs_curr.buf += written_this_time;
-                iovs_curr.buf_len -= written_this_time;
+                fprintf(stderr, "written_this_time post %lu\n", written_this_time);
+
+                // iovs_curr.buf += written_this_time;
+                // iovs_curr.buf_len -= written_this_time;
             }
 
             * (int32_t *) r0_size_ptr = written;
