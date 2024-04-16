@@ -1,15 +1,12 @@
 description: >
-  `fd_seek` with a very large offset fails for some runtimes.  Most runtimes
-  pass through the host filesystem behavior.  For example, 64-bit Linux with
-  ext4 will fail at offset `17592186040320`, just one block short of 16 TiB.
-  Wasmtime emulates the filesystem behavior, and since it doesn't actually
-  perform any seeking, it succeeds up to s64 max.
+  `fd_pread` with a large offset causes Node to wrap the offset and read from
+  a smaller offset.
 
 reports:
-  - url: https://github.com/WebAssembly/wasi-filesystem/issues/146
+  - url: https://github.com/nodejs/uvwasi/issues/257
 
 wazzi:
-  commit: a8ac7f34235768e82142f6944435a6001e9b9cbd
+  commit: 67d6c5d1ad890ca683997aba00509c3491a42be2
 
 runtimes:
   node:
@@ -29,5 +26,5 @@ runtimes:
     commit: refs/tags/case/02
 
 tmin:
-  original_sequence_len: 43
+  original_sequence_len: 12
   minimized_len: 2

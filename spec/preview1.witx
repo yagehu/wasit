@@ -349,7 +349,7 @@
   )
 
   (@interface func (export "fd_seek")
-    (param $fd $fd)
+    (param $fd $fd (@state write))
     (param $offset $filedelta)
     (param $whence $whence)
     (result $error (expected $filesize (error $errno)))
