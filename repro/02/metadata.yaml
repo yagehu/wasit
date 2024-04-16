@@ -9,7 +9,7 @@ reports:
   - url: https://github.com/WebAssembly/wasi-filesystem/issues/146
 
 wazzi:
-  version:
+  commit: a8ac7f34235768e82142f6944435a6001e9b9cbd
 
 runtimes:
   node:
