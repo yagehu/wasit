@@ -1,0 +1,33 @@
+description: >
+  `fd_seek` with a very large offset fails for some runtimes.  Most runtimes
+  pass through the host filesystem behavior.  For example, 64-bit Linux with
+  ext4 will fail at offset `17592186040320`, just one block short of 16 TiB.
+  Wasmtime emulates the filesystem behavior, and since it doesn't actually
+  perform any seeking, it succeeds up to s64 max.
+
+reports:
+  - url: https://github.com/WebAssembly/wasi-filesystem/issues/146
+
+wazzi:
+  version:
+
+runtimes:
+  node:
+    repository: git@github.com:yagehu/node.git
+    commit: refs/tags/case/02
+  wamr:
+    repository: https://github.com/bytecodealliance/wasm-micro-runtime.git
+    commit: 1b9fbb162ff6739ffb107927e5a9324585a518cd
+  wasmedge:
+    repository: git@github.com:yagehu/WasmEdge.git
+    commit: f930fffb6e8c1fbf5569e17c950682dc571b63d2
+  wasmer:
+    repository: git@github.com:yagehu/wasmer.git
+    commit: refs/tags/case/02
+  wasmtime:
+    repository: git@github.com:yagehu/wasmtime.git
+    commit: refs/tags/case/02
+
+tmin:
+  original_sequence_len: 42
+  minimized_len: 2
