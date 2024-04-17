@@ -1,0 +1,5 @@
+digraph {
+    0 [ label = "0" ]
+    94 [ label = "94" ]
+    0 -> 94 [ label = "Rf" ]
+}
