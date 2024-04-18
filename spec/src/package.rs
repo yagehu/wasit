@@ -243,6 +243,7 @@ pub struct FunctionParam {
     pub name:         String,
     pub valtype:      Valtype,
     pub state_effect: StateEffect,
+    pub unspecified:  bool,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]

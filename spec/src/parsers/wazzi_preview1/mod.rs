@@ -261,15 +261,25 @@ pub struct FuncParam<'a> {
     pub name:         Id<'a>,
     pub tref:         TypeRef<'a>,
     pub state_effect: Option<StateEffect>,
+    pub annotations:  Vec<Annotation<'a>>,
 }
 
 impl<'a> FuncParam<'a> {
     fn parse(input: Span<'a>) -> nom::IResult<Span, Self, ErrorTree<Span>> {
-        let (input, (_, name, tref, state_effect)) = paren(tuple((
+        let (input, (_, name, tref, state_effect, annotations)) = paren(tuple((
             ws(tag("param")),
             ws(Id::parse),
             ws(TypeRef::parse),
             ws(StateEffect::parse).opt(),
+            alt((
+                collect_separated_terminated(
+                    Annotation::parse,
+                    multispace0,
+                    multispace0.terminated(char(')')).peek(),
+                ),
+                peek::<_, _, ErrorTree<_>, _>(char(')')).value(vec![]),
+            ))
+            .cut(),
         )))
         .context("func param")
         .parse(input)?;
@@ -280,6 +290,7 @@ impl<'a> FuncParam<'a> {
                 name,
                 tref,
                 state_effect,
+                annotations,
             },
         ))
     }
@@ -292,27 +303,58 @@ impl<'a> FuncParam<'a> {
                 | Some(StateEffect::Write) => package::StateEffect::Write,
                 | None => package::StateEffect::Read,
             },
+            unspecified:  self
+                .annotations
+                .iter()
+                .find_map(|annot| {
+                    if annot.name.name() == "wazzi"
+                        && annot.strs.len() >= 1
+                        && *annot.strs[0] == "unspecified"
+                    {
+                        Some(true)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(false),
         })
     }
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct FuncResult<'a> {
-    pub name: Id<'a>,
-    pub tref: TypeRef<'a>,
+    pub name:        Id<'a>,
+    pub tref:        TypeRef<'a>,
+    pub annotations: Vec<Annotation<'a>>,
 }
 
 impl<'a> FuncResult<'a> {
     fn parse(input: Span<'a>) -> nom::IResult<Span, Self, ErrorTree<Span>> {
-        let (input, (_, name, tref)) = paren(tuple((
+        let (input, (_, name, tref, annotations)) = paren(tuple((
             ws(tag("result")),
             ws(Id::parse),
             ws(TypeRef::parse),
+            alt((
+                collect_separated_terminated(
+                    Annotation::parse,
+                    multispace0,
+                    multispace0.terminated(char(')')).peek(),
+                ),
+                peek::<_, _, ErrorTree<_>, _>(char(')')).value(vec![]),
+            ))
+            .cut(),
         )))
         .context("func result")
         .parse(input)?;
 
-        Ok((input, Self { name, tref }))
+        Ok((
+            input,
+            Self {
+                name,
+                tref,
+                annotations,
+            },
+        ))
     }
 
     fn into_package(self, interface: &package::Interface) -> Result<package::FunctionParam, Error> {
@@ -320,6 +362,20 @@ impl<'a> FuncResult<'a> {
             name:         self.name.name().to_owned(),
             valtype:      self.tref.into_package(interface)?,
             state_effect: package::StateEffect::Write,
+            unspecified:  self
+                .annotations
+                .iter()
+                .find_map(|annot| {
+                    if annot.name.name() == "wazzi"
+                        && annot.strs.len() >= 1
+                        && *annot.strs[0] == "unspecified"
+                    {
+                        Some(true)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(false),
         })
     }
 }

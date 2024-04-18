@@ -167,7 +167,7 @@
     (param $offset $filesize)
     (param $len $filesize)
     (param $advice $advice)
-    (result $error (expected (error $errno)))
+    (result $error (expected (error $errno)) (@wazzi unspecified))
   )
 
   (@interface func (export "fd_allocate")
@@ -210,13 +210,13 @@
   )
 
   (@interface func (export "fd_fdstat_set_flags")
-    (param $fd $fd)
+    (param $fd $fd (@state write))
     (param $flags $fdflags)
     (result $error (expected (error $errno)))
   )
 
   (@interface func (export "fd_fdstat_set_rights")
-    (param $fd $fd)
+    (param $fd $fd (@state write))
     (param $fs_rights_base $rights)
     (param $fs_rights_inheriting $rights)
     (result $error (expected (error $errno)))
@@ -269,7 +269,7 @@
   )
 
   (@interface func (export "fd_pread")
-    (param $fd $fd)
+    (param $fd $fd (@state write))
     (param $iovs $iovec_array)
     (param $offset $filesize)
     (result $error (expected $size (error $errno)))
@@ -305,7 +305,7 @@
   )
 
   (@interface func (export "fd_pwrite")
-    (param $fd $fd)
+    (param $fd $fd (@state pwrite))
     (param $iovs $ciovec_array)
     (param $offset $filesize)
     (result $error (expected $size (error $errno)))
@@ -334,7 +334,7 @@
   (typename $iovec_array (list $iovec))
 
   (@interface func (export "fd_read")
-    (param $fd $fd)
+    (param $fd $fd (@state write))
     (param $iovs $iovec_array)
     (result $error (expected $size (error $errno)))
   )
@@ -363,7 +363,7 @@
   (typename $ciovec_array (list $ciovec))
 
   (@interface func (export "fd_write")
-    (param $fd $fd)
+    (param $fd $fd (@state write))
     (param $iovs $ciovec_array)
     (result $error (expected $size (error $errno)))
   )

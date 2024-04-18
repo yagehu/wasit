@@ -19,7 +19,7 @@ use rand::{thread_rng, RngCore};
 use walkdir::WalkDir;
 use wazzi_executor::ExecutorRunner;
 use wazzi_runners::WasiRunner;
-use wazzi_spec::parsers::Span;
+use wazzi_spec::{package::TypeidxBorrow, parsers::Span};
 use wazzi_store::FuzzStore;
 use wazzi_wazi::seed::Seed;
 
@@ -194,8 +194,18 @@ impl Fuzzer {
                 .name("differ".to_owned())
                 .spawn_scoped(scope, {
                     let cancel = cancel.clone();
+                    let spec = fs::read_to_string(PathBuf::from("spec").join("preview1.witx"))
+                        .wrap_err("failed to read spec to string")?;
+                    let doc =
+                        wazzi_spec::parsers::wazzi_preview1::Document::parse(Span::new(&spec))
+                            .map_err(|_| err!("failed to parse spec"))?;
+                    let spec = doc.into_package().wrap_err("failed to process spec")?;
 
                     move || -> Result<(), eyre::Error> {
+                        let interface = spec
+                            .interface(TypeidxBorrow::Symbolic("wasi_snapshot_preview1"))
+                            .unwrap();
+
                         while let Ok(_done) = rx.recv() {
                             let runtimes = run_store
                                 .runtimes()
@@ -211,6 +221,7 @@ impl Fuzzer {
                                     .read_call()
                                     .wrap_err("failed to read action")?
                                     .unwrap();
+                                let func_spec = interface.function(&call_0.func).unwrap();
 
                                 for j in (i + 1)..runtimes.len() {
                                     let runtime_1 = runtimes.get(j).unwrap();
@@ -223,23 +234,27 @@ impl Fuzzer {
                                         .wrap_err("failed to read action")?
                                         .unwrap();
 
-                                    match (call_0.errno, call_1.errno) {
-                                        | (None, None) => {},
-                                        | (Some(errno_0), Some(errno_1))
-                                            if errno_0 == 0 && errno_1 == 0
-                                                || errno_0 != 0 && errno_1 != 0 => {},
-                                        | _ => {
-                                            tracing::warn!(
-                                                runtime_a = runtime_0.name(),
-                                                runtime_b = runtime_1.name(),
-                                                runtime_a_errno = call_0.errno,
-                                                runtime_b_errno = call_1.errno,
-                                                "Errno diff found!"
-                                            );
+                                    if let Some(result) = func_spec.results.first() {
+                                        if !result.unspecified {
+                                            match (call_0.errno, call_1.errno) {
+                                                | (None, None) => {},
+                                                | (Some(errno_0), Some(errno_1))
+                                                    if errno_0 == 0 && errno_1 == 0
+                                                        || errno_0 != 0 && errno_1 != 0 => {},
+                                                | _ => {
+                                                    tracing::warn!(
+                                                        runtime_a = runtime_0.name(),
+                                                        runtime_b = runtime_1.name(),
+                                                        runtime_a_errno = call_0.errno,
+                                                        runtime_b_errno = call_1.errno,
+                                                        "Errno diff found!"
+                                                    );
 
-                                            cancel.store(true, Ordering::SeqCst);
-                                            break 'outer;
-                                        },
+                                                    cancel.store(true, Ordering::SeqCst);
+                                                    break 'outer;
+                                                },
+                                            }
+                                        }
                                     }
 
                                     let runtime_0_walk = WalkDir::new(&runtime_0.base)
