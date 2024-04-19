@@ -7,6 +7,7 @@ use std::{
     process,
 };
 
+use eyre::Context;
 use tera::Tera;
 
 pub trait WasiRunner: fmt::Debug + Send + Sync {
@@ -23,9 +24,11 @@ pub trait WasiRunner: fmt::Debug + Send + Sync {
         wasm_path: PathBuf,
         working_dir: &Path,
         base_dir: Option<PathBuf>,
-    ) -> Result<process::Child, io::Error> {
+    ) -> Result<process::Child, eyre::Error> {
         let mut command = self.prepare_command(wasm_path, working_dir, base_dir);
-        let child = command.spawn()?;
+        let child = command
+            .spawn()
+            .wrap_err(format!("failed to spawn command {:?}", command))?;
 
         Ok(child)
     }

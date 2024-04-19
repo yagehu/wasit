@@ -4,6 +4,8 @@ set -euxo pipefail
 
 declare -a extra_paths=()
 
+os=""
+
 function join_by {
   local d="${1-}" f="${2-}"
 
@@ -26,7 +28,7 @@ function build_node {
 
 function build_wamr {
   local repo_path="$1"
-  local build_path="$repo_path/product-mini/platforms/linux/build"
+  local build_path="$repo_path/product-mini/platforms/$os/build"
 
   mkdir -p "$build_path"
 
@@ -75,6 +77,15 @@ function build_wasmtime {
 
   extra_paths+=("$(realpath $path/target/release)")
 }
+
+case "$(uname -s)" in
+  Linux*)  os=linux;;
+  Darwin*) os=darwin;;
+  *)
+    echo "Unknown OS"
+    exit 1
+    ;;
+esac
 
 node_repo_dir="${NODE_REPO_DIR:-runtimes/node}"
 wamr_repo_dir="${WAMR_REPO_DIR:-runtimes/wasm-micro-runtime}"

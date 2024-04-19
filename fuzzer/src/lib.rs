@@ -115,7 +115,7 @@ impl Fuzzer {
                                     Some(runtime_store.base.clone()),
                                 )
                                 .run(Arc::new(Mutex::new(stderr_file)))
-                                .wrap_err("failed to run executor")
+                                .wrap_err(format!("failed to run executor with {}", runtime.name))
                                 .map_err(wake_main)?;
                                 let mut prog = seed
                                     .clone()

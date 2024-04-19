@@ -1647,6 +1647,7 @@ version = "0.1.0"
 name = "wazzi-executor"
 version = "0.1.0"
 dependencies = [
+ "eyre",
  "protobuf",
  "wazzi-executor-pb-c",
  "wazzi-executor-pb-rust",
@@ -1699,6 +1700,7 @@ dependencies = [
 name = "wazzi-runners"
 version = "0.1.0"
 dependencies = [
+ "eyre",
  "tera",
  "tracing",
 ]

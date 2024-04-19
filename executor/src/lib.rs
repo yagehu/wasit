@@ -9,6 +9,7 @@ use std::{
     thread,
 };
 
+use eyre::Context as _;
 use protobuf::Message;
 use wazzi_runners::WasiRunner;
 
@@ -34,15 +35,21 @@ impl<'r> ExecutorRunner<'r> {
         }
     }
 
-    pub fn run<W>(&self, stderr_logger: Arc<Mutex<W>>) -> Result<RunningExecutor, io::Error>
+    pub fn run<W>(&self, stderr_logger: Arc<Mutex<W>>) -> Result<RunningExecutor, eyre::Error>
     where
         W: io::Write + Send + 'static,
     {
-        let mut child = self.wasi_runner.run(
-            self.executor.clone(),
-            &self.working_dir,
-            self.base_dir.clone(),
-        )?;
+        let mut child = self
+            .wasi_runner
+            .run(
+                self.executor.clone(),
+                &self.working_dir,
+                self.base_dir.clone(),
+            )
+            .wrap_err(format!(
+                "failed to run executor {}",
+                self.executor.display()
+            ))?;
         let mut stderr = child.stderr.take().unwrap();
         let stderr_copy_handle = thread::spawn(move || {
             io::copy(&mut stderr, stderr_logger.lock().unwrap().deref_mut()).unwrap()

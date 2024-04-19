@@ -58,9 +58,7 @@ fn main() -> Result<(), eyre::Error> {
             Runtime {
                 name:   "node",
                 repo:   runtimes_dir.join("node"),
-                runner: Arc::new(Node::new(Path::new(
-                    "/home/huyage/src/wazzi/runtimes/node/node",
-                ))),
+                runner: Arc::new(Node::new(Path::new("node"))),
             },
             Runtime {
                 name:   "wamr",
