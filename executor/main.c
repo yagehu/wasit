@@ -946,8 +946,11 @@ static void handle_call(Request__Call * call) {
                 to_read += (* (__wasi_iovec_t **) p1_iovs_ptr)[i].buf_len;
 
             __wasi_iovec_t * iovs_curr = &(* (__wasi_iovec_t **) p1_iovs_ptr)[iovs_idx];
+            bool first = true;
 
-            while (n_read < to_read) {
+            while (n_read < to_read || first) {
+                first = false;
+
                 response.errno_some = __imported_wasi_snapshot_preview1_fd_pread(
                     p0_fd,
                     (int32_t) iovs_curr,
@@ -1044,8 +1047,11 @@ static void handle_call(Request__Call * call) {
                 to_write += (* (__wasi_ciovec_t **) p1_iovs_ptr)[i].buf_len;
 
             __wasi_ciovec_t * iovs_curr = & (* (__wasi_ciovec_t **) p1_iovs_ptr)[iovs_idx];
+            bool first = true;
 
-            while (written < to_write) {
+            while (written < to_write || first) {
+                first = false;
+
                 response.errno_some = __imported_wasi_snapshot_preview1_fd_pwrite(
                     p0_fd,
                     (int32_t) iovs_curr,
@@ -1103,8 +1109,11 @@ static void handle_call(Request__Call * call) {
                 to_read += (* (__wasi_iovec_t **) p1_iovs_ptr + i)->buf_len;
 
             __wasi_iovec_t * iovs_curr = &(* (__wasi_iovec_t **) p1_iovs_ptr)[iovs_idx];
+            bool first = true;
 
-            while (n_read < to_read) {
+            while (n_read < to_read || first) {
+                first = false;
+
                 response.errno_some = __imported_wasi_snapshot_preview1_fd_read(
                     p0_fd,
                     (int32_t) iovs_curr,
@@ -1264,9 +1273,11 @@ static void handle_call(Request__Call * call) {
                 to_write += (* (__wasi_ciovec_t **) p1_iovs_ptr + i)->buf_len;
 
             __wasi_ciovec_t * iovs_curr = &(* (__wasi_ciovec_t **) p1_iovs_ptr)[iovs_idx];
+            bool first = true;
 
-            while (written < to_write) {
-                fprintf(stderr, "iovs ptr %d\n", (uint32_t) iovs_curr);
+            while (written < to_write || first) {
+                first = false;
+
                 response.errno_some = __imported_wasi_snapshot_preview1_fd_write(
                     p0_fd,
                     (int32_t) iovs_curr,
@@ -1286,20 +1297,11 @@ static void handle_call(Request__Call * call) {
 
                 written += written_this_time;
 
-                fprintf(stderr, "to_write %lu written %lu\n", to_write, written);
-
                 while (written < to_write && written_this_time >= iovs_curr->buf_len) {
-                    fprintf(stderr, "written_this_time %lu\n", written_this_time);
-
                     written_this_time -= iovs_curr->buf_len;
                     iovs_idx += 1;
                     iovs_curr = &(* (__wasi_ciovec_t **) p1_iovs_ptr)[iovs_idx];
                 }
-
-                fprintf(stderr, "written_this_time post %lu\n", written_this_time);
-
-                // iovs_curr.buf += written_this_time;
-                // iovs_curr.buf_len -= written_this_time;
             }
 
             * (int32_t *) r0_size_ptr = written;
