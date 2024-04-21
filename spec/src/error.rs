@@ -7,4 +7,7 @@ pub enum Error {
 
     #[error("invalid typeidx: {0:?}")]
     InvalidTypeidx(Typeidx),
+
+    #[error("unexpected token: {token}")]
+    UnexpectedToken { token: String, offset: usize },
 }

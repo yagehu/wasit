@@ -61,7 +61,7 @@ impl Fuzzer {
 
         let spec = fs::read_to_string(PathBuf::from("spec").join("preview1.witx"))
             .wrap_err("failed to read spec to string")?;
-        let doc = wazzi_spec::parsers::wazzi_preview1::Document::parse(Span::new(&spec))
+        let doc = wazzi_spec::parsers::wazzi_preview1_old::Document::parse(Span::new(&spec))
             .map_err(|_| err!("failed to parse spec"))?;
         let spec = doc.into_package().wrap_err("failed to process spec")?;
 
@@ -197,7 +197,7 @@ impl Fuzzer {
                     let spec = fs::read_to_string(PathBuf::from("spec").join("preview1.witx"))
                         .wrap_err("failed to read spec to string")?;
                     let doc =
-                        wazzi_spec::parsers::wazzi_preview1::Document::parse(Span::new(&spec))
+                        wazzi_spec::parsers::wazzi_preview1_old::Document::parse(Span::new(&spec))
                             .map_err(|_| err!("failed to parse spec"))?;
                     let spec = doc.into_package().wrap_err("failed to process spec")?;
 

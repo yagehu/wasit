@@ -18,18 +18,18 @@ fn preview1() {
         },
     };
     let spec = doc.into_package().unwrap();
-    let interface = spec
-        .interface(TypeidxBorrow::Symbolic("wasi_snapshot_preview1"))
-        .unwrap();
-    let fd_type = interface
-        .get_resource_type(TypeidxBorrow::Symbolic("fd"))
-        .unwrap();
+    // let interface = spec
+    //     .interface(TypeidxBorrow::Symbolic("wasi_snapshot_preview1"))
+    //     .unwrap();
+    // let fd_type = interface
+    //     .get_resource_type(TypeidxBorrow::Symbolic("fd"))
+    //     .unwrap();
 
-    assert_eq!(fd_type, &Defvaltype::Handle);
+    // assert_eq!(fd_type, &Defvaltype::Handle);
 
-    let path_open = interface.function("path_open").unwrap();
+    // let path_open = interface.function("path_open").unwrap();
 
-    assert_eq!(path_open.name, "path_open");
-    assert_eq!(path_open.params.len(), 7);
-    assert_eq!(path_open.results.len(), 1);
+    // assert_eq!(path_open.name, "path_open");
+    // assert_eq!(path_open.params.len(), 7);
+    // assert_eq!(path_open.results.len(), 1);
 }

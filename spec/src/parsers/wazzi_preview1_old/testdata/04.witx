@@ -1,0 +1,77 @@
+(module $wasi_snapshot_preview1
+  (typename $fd (handle))
+  (typename $fd_dir (handle) (@wazzi fulfills $fd))
+
+  (typename $fdflags
+    (flags (@witx repr u16)
+      $append
+      $dsync
+      $nonblock
+      $rsync
+      $sync
+    )
+  )
+
+  (typename $lookupflags
+    (flags (@witx repr u32)
+      $symlink_follow
+    )
+  )
+
+  (typename $oflags
+    (flags (@witx repr u16)
+      $creat
+      $directory
+      $excl
+      $trunc
+    )
+  )
+
+  (typename $path string)
+
+  (typename $rights
+    (flags (@witx repr u64)
+      $fd_datasync
+      $fd_read
+      $fd_seek
+      $fd_fdstat_set_flags
+      $fd_sync
+      $fd_tell
+      $fd_write
+      $fd_advise
+      $fd_allocate
+      $path_create_directory
+      $path_create_file
+      $path_link_source
+      $path_link_target
+      $path_open
+      $fd_readdir
+      $path_readlink
+      $path_rename_source
+      $path_rename_target
+      $path_filestat_get
+      $path_filestat_set_size
+      $path_filestat_set_times
+      $fd_filestat_get
+      $fd_filestat_set_size
+      $fd_filestat_set_times
+      $path_symlink
+      $path_remove_directory
+      $path_unlink_file
+      $poll_fd_readwrite
+      $sock_shutdown
+      $sock_accept
+    )
+  )
+
+  (@interface func (export "path_open")
+    (param $fd $fd_dir)
+    (param $dirflags $lookupflags)
+    (param $path $path)
+    (param $oflags $oflags)
+    (param $fs_rights_base $rights)
+    (param $fs_rights_inheriting $rights)
+    (param $fdflags $fdflags)
+    (result $error (expected $fd (error $errno)))
+  )
+)

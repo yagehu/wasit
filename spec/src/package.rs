@@ -171,7 +171,11 @@ impl Interface {
                 },
             },
             | Valtype::Defvaltype(defvaltype) => match defvaltype {
-                | Defvaltype::S64 | Defvaltype::U8 | Defvaltype::U32 | Defvaltype::U64 => (),
+                | Defvaltype::S64
+                | Defvaltype::U8
+                | Defvaltype::U16
+                | Defvaltype::U32
+                | Defvaltype::U64 => (),
                 | Defvaltype::List(list) => self.rec_validate_valtype(&list.element)?,
                 | Defvaltype::Record(_record) => todo!(),
                 | Defvaltype::Variant(variant) => {
@@ -207,7 +211,7 @@ impl Interface {
 pub struct Function {
     pub name:    String,
     pub params:  Vec<FunctionParam>,
-    pub results: Vec<FunctionParam>,
+    pub results: Vec<FunctionResult>,
 }
 
 impl Function {
@@ -243,7 +247,12 @@ pub struct FunctionParam {
     pub name:         String,
     pub valtype:      Valtype,
     pub state_effect: StateEffect,
-    pub unspecified:  bool,
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct FunctionResult {
+    pub name:    String,
+    pub valtype: Valtype,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -313,6 +322,7 @@ pub enum Defvaltype {
     // Fundamental numerical value types
     S64,
     U8,
+    U16,
     U32,
     U64,
 
@@ -333,6 +343,7 @@ impl Defvaltype {
     pub fn mem_size(&self, interface: &Interface) -> u32 {
         match self {
             | Defvaltype::U8 => 1,
+            | Defvaltype::U16 => 2,
             | Defvaltype::U32 => 4,
             | Defvaltype::S64 | Defvaltype::U64 => 8,
             | Defvaltype::List(_) => 8,
@@ -349,6 +360,7 @@ impl Defvaltype {
     pub fn alignment(&self, interface: &Interface) -> u32 {
         match self {
             | Defvaltype::U8 => 1,
+            | Defvaltype::U16 => 2,
             | Defvaltype::U32 => 4,
             | Defvaltype::S64 | Defvaltype::U64 => 8,
             | Defvaltype::List(_) => 4,
