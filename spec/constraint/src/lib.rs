@@ -6,19 +6,10 @@ use interval::IntervalSet;
 
 use crate::program::ConstraintSet;
 
-pub fn evaluate(_ctx: &Context, prog: &Program) -> ConstraintSet {
+pub fn evaluate(prog: &Program) -> ConstraintSet {
     let cset = prog.expr.eval();
 
     cset
-}
-
-#[derive(PartialEq, Eq, Clone, Debug)]
-pub struct Context {}
-
-impl Context {
-    pub fn new() -> Self {
-        Self {}
-    }
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -34,7 +25,6 @@ mod tests {
     use crate::{
         evaluate,
         program::{And, Expr, If, TypeRef, U64Gt, U64Lt, Unspecified},
-        Context,
         Program,
     };
 
@@ -64,8 +54,7 @@ mod tests {
             })),
         };
 
-        let ctx = Context::new();
-        let cset = evaluate(&ctx, &p);
+        let cset = evaluate(&p);
         let iset = cset.get::<u64>(&TypeRef::Param {
             name: "offset".to_owned(),
         });

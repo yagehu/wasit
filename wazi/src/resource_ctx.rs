@@ -95,6 +95,7 @@ impl ResourceContext {
         match (def, &mut value.value) {
             | (Defvaltype::S64, _)
             | (Defvaltype::U8, _)
+            | (Defvaltype::U16, _)
             | (Defvaltype::U32, _)
             | (Defvaltype::U64, _) => (),
             | (Defvaltype::List(_), _) => todo!(),
@@ -159,6 +160,7 @@ impl ResourceContext {
         Ok(match def {
             | Defvaltype::S64 => Value::S64(u.arbitrary()?),
             | Defvaltype::U8 => Value::U8(u.arbitrary()?),
+            | Defvaltype::U16 => Value::U16(u.arbitrary()?),
             | Defvaltype::U32 => Value::U32(u.arbitrary()?),
             | Defvaltype::U64 => Value::U64(u.arbitrary()?),
             | Defvaltype::List(list) => {

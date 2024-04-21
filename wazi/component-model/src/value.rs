@@ -20,6 +20,7 @@ pub struct ResourceMeta {
 pub enum Value {
     S64(i64),
     U8(u8),
+    U16(u16),
     U32(u32),
     U64(u64),
     Handle(u32),
@@ -42,6 +43,7 @@ impl ValueMeta {
             value:    match def {
                 | Defvaltype::S64 => Value::S64(0),
                 | Defvaltype::U8 => Value::U8(0),
+                | Defvaltype::U16 => Value::U16(0),
                 | Defvaltype::U32 => Value::U32(0),
                 | Defvaltype::U64 => Value::U64(0),
                 | Defvaltype::List(_) => todo!(),
@@ -96,6 +98,7 @@ impl ValueMeta {
                     special_fields: Default::default(),
                 })
             },
+            | (_, Value::U16(_i)) => todo!(),
             | (_, Value::U32(i)) => {
                 executor_pb::value::Which::Builtin(executor_pb::value::Builtin {
                     which:          Some(executor_pb::value::builtin::Which::U32(i)),

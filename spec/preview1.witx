@@ -168,6 +168,11 @@
     (param $len $filesize)
     (param $advice $advice)
     (result $error (expected (error $errno)))
+    (@wazzi (spec
+      (if (i64.gt_u (param $len) (i64.const 9223372036854775807))
+        (then (unspecified (result $error)))
+      )
+    ))
   )
 
   (@interface func (export "fd_allocate")

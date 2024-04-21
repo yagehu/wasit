@@ -61,7 +61,7 @@ impl Fuzzer {
 
         let spec = fs::read_to_string(PathBuf::from("spec").join("preview1.witx"))
             .wrap_err("failed to read spec to string")?;
-        let doc = wazzi_spec::parsers::wazzi_preview1_old::Document::parse(Span::new(&spec))
+        let doc = wazzi_spec::parsers::wazzi_preview1::Document::parse(Span::new(&spec))
             .map_err(|_| err!("failed to parse spec"))?;
         let spec = doc.into_package().wrap_err("failed to process spec")?;
 
@@ -197,7 +197,7 @@ impl Fuzzer {
                     let spec = fs::read_to_string(PathBuf::from("spec").join("preview1.witx"))
                         .wrap_err("failed to read spec to string")?;
                     let doc =
-                        wazzi_spec::parsers::wazzi_preview1_old::Document::parse(Span::new(&spec))
+                        wazzi_spec::parsers::wazzi_preview1::Document::parse(Span::new(&spec))
                             .map_err(|_| err!("failed to parse spec"))?;
                     let spec = doc.into_package().wrap_err("failed to process spec")?;
 
@@ -234,27 +234,23 @@ impl Fuzzer {
                                         .wrap_err("failed to read action")?
                                         .unwrap();
 
-                                    if let Some(result) = func_spec.results.first() {
-                                        if !result.unspecified {
-                                            match (call_0.errno, call_1.errno) {
-                                                | (None, None) => {},
-                                                | (Some(errno_0), Some(errno_1))
-                                                    if errno_0 == 0 && errno_1 == 0
-                                                        || errno_0 != 0 && errno_1 != 0 => {},
-                                                | _ => {
-                                                    tracing::warn!(
-                                                        runtime_a = runtime_0.name(),
-                                                        runtime_b = runtime_1.name(),
-                                                        runtime_a_errno = call_0.errno,
-                                                        runtime_b_errno = call_1.errno,
-                                                        "Errno diff found!"
-                                                    );
+                                    match (call_0.errno, call_1.errno) {
+                                        | (None, None) => {},
+                                        | (Some(errno_0), Some(errno_1))
+                                            if errno_0 == 0 && errno_1 == 0
+                                                || errno_0 != 0 && errno_1 != 0 => {},
+                                        | _ => {
+                                            tracing::warn!(
+                                                runtime_a = runtime_0.name(),
+                                                runtime_b = runtime_1.name(),
+                                                runtime_a_errno = call_0.errno,
+                                                runtime_b_errno = call_1.errno,
+                                                "Errno diff found!"
+                                            );
 
-                                                    cancel.store(true, Ordering::SeqCst);
-                                                    break 'outer;
-                                                },
-                                            }
-                                        }
+                                            cancel.store(true, Ordering::SeqCst);
+                                            break 'outer;
+                                        },
                                     }
 
                                     let runtime_0_walk = WalkDir::new(&runtime_0.base)
