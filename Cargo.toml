@@ -13,7 +13,7 @@ members = [
     "fuzzer",
     "runners",
     "spec",
-    "spec/evaluator",
+    "spec/constraint",
     "store",
     "strace",
     "tmin",
@@ -36,7 +36,7 @@ wazzi-fuzzer.path = "fuzzer"
 wazzi-runners.path = "runners"
 wazzi-snapshot.path = "snapshot"
 wazzi-spec.path = "spec"
-wazzi-spec-evaluator.path = "spec/evaluator"
+wazzi-spec-constraint.path = "spec/constraint"
 wazzi-store.path = "store"
 wazzi-wasi.path = "wasi"
 wazzi-wazi.path = "wazi"

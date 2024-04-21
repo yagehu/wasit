@@ -1784,15 +1784,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "wazzi-spec-evaluator"
+name = "wazzi-spec-constraint"
 version = "0.1.0"
 dependencies = [
- "arbitrary",
  "gcollections",
  "intervallum",
  "num-bigint",
  "num-traits",
- "rand",
 ]
 
 [[package]]

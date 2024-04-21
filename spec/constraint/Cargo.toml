@@ -1,5 +1,5 @@
 [package]
-name = "wazzi-spec-evaluator"
+name = "wazzi-spec-constraint"
 version = "0.1.0"
 edition.workspace = true
 publish.workspace = true
@@ -11,5 +11,3 @@ num-bigint = "0.4"
 num-traits = "*"
 
 [dev-dependencies]
-arbitrary.workspace = true
-rand.workspace = true
