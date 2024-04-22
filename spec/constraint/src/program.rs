@@ -15,7 +15,7 @@ use num_traits::Num;
 pub struct ConstraintSet(HashMap<TypeRef, IntervalSet<u64>>);
 
 impl ConstraintSet {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self(Default::default())
     }
 

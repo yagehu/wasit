@@ -212,6 +212,7 @@ pub struct Function {
     pub name:    String,
     pub params:  Vec<FunctionParam>,
     pub results: Vec<FunctionResult>,
+    pub spec:    Option<wazzi_spec_constraint::Program>,
 }
 
 impl Function {

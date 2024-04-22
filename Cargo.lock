@@ -1779,8 +1779,10 @@ dependencies = [
  "nom",
  "nom-supreme",
  "nom_locate",
+ "num-bigint",
  "petgraph",
  "thiserror",
+ "wazzi-spec-constraint",
 ]
 
 [[package]]
@@ -1862,6 +1864,7 @@ dependencies = [
  "arbitrary",
  "color-eyre",
  "eyre",
+ "gcollections",
  "serde",
  "serde_json",
  "tempfile",
@@ -1871,6 +1874,7 @@ dependencies = [
  "wazzi-executor-pb-rust",
  "wazzi-runners",
  "wazzi-spec",
+ "wazzi-spec-constraint",
  "wazzi-store",
  "wazzi-wasi-component-model",
 ]

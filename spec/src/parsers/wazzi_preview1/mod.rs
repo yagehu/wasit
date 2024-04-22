@@ -14,6 +14,7 @@ use nom_supreme::{
     multi::collect_separated_terminated,
     ParserExt,
 };
+use num_bigint::BigInt;
 
 use super::Span;
 use crate::{
@@ -233,6 +234,30 @@ impl<'a> Function<'a> {
                 .into_iter()
                 .map(|r| r.into_package(interface))
                 .collect::<Result<Vec<_>, _>>()?,
+            spec:    self
+                .annotations
+                .iter()
+                .find(|annot| {
+                    *annot.span.name == "wazzi"
+                        && matches!(
+                            annot.exprs.first(),
+                            Some(Expr::SExpr(exprs))
+                            if matches!(
+                                exprs.first(),
+                                Some(Expr::Keyword(span))
+                                if span.keyword == Keyword::Spec
+                            )
+                        )
+                })
+                .map(|annot| {
+                    let exprs = match annot.exprs.first().unwrap() {
+                        | Expr::SExpr(exprs) => exprs,
+                        | _ => panic!(),
+                    };
+                    let expr = exprs.get(1).unwrap();
+
+                    expr.to_owned().into_constraint()
+                }),
         })
     }
 }
@@ -814,6 +839,77 @@ impl<'a> Expr<'a> {
         .parse(input)?;
 
         Ok((input, expr))
+    }
+
+    fn into_constraint(self) -> wazzi_spec_constraint::Program {
+        fn into_unspecified(e: Expr) -> wazzi_spec_constraint::program::Unspecified {
+            let exprs = match e {
+                | Expr::SExpr(exprs) => exprs,
+                | _ => panic!(),
+            };
+            let exprs = match exprs[1].clone() {
+                | Expr::SExpr(exprs) => exprs,
+                | _ => panic!(),
+            };
+            let exprs = match exprs[1].clone() {
+                | Expr::SExpr(exprs) => exprs,
+                | _ => panic!(),
+            };
+            let name = match exprs[1].clone() {
+                | Expr::SymbolicIdx(s) => s.name().to_owned(),
+                | _ => panic!("{:?}", exprs[1]),
+            };
+
+            wazzi_spec_constraint::program::Unspecified {
+                tref: wazzi_spec_constraint::program::TypeRef::Result { name },
+            }
+        }
+
+        fn into_expr(e: Expr) -> wazzi_spec_constraint::program::Expr {
+            match e {
+                | Expr::SymbolicIdx(_) => todo!(),
+                | Expr::Keyword(_) => todo!(),
+                | Expr::NumLit(_) => todo!(),
+                | Expr::SExpr(exprs) => {
+                    match exprs.first().unwrap() {
+                        | Expr::Keyword(span) => match span.keyword {
+                            | Keyword::I64Const => wazzi_spec_constraint::program::Expr::Number(
+                                BigInt::from(match &exprs[1] {
+                                    | Expr::NumLit(num) => num.0.parse::<u64>().unwrap(),
+                                    | _ => panic!(),
+                                }),
+                            ),
+                            | Keyword::I64GtU => wazzi_spec_constraint::program::Expr::U64Gt(
+                                Box::new(wazzi_spec_constraint::program::U64Gt {
+                                    lhs: into_expr(exprs[1].clone()),
+                                    rhs: into_expr(exprs[2].clone()),
+                                }),
+                            ),
+                            | Keyword::If => wazzi_spec_constraint::program::Expr::If(Box::new(
+                                wazzi_spec_constraint::program::If {
+                                    cond: into_expr(exprs[1].clone()),
+                                    then: into_unspecified(exprs[2].clone()),
+                                },
+                            )),
+                            | Keyword::Param => wazzi_spec_constraint::program::Expr::TypeRef(
+                                wazzi_spec_constraint::program::TypeRef::Param {
+                                    name: match &exprs[1] {
+                                        | Expr::SymbolicIdx(s) => s.name().to_owned(),
+                                        | _ => panic!(),
+                                    },
+                                },
+                            ),
+                            | _ => panic!("{:?}", span),
+                        },
+                        | _ => panic!(),
+                    }
+                },
+            }
+        }
+
+        wazzi_spec_constraint::Program {
+            expr: into_expr(self),
+        }
     }
 }
 

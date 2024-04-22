@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use arbitrary::Unstructured;
 use eyre::ContextCompat;
+use gcollections::ops::{Bounded as _, Cardinality as _};
 use serde::{Deserialize, Serialize};
 use wazzi_spec::package::{Defvaltype, Interface, Typeidx, TypeidxBorrow, Valtype};
 use wazzi_wasi_component_model::value::{
@@ -156,31 +157,60 @@ impl ResourceContext {
         u: &mut Unstructured,
         interface: &Interface,
         def: &Defvaltype,
+        cset: &wazzi_spec_constraint::program::ConstraintSet,
+        tref: Option<wazzi_spec_constraint::program::TypeRef>,
     ) -> Result<Value, eyre::Error> {
-        Ok(match def {
-            | Defvaltype::S64 => Value::S64(u.arbitrary()?),
-            | Defvaltype::U8 => Value::U8(u.arbitrary()?),
-            | Defvaltype::U16 => Value::U16(u.arbitrary()?),
-            | Defvaltype::U32 => Value::U32(u.arbitrary()?),
-            | Defvaltype::U64 => Value::U64(u.arbitrary()?),
-            | Defvaltype::List(list) => {
+        Ok(match (def, tref) {
+            | (Defvaltype::S64, _) => Value::S64(u.arbitrary()?),
+            | (Defvaltype::U8, _) => Value::U8(u.arbitrary()?),
+            | (Defvaltype::U16, _) => Value::U16(u.arbitrary()?),
+            | (Defvaltype::U32, _) => Value::U32(u.arbitrary()?),
+            | (Defvaltype::U64, Some(tref)) => {
+                let iset = cset.get::<u64>(&tref);
+                let size = iset.iter().map(|i| i.size()).sum::<u64>() as usize;
+                let mut idx = u.choose_index(size)?;
+                let mut value = 0;
+
+                for int in iset.iter() {
+                    let size = int.size() as usize;
+
+                    if size > idx {
+                        value = iset.lower() + idx as u64;
+                        break;
+                    }
+
+                    idx -= size;
+                }
+
+                Value::U64(value)
+            },
+            | (Defvaltype::U64, _) => Value::U64(u.arbitrary()?),
+            | (Defvaltype::List(list), _) => {
                 let len = u.int_in_range(0..=3)? as usize;
                 let mut items = Vec::with_capacity(len);
 
                 for _i in 0..len {
-                    items.push(self.arbitrary_value_from_valtype(u, interface, &list.element)?);
+                    items.push(self.arbitrary_value_from_valtype(
+                        u,
+                        interface,
+                        &list.element,
+                        cset,
+                        None,
+                    )?);
                 }
 
                 Value::List(items)
             },
-            | Defvaltype::Record(record) => Value::Record(RecordValue {
+            | (Defvaltype::Record(record), _) => Value::Record(RecordValue {
                 members: record
                     .members
                     .iter()
-                    .map(|member| self.arbitrary_value_from_valtype(u, interface, &member.ty))
+                    .map(|member| {
+                        self.arbitrary_value_from_valtype(u, interface, &member.ty, cset, None)
+                    })
                     .collect::<Result<_, _>>()?,
             }),
-            | Defvaltype::Variant(variant) => {
+            | (Defvaltype::Variant(variant), _) => {
                 let case_idx = u.int_in_range(0..=(variant.cases.len() - 1))?;
                 let case = variant.cases.get(case_idx).unwrap();
 
@@ -190,12 +220,14 @@ impl ResourceContext {
                     payload:   case
                         .payload
                         .as_ref()
-                        .map(|payload| self.arbitrary_value_from_valtype(u, interface, payload))
+                        .map(|payload| {
+                            self.arbitrary_value_from_valtype(u, interface, payload, cset, None)
+                        })
                         .transpose()?,
                 }))
             },
-            | Defvaltype::Handle => Value::Handle(u.arbitrary()?),
-            | Defvaltype::Flags(flags) => Value::Flags(FlagsValue {
+            | (Defvaltype::Handle, _) => Value::Handle(u.arbitrary()?),
+            | (Defvaltype::Flags(flags), _) => Value::Flags(FlagsValue {
                 members: flags
                     .members
                     .iter()
@@ -207,9 +239,9 @@ impl ResourceContext {
                     })
                     .collect::<Result<_, _>>()?,
             }),
-            | Defvaltype::Tuple(_) => todo!(),
-            | Defvaltype::Result(_) => todo!(),
-            | Defvaltype::String => {
+            | (Defvaltype::Tuple(_), _) => todo!(),
+            | (Defvaltype::Result(_), _) => todo!(),
+            | (Defvaltype::String, _) => {
                 let len = u.int_in_range(0..=3)? as usize;
                 let mut bytes = vec![0; len];
 
@@ -225,6 +257,8 @@ impl ResourceContext {
         u: &mut Unstructured,
         interface: &Interface,
         resource_name: &str,
+        cset: &wazzi_spec_constraint::program::ConstraintSet,
+        tref: Option<wazzi_spec_constraint::program::TypeRef>,
     ) -> Result<ValueMeta, eyre::Error> {
         let resource = interface
             .resource_by_name(TypeidxBorrow::Symbolic(resource_name))
@@ -237,7 +271,7 @@ impl ResourceContext {
 
                 if randomly_generate {
                     return Ok(ValueMeta {
-                        value:    self.arbitrary_value(u, interface, &resource.def)?,
+                        value:    self.arbitrary_value(u, interface, &resource.def, cset, tref)?,
                         resource: None,
                     });
                 }
@@ -253,7 +287,7 @@ impl ResourceContext {
                 })
             },
             | None => Ok(ValueMeta {
-                value:    self.arbitrary_value(u, interface, &resource.def)?,
+                value:    self.arbitrary_value(u, interface, &resource.def, cset, tref)?,
                 resource: None,
             }),
         }
@@ -264,14 +298,18 @@ impl ResourceContext {
         u: &mut Unstructured,
         interface: &Interface,
         valtype: &Valtype,
+        cset: &wazzi_spec_constraint::program::ConstraintSet,
+        tref: Option<wazzi_spec_constraint::program::TypeRef>,
     ) -> Result<ValueMeta, eyre::Error> {
         match valtype {
             | Valtype::Typeidx(typeidx) => match typeidx {
                 | Typeidx::Numeric(_) => todo!(),
-                | Typeidx::Symbolic(name) => self.arbitrary_resource_value(u, interface, name),
+                | Typeidx::Symbolic(name) => {
+                    self.arbitrary_resource_value(u, interface, name, cset, tref)
+                },
             },
             | Valtype::Defvaltype(def) => Ok(ValueMeta {
-                value:    self.arbitrary_value(u, interface, def)?,
+                value:    self.arbitrary_value(u, interface, def, cset, tref)?,
                 resource: None,
             }),
         }

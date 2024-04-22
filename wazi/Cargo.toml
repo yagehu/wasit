@@ -12,11 +12,13 @@ harness = false
 wazzi-executor.workspace = true
 wazzi-executor-pb-rust.workspace = true
 wazzi-spec.workspace = true
+wazzi-spec-constraint.workspace = true
 wazzi-store.workspace = true
 wazzi-wasi-component-model.workspace = true
 
 arbitrary.workspace = true
 eyre.workspace = true
+gcollections.workspace = true
 serde.workspace = true
 tracing.workspace = true
 

@@ -206,11 +206,23 @@ impl Prog {
         let result_valtypes = function.unpack_expected_result();
         let mut params = Vec::with_capacity(function.params.len());
         let mut results = Vec::with_capacity(result_valtypes.len());
+        let cset = match &function.spec {
+            | Some(prog) => wazzi_spec_constraint::evaluate(prog),
+            | None => wazzi_spec_constraint::program::ConstraintSet::new(),
+        };
 
         for param_type in &function.params {
             let param = self
                 .resource_ctx
-                .arbitrary_value_from_valtype(u, interface, &param_type.valtype)
+                .arbitrary_value_from_valtype(
+                    u,
+                    interface,
+                    &param_type.valtype,
+                    &cset,
+                    Some(wazzi_spec_constraint::program::TypeRef::Param {
+                        name: param_type.name.clone(),
+                    }),
+                )
                 .wrap_err("failed to get arbitrary param value")?;
 
             params.push(param);

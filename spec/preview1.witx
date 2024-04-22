@@ -279,7 +279,7 @@
     (param $offset $filesize)
     (result $error (expected $size (error $errno)))
     (@wazzi (spec
-      (if (i64.gt_u (param $offset) (i64.const 10451652599764211284))
+      (if (i64.gt_u (param $offset) (i64.const 17592186040320))
         (then (unspecified (result $error)))
       )
     ))

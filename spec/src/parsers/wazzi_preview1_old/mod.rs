@@ -237,6 +237,7 @@ impl<'a> Func<'a> {
                 .into_iter()
                 .map(|r| r.into_package(interface))
                 .collect::<Result<Vec<_>, _>>()?,
+            spec:    None,
         })
     }
 }
