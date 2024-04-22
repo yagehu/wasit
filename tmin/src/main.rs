@@ -133,7 +133,7 @@ fn main() -> Result<(), eyre::Error> {
     }
 
     let spec_str = fs::read_to_string("spec/preview1.witx").wrap_err("failed to read spec file")?;
-    let spec = wazzi_spec::parsers::wazzi_preview1_old::Document::parse(Span::new(&spec_str))
+    let spec = wazzi_spec::parsers::wazzi_preview1::Document::parse(Span::new(&spec_str))
         .unwrap()
         .into_package()
         .wrap_err("failed to process spec")?;
