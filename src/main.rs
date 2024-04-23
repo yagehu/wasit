@@ -1,6 +1,6 @@
 use std::{
     fs,
-    io::{self, stderr},
+    io,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -12,7 +12,7 @@ use tracing_subscriber::layer::SubscriberExt as _;
 use wazzi_fuzzer::{Fuzzer, Runtime};
 use wazzi_runners::{Node, Wamr, Wasmedge, Wasmer, Wasmtime};
 use wazzi_store::FuzzStore;
-use wazzi_wazi::seed::Seed;
+use wazzi_wasi::seed::Seed;
 
 #[derive(Parser, Debug, Clone)]
 struct Cmd {

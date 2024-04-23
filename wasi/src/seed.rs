@@ -1,12 +1,20 @@
-use color_eyre::eyre::{self, Context, ContextCompat};
+use eyre::{self, ContextCompat};
 use serde::{Deserialize, Serialize};
 use wazzi_executor::RunningExecutor;
-
-use crate::{
-    prog::{self, Prog},
-    resource_ctx::ResourceContext,
-    store::ExecutionStore,
+use wazzi_spec::package::{Defvaltype, Interface, Package, Typeidx, TypeidxBorrow, Valtype};
+use wazzi_store::RuntimeStore;
+use wazzi_wasi_component_model::value::{
+    FlagsMember,
+    FlagsValue as WasiFlagsValue,
+    RecordValue as WasiRecordValue,
+    ResourceMeta,
+    StringValue,
+    Value as WasiValue,
+    ValueMeta,
+    VariantValue as WasiVariantValue,
 };
+
+use crate::{prog::Prog, resource_ctx::ResourceContext};
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 #[serde(deny_unknown_fields)]
@@ -18,33 +26,33 @@ pub struct Seed {
 impl Seed {
     pub fn execute(
         self,
-        spec: &witx::Document,
-        store: ExecutionStore,
+        spec: &Package,
         executor: RunningExecutor,
+        store: RuntimeStore,
     ) -> Result<Prog, eyre::Error> {
         let base_dir_fd = executor.base_dir_fd();
-        let mut prog = Prog::new(executor, store).wrap_err("failed to init prog")?;
-        let module_spec = spec
-            .module(&witx::Id::new("wasi_snapshot_preview1"))
-            .unwrap();
+        let mut prog = Prog::new(executor, store);
+        let interface = spec
+            .interface(TypeidxBorrow::Symbolic("wasi_snapshot_preview1"))
+            .wrap_err("interface wasi_snapshot_preview1 not found")?;
 
         if self.mount_base_dir {
-            prog.resource_ctx_mut().register_resource(
-                "fd_base",
-                prog::Value::Handle(base_dir_fd),
-                0,
-            );
+            prog.resource_ctx_mut()
+                .register_resource("fd_base", WasiValue::Handle(base_dir_fd), 0);
         }
 
         for action in self.actions {
             match action {
                 | Action::Decl(decl) => {
-                    let resource = spec
-                        .resource(&witx::Id::new(&decl.resource_type))
-                        .wrap_err("resource not found in spec")?;
-                    let value = decl
-                        .value
-                        .into_prog_value(resource.tref.type_().as_ref(), prog.resource_ctx());
+                    let resource_type = interface
+                        .get_resource_type(TypeidxBorrow::Symbolic(&decl.resource_type))
+                        .wrap_err(format!(
+                            "resource {} not found in interface",
+                            &decl.resource_type
+                        ))?;
+                    let value =
+                        decl.value
+                            .into_wasi_value(interface, prog.resource_ctx(), resource_type);
 
                     prog.resource_ctx_mut().register_resource(
                         &decl.resource_type,
@@ -53,48 +61,33 @@ impl Seed {
                     );
                 },
                 | Action::Call(call) => {
-                    let func_spec = module_spec
-                        .func(&witx::Id::new(&call.func))
-                        .wrap_err("func not found")?;
-                    let result_trefs = func_spec.unpack_expected_result();
+                    let func_spec = interface
+                        .function(&call.func)
+                        .wrap_err(format!("func {} not found", call.func))?;
+                    let result_valtypes = func_spec.unpack_expected_result();
                     let params = func_spec
                         .params
                         .iter()
                         .zip(call.params)
-                        .map(|(param_type, rv)| {
-                            rv.into_prog_value(
-                                param_type.tref.type_().as_ref(),
+                        .map(|(param_type, rv)| -> Result<_, eyre::Error> {
+                            Ok(rv.into_prog_value(
+                                interface,
                                 prog.resource_ctx(),
-                            )
+                                &param_type.valtype,
+                            ))
                         })
-                        .collect();
+                        .collect::<Result<Vec<_>, _>>()?;
 
                     prog.call(
+                        interface,
                         &func_spec,
                         params,
-                        result_trefs
+                        result_valtypes
                             .iter()
-                            .map(prog::Value::zero_value_from_spec)
+                            .map(|valtype| ValueMeta::zero_value_from_spec(interface, &valtype))
                             .collect(),
+                        Some(call.results.as_slice()),
                     )?;
-
-                    let call_result = prog.store().recorder().last()?.unwrap().read_result()?;
-
-                    for ((result_tref, result), result_spec) in result_trefs
-                        .iter()
-                        .zip(call_result.results)
-                        .zip(call.results)
-                    {
-                        if let ResultSpec::Resource(id) = result_spec {
-                            prog::register_resource_rec(
-                                prog.resource_ctx_mut(),
-                                spec,
-                                result_tref,
-                                result,
-                                Some(id),
-                            )
-                        }
-                    }
                 },
             }
         }
@@ -145,10 +138,31 @@ pub enum ResourceOrValue {
 }
 
 impl ResourceOrValue {
-    fn into_prog_value(self, ty: &witx::Type, resource_ctx: &ResourceContext) -> prog::Value {
-        match self {
-            | Self::Resource(id) => resource_ctx.get_resource(id).unwrap().value,
-            | Self::Value(value) => value.into_prog_value(ty, resource_ctx),
+    fn into_prog_value(
+        self,
+        interface: &Interface,
+        resource_ctx: &ResourceContext,
+        valtype: &Valtype,
+    ) -> ValueMeta {
+        match (self, valtype) {
+            | (Self::Resource(id), Valtype::Typeidx(Typeidx::Symbolic(resource_name))) => {
+                ValueMeta {
+                    value:    resource_ctx.get_resource(id).unwrap().value,
+                    resource: Some(ResourceMeta {
+                        id,
+                        name: resource_name.to_owned(),
+                    }),
+                }
+            },
+            | (Self::Value(value), _) => ValueMeta {
+                value:    value.into_wasi_value(
+                    interface,
+                    resource_ctx,
+                    &interface.resolve_valtype(valtype).unwrap(),
+                ),
+                resource: None,
+            },
+            | _ => unreachable!(),
         }
     }
 }
@@ -156,187 +170,92 @@ impl ResourceOrValue {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum Value {
-    Builtin(BuiltinValue),
-    String(StringValue),
-    Bitflags(BitflagsValue),
+    S64(i64),
+    U8(u8),
+    U64(u64),
+
+    Handle(u32),
+
+    // Container types
     Record(RecordValue),
-    List(ListValue),
-    ConstPointer(ListValue),
-    Pointer(PointerValue),
     Variant(VariantValue),
+    List(Vec<ResourceOrValue>),
+
+    // Specialized types
+    Flags(Vec<FlagsMember>),
+    String(StringValue),
 }
 
 impl Value {
-    fn into_prog_value(self, ty: &witx::Type, resource_ctx: &ResourceContext) -> prog::Value {
+    fn into_wasi_value(
+        self,
+        interface: &Interface,
+        resource_ctx: &ResourceContext,
+        ty: &Defvaltype,
+    ) -> WasiValue {
         match (ty, self) {
-            | (_, Value::Builtin(builtin)) => prog::Value::Builtin(builtin),
-            | (_, Value::String(string)) => prog::Value::String(string),
-            | (witx::Type::Record(record_type), Value::Bitflags(bitflags))
-                if record_type.bitflags_repr().is_some() =>
-            {
-                prog::Value::Bitflags(bitflags)
-            },
-            | (witx::Type::Record(record_type), Value::Record(record)) => {
-                prog::Value::Record(prog::RecordValue {
+            | (_, Value::S64(i)) => WasiValue::S64(i),
+            | (_, Value::U8(i)) => WasiValue::U8(i),
+            | (_, Value::U64(i)) => WasiValue::U64(i),
+            | (_, Value::Handle(handle)) => WasiValue::Handle(handle),
+            | (Defvaltype::Record(record_type), Value::Record(record)) => {
+                WasiValue::Record(WasiRecordValue {
                     members: record_type
                         .members
                         .iter()
                         .zip(record.0)
-                        .map(|(member_type, member)| prog::RecordMemberValue {
-                            name:  member.name,
-                            value: match member.value {
-                                | ResourceOrValue::Resource(id) => {
-                                    resource_ctx.get_resource(id).unwrap().value
-                                },
-                                | ResourceOrValue::Value(value) => value.into_prog_value(
-                                    member_type.tref.type_().as_ref(),
-                                    resource_ctx,
-                                ),
-                            },
+                        .map(|(member_type, member)| {
+                            member
+                                .value
+                                .into_prog_value(interface, resource_ctx, &member_type.ty)
                         })
                         .collect(),
                 })
             },
-            | (witx::Type::List(item_tref), Value::List(list)) => prog::Value::List(
-                list.0
-                    .into_iter()
-                    .map(|item| item.into_prog_value(item_tref.type_().as_ref(), resource_ctx))
-                    .collect(),
-            ),
-            | (witx::Type::ConstPointer(tref), Value::ConstPointer(list)) => {
-                prog::Value::ConstPointer(
-                    list.0
-                        .into_iter()
-                        .map(|item| item.into_prog_value(tref.type_().as_ref(), resource_ctx))
-                        .collect(),
-                )
-            },
-            | (witx::Type::Pointer(tref), Value::Pointer(pointer)) => {
-                let value = match pointer.default_value {
-                    | Some(value) => value.into_prog_value(ty, resource_ctx),
-                    | None => prog::Value::zero_value_from_spec(tref),
-                };
-                let resource = resource_ctx
-                    .get_resource(pointer.alloc_from_resource)
-                    .unwrap();
-                let len = match resource.value {
-                    | prog::Value::Builtin(BuiltinValue::U32(i)) => i,
-                    | _ => panic!(),
-                };
-
-                prog::Value::Pointer(vec![value; len as usize])
-            },
-            | (witx::Type::Variant(variant_type), Value::Variant(variant)) => {
-                let (case_idx, case) = variant_type
+            | (Defvaltype::Variant(variant_type), Value::Variant(variant)) => {
+                let (case_idx, case_type) = variant_type
                     .cases
                     .iter()
                     .enumerate()
-                    .find(|(_i, case)| case.name.as_str() == variant.name)
+                    .find(|(_i, case)| case.name == variant.name)
                     .unwrap();
 
-                prog::Value::Variant(prog::VariantValue {
-                    idx:     case_idx as u64,
-                    name:    variant.name,
-                    payload: case
-                        .tref
-                        .as_ref()
-                        .zip(variant.payload)
-                        .map(|(tref, payload)| {
-                            Box::new(payload.into_prog_value(tref.type_().as_ref(), resource_ctx))
-                        }),
-                })
+                WasiValue::Variant(Box::new(WasiVariantValue {
+                    case_idx:  case_idx as u32,
+                    case_name: variant.name,
+                    payload:   variant.payload.map(|payload| {
+                        payload.into_prog_value(
+                            interface,
+                            resource_ctx,
+                            case_type.payload.as_ref().unwrap(),
+                        )
+                    }),
+                }))
             },
-            | (_, Value::Bitflags(_))
-            | (_, Value::Record(_))
-            | (_, Value::List(_))
-            | (_, Value::Pointer(_))
-            | (_, Value::ConstPointer(_))
-            | (_, Value::Variant(_)) => panic!(),
-        }
-    }
-}
+            | (Defvaltype::List(list_type), Value::List(elements)) => {
+                let mut list = Vec::with_capacity(elements.len());
 
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
-#[serde(rename_all = "snake_case")]
-pub enum BuiltinValue {
-    Char(char),
-    U8(u8),
-    U32(u32),
-    U64(u64),
-    S64(i64),
-}
+                for element in elements {
+                    let item = element.into_prog_value(interface, resource_ctx, &list_type.element);
 
-impl From<BuiltinValue> for executor_pb::value::Builtin {
-    fn from(x: BuiltinValue) -> Self {
-        let which = match x {
-            | BuiltinValue::Char(c) => executor_pb::value::builtin::Which::Char(c as u32),
-            | BuiltinValue::U8(i) => executor_pb::value::builtin::Which::U8(i.into()),
-            | BuiltinValue::U32(i) => executor_pb::value::builtin::Which::U32(i),
-            | BuiltinValue::U64(i) => executor_pb::value::builtin::Which::U64(i),
-            | BuiltinValue::S64(i) => executor_pb::value::builtin::Which::S64(i),
-        };
+                    list.push(item);
+                }
 
-        Self {
-            which:          Some(which),
-            special_fields: Default::default(),
-        }
-    }
-}
-
-impl From<executor_pb::value::Builtin> for BuiltinValue {
-    fn from(x: executor_pb::value::Builtin) -> Self {
-        match x.which.unwrap() {
-            | executor_pb::value::builtin::Which::Char(i) => Self::Char(char::from_u32(i).unwrap()),
-            | executor_pb::value::builtin::Which::U8(i) => Self::U8(i as u8),
-            | executor_pb::value::builtin::Which::U32(i) => Self::U32(i),
-            | executor_pb::value::builtin::Which::U64(i) => Self::U64(i),
-            | executor_pb::value::builtin::Which::S64(i) => Self::S64(i),
-            | _ => panic!(),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
-#[serde(rename_all = "snake_case")]
-pub enum StringValue {
-    Utf8(String),
-    Bytes(Vec<u8>),
-}
-
-impl From<StringValue> for Vec<u8> {
-    fn from(x: StringValue) -> Self {
-        match x {
-            | StringValue::Utf8(string) => string.into_bytes(),
-            | StringValue::Bytes(bytes) => bytes,
-        }
-    }
-}
-
-impl From<Vec<u8>> for StringValue {
-    fn from(x: Vec<u8>) -> Self {
-        match String::from_utf8(x) {
-            | Ok(s) => Self::Utf8(s),
-            | Err(err) => Self::Bytes(err.into_bytes()),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
-#[serde(deny_unknown_fields)]
-pub struct BitflagsValue(pub Vec<BitflagsMemberValue>);
-
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
-#[serde(deny_unknown_fields)]
-pub struct BitflagsMemberValue {
-    pub name:  String,
-    pub value: bool,
-}
-
-impl From<executor_pb::value::bitflags::Member> for BitflagsMemberValue {
-    fn from(x: executor_pb::value::bitflags::Member) -> Self {
-        Self {
-            name:  x.name,
-            value: x.value,
+                WasiValue::List(list)
+            },
+            | (_, Value::Flags(members)) => WasiValue::Flags(WasiFlagsValue {
+                members: members
+                    .into_iter()
+                    .map(|member| FlagsMember {
+                        name:  member.name,
+                        value: member.value,
+                    })
+                    .collect(),
+            }),
+            | (_, Value::String(string)) => WasiValue::String(string),
+            | (_, Value::Record(_)) | (_, Value::Variant(_)) | (_, Value::List(_)) => {
+                panic!("{:?}", ty)
+            },
         }
     }
 }

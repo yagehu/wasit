@@ -1,9 +1,6 @@
 use std::fs;
 
-use wazzi_spec::{
-    package::{Defvaltype, TypeidxBorrow},
-    parsers::{wazzi_preview1, Span},
-};
+use wazzi_spec::parsers::{wazzi_preview1, Span};
 
 #[test]
 fn preview1() {
@@ -17,19 +14,5 @@ fn preview1() {
             panic!();
         },
     };
-    let spec = doc.into_package().unwrap();
-    // let interface = spec
-    //     .interface(TypeidxBorrow::Symbolic("wasi_snapshot_preview1"))
-    //     .unwrap();
-    // let fd_type = interface
-    //     .get_resource_type(TypeidxBorrow::Symbolic("fd"))
-    //     .unwrap();
-
-    // assert_eq!(fd_type, &Defvaltype::Handle);
-
-    // let path_open = interface.function("path_open").unwrap();
-
-    // assert_eq!(path_open.name, "path_open");
-    // assert_eq!(path_open.params.len(), 7);
-    // assert_eq!(path_open.results.len(), 1);
+    let _spec = doc.into_package().unwrap();
 }

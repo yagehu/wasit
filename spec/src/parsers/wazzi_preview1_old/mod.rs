@@ -1012,7 +1012,7 @@ mod tests {
             },
             Case {
                 input:  include_str!("testdata/06.witx"),
-                assert: Box::new(|doc| {}),
+                assert: Box::new(|_doc| {}),
             },
         ];
 

@@ -35,7 +35,6 @@ impl FuzzStore {
 
 #[derive(Clone, Debug)]
 pub struct RunStore {
-    path:         PathBuf,
     data:         PathBuf,
     runtimes_dir: PathBuf,
     runtimes:     HashSet<String>,
@@ -55,7 +54,6 @@ impl RunStore {
         }
 
         Ok(Self {
-            path,
             data,
             runtimes_dir,
             runtimes,
@@ -72,7 +70,6 @@ impl RunStore {
         fs::create_dir(&runtimes_dir)?;
 
         Ok(Self {
-            path,
             data,
             runtimes_dir,
             runtimes: Default::default(),
@@ -110,9 +107,8 @@ pub struct RuntimeStore {
     pub path: PathBuf,
     pub base: PathBuf,
 
-    name:         String,
-    version_path: PathBuf,
-    trace:        TraceStore,
+    name:  String,
+    trace: TraceStore,
 }
 
 impl RuntimeStore {
@@ -128,14 +124,12 @@ impl RuntimeStore {
             .as_os_str()
             .to_string_lossy()
             .to_string();
-        let version_path = path.join("version");
         let trace = TraceStore::resume(&path.join("trace"))?;
 
         Ok(Self {
             path,
             base,
             name,
-            version_path,
             trace,
         })
     }
@@ -162,7 +156,6 @@ impl RuntimeStore {
             path,
             base,
             name,
-            version_path,
             trace,
         })
     }
@@ -231,8 +224,6 @@ impl TraceStore {
     }
 
     pub fn last_call(&self) -> Result<Option<ActionStore>, io::Error> {
-        let t = std::thread::current();
-
         if self.next == 0 {
             eprintln!("whoa: None");
             return Ok(None);

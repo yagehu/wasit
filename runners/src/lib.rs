@@ -2,7 +2,6 @@ use std::{
     ffi::OsString,
     fmt,
     fs,
-    io,
     path::{Path, PathBuf},
     process,
 };

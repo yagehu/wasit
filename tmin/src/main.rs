@@ -96,7 +96,7 @@ fn main() -> Result<(), eyre::Error> {
         for (j, param_spec) in func_spec.params.iter().enumerate() {
             let param = call.params.get(j).unwrap();
 
-            if let (Valtype::Typeidx(Typeidx::Symbolic(name)), Some(resource)) =
+            if let (Valtype::Typeidx(Typeidx::Symbolic(_name)), Some(resource)) =
                 (&param_spec.valtype, &param.resource)
             {
                 match param_spec.state_effect {
@@ -109,7 +109,7 @@ fn main() -> Result<(), eyre::Error> {
         for (j, result_valtype) in result_valtypes.iter().enumerate() {
             let result = call.results.get(j).unwrap();
 
-            if let (Valtype::Typeidx(Typeidx::Symbolic(name)), Some(resource)) =
+            if let (Valtype::Typeidx(Typeidx::Symbolic(_name)), Some(resource)) =
                 (&result_valtype, &result.resource)
             {
                 writes.insert(resource.id);

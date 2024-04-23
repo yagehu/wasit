@@ -9,7 +9,7 @@ wazzi-executor.workspace = true
 wazzi-runners.workspace = true
 wazzi-spec.workspace = true
 wazzi-store.workspace = true
-wazzi-wazi.workspace = true
+wazzi-wasi.workspace = true
 
 arbitrary.workspace = true
 color-eyre.workspace = true

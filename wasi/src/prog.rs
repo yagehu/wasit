@@ -1,16 +1,11 @@
-pub mod call;
-
-use std::{collections::HashSet, io};
-
 use arbitrary::Unstructured;
-use eyre::{self, Context};
-use serde::{Deserialize, Serialize};
-use tracing::{error, info};
+use eyre::{Context, ContextCompat};
 use wazzi_executor::RunningExecutor;
-use witx::Layout;
+use wazzi_spec::package::{Function, Interface, Package};
+use wazzi_store::{Call, RuntimeStore};
+use wazzi_wasi_component_model::value::ValueMeta;
 
-use self::call::CallResult;
-use crate::{resource_ctx::ResourceContext, seed, store::ExecutionStore};
+use crate::{resource_ctx::ResourceContext, seed::ResultSpec};
 
 fn pb_func(name: &str) -> executor_pb::WasiFunc {
     use executor_pb::WasiFunc::*;
@@ -58,42 +53,90 @@ fn pb_func(name: &str) -> executor_pb::WasiFunc {
 
 #[derive(Debug)]
 pub struct Prog {
-    store:        ExecutionStore,
     executor:     RunningExecutor,
     resource_ctx: ResourceContext,
+    store:        RuntimeStore,
 }
 
 impl Prog {
-    pub fn new(executor: RunningExecutor, store: ExecutionStore) -> Result<Self, io::Error> {
-        Ok(Self {
-            store,
+    pub fn new(executor: RunningExecutor, store: RuntimeStore) -> Self {
+        Self {
             executor,
             resource_ctx: ResourceContext::new(),
-        })
+            store,
+        }
+    }
+
+    pub fn executor(&self) -> &RunningExecutor {
+        &self.executor
+    }
+
+    pub fn resource_ctx_mut(&mut self) -> &mut ResourceContext {
+        &mut self.resource_ctx
+    }
+
+    pub fn resource_ctx(&mut self) -> &ResourceContext {
+        &self.resource_ctx
+    }
+
+    pub fn store(&self) -> &RuntimeStore {
+        &self.store
+    }
+
+    pub fn store_mut(&mut self) -> &mut RuntimeStore {
+        &mut self.store
     }
 
     pub fn call(
         &mut self,
-        func: &witx::InterfaceFunc,
-        params: Vec<Value>,
-        results: Vec<Value>,
+        interface: &Interface,
+        func: &Function,
+        params: Vec<ValueMeta>,
+        results: Vec<ValueMeta>,
+        result_specs: Option<&[ResultSpec]>,
     ) -> Result<(), eyre::Error> {
-        self.store.recorder_mut().begin_call()?;
+        tracing::debug!(
+            count = self.store.trace().count(),
+            func = func.name,
+            "Calling func."
+        );
 
-        let result_trefs = func.unpack_expected_result();
+        self.store
+            .trace_mut()
+            .begin_call(Call {
+                func:    func.name.clone(),
+                errno:   None,
+                params:  params.clone(),
+                results: results.clone(),
+            })
+            .wrap_err("failed to begin recording call")?;
+
+        let result_valtypes = func.unpack_expected_result();
         let response = self.executor.call(executor_pb::request::Call {
-            func:           protobuf::EnumOrUnknown::new(pb_func(func.name.as_str())),
+            func:           pb_func(func.name.as_str()).into(),
             params:         func
                 .params
                 .iter()
-                .zip(params)
-                .map(|(param, v)| v.into_pb_value(param.tref.type_().as_ref()))
-                .collect(),
-            results:        result_trefs
+                .zip(params.clone())
+                .map(|(param, v)| -> Result<_, eyre::Error> {
+                    let def = interface
+                        .resolve_valtype(&param.valtype)
+                        .wrap_err("failed to resolve valtype")?;
+
+                    Ok(v.into_pb(interface, &def))
+                })
+                .collect::<Result<_, _>>()?,
+            results:        result_valtypes
                 .iter()
-                .zip(results)
-                .map(|(result_tref, v)| v.into_pb_value(result_tref.type_().as_ref()))
-                .collect(),
+                .zip(results.clone())
+                .map(|(result_valtype, v)| -> Result<_, eyre::Error> {
+                    let def = interface
+                        .resolve_valtype(&result_valtype)
+                        .wrap_err("failed to resolve valtype")?;
+
+                    Ok(v.into_pb(interface, &def))
+                })
+                .collect::<Result<_, _>>()?,
             special_fields: Default::default(),
         })?;
         let errno = match response.errno_option.unwrap() {
@@ -101,24 +144,52 @@ impl Prog {
             | executor_pb::response::call::Errno_option::ErrnoNone(_) => None,
             | _ => panic!(),
         };
+        let mut results_after = response
+            .results
+            .iter()
+            .zip(result_valtypes.iter())
+            .zip(results.iter())
+            .map(|((result, result_valtype), before)| {
+                ValueMeta::from_pb(result.to_owned(), interface, result_valtype, before)
+            })
+            .collect::<Vec<_>>();
 
-        self.store.recorder_mut().end_call(CallResult {
-            func: func.name.as_str().to_owned(),
-            errno,
-            params: func
-                .params
-                .iter()
-                .zip(response.params)
-                .map(|(param, value)| Value::from_pb_value(value, param.tref.type_().as_ref()))
-                .collect(),
-            results: result_trefs
-                .iter()
-                .zip(response.results)
-                .map(|(result_tref, result)| {
-                    Value::from_pb_value(result, result_tref.type_().as_ref())
-                })
-                .collect(),
-        })?;
+        if errno.is_none() || errno.unwrap() == 0 {
+            for (i, (result, valtype)) in results_after
+                .iter_mut()
+                .zip(result_valtypes.iter())
+                .enumerate()
+            {
+                let id = match result_specs {
+                    | Some(result_specs) => match result_specs.get(i).unwrap() {
+                        | ResultSpec::Resource(id) => Some(*id),
+                        | ResultSpec::Ignore => continue,
+                    },
+                    | None => None,
+                };
+
+                self.resource_ctx
+                    .register_resource_rec(interface, valtype, result, id)?;
+            }
+        }
+
+        self.store
+            .trace_mut()
+            .end_call(Call {
+                func: func.name.clone(),
+                errno,
+                params: func
+                    .params
+                    .iter()
+                    .zip(response.params)
+                    .zip(params)
+                    .map(|((param_spec, param), before_param)| {
+                        ValueMeta::from_pb(param, interface, &param_spec.valtype, &before_param)
+                    })
+                    .collect(),
+                results: results_after,
+            })
+            .wrap_err("failed to end call")?;
 
         Ok(())
     }
@@ -126,523 +197,40 @@ impl Prog {
     pub fn call_arbitrary(
         &mut self,
         u: &mut Unstructured,
-        spec: &witx::Document,
+        spec: &Package,
     ) -> Result<(), eyre::Error> {
-        let funcs_to_skip = ["proc_raise", "sched_yield", "sock_recv", "sock_send"]
-            .into_iter()
-            .collect::<HashSet<_>>();
-        let module_spec = spec
-            .module(&witx::Id::new("wasi_snapshot_preview1"))
-            .unwrap();
-        let func_specs = module_spec
-            .funcs()
-            .filter(|f| !funcs_to_skip.contains(f.name.as_str()))
-            .collect::<Vec<_>>();
-        let func_spec = u.choose(&func_specs)?;
-        let result_trefs = func_spec.unpack_expected_result();
-        let mut params = Vec::with_capacity(func_spec.params.len());
-        let mut results = Vec::with_capacity(result_trefs.len());
-
-        info!(func = func_spec.name.as_str(), "Picked arbitrary func");
-
-        for (i, param) in func_spec.params.iter().enumerate() {
-            let next = func_spec.params.get(i + 1).map(|param| &param.tref);
-
-            params.push(
-                self.arbitrary_value_or_resource(u, spec, &param.tref, next)
-                    .wrap_err(format!("failed to choose arbitrary param {i}"))?,
-            );
-        }
-
-        for result_tref in &result_trefs {
-            results.push(Value::zero_value_from_spec(result_tref));
-        }
-
-        self.call(func_spec, params, results)
-            .wrap_err(format!("failed to call func {}", func_spec.name.as_str()))?;
-
-        Ok(())
-    }
-
-    pub fn resource_ctx(&mut self) -> &ResourceContext {
-        &self.resource_ctx
-    }
-
-    pub fn resource_ctx_mut(&mut self) -> &mut ResourceContext {
-        &mut self.resource_ctx
-    }
-
-    pub fn into_store(self) -> ExecutionStore {
-        self.store
-    }
-
-    pub fn store(&self) -> &ExecutionStore {
-        &self.store
-    }
-
-    pub fn executor(&self) -> &RunningExecutor {
-        &self.executor
-    }
-
-    fn arbitrary_value_or_resource(
-        &self,
-        u: &mut Unstructured,
-        spec: &witx::Document,
-        tref: &witx::TypeRef,
-        next: Option<&witx::TypeRef>,
-    ) -> Result<Value, eyre::Error> {
-        match tref.resource(spec) {
-            | Some(resource) => {
-                // First, handle the special case that the structurally next value can allocate the
-                // current value.  If so, resolve the next value first.
-
-                let candidate_resource_types = spec
-                    .resource_fulfilled_by_transitive(&resource.name)
-                    .unwrap();
-                let candidate_resource_type_set = candidate_resource_types
-                    .iter()
-                    .map(|resource| resource.0.name.as_str())
-                    .collect::<HashSet<_>>();
-                let mut populated_candidates = Vec::new();
-
-                for (resource_type, resources) in self.resource_ctx.iter_by_type() {
-                    if !candidate_resource_type_set.contains(resource_type.as_str()) {
-                        continue;
-                    }
-
-                    if resources.is_empty() && !resource_type.ends_with("_maybe") {
-                        continue;
-                    }
-
-                    populated_candidates.push((resource_type, resources));
-                }
-
-                if populated_candidates.is_empty() {
-                    return self.arbitrary_value(u, spec, tref);
-                }
-
-                let &(_resource_type, resources) = u.choose(&populated_candidates)?;
-                let resource_pool = resources.iter().cloned().collect::<Vec<_>>();
-                let resource_id = *u.choose(&resource_pool)?;
-                let resource = self.resource_ctx.get_resource(resource_id).unwrap();
-
-                Ok(resource.value)
-            },
-            | None => self.arbitrary_value(u, spec, tref),
-        }
-    }
-
-    fn arbitrary_value(
-        &self,
-        u: &mut Unstructured,
-        spec: &witx::Document,
-        tref: &witx::TypeRef,
-    ) -> Result<Value, eyre::Error> {
-        Ok(match tref.type_().as_ref() {
-            | witx::Type::Record(record) if record.bitflags_repr().is_some() => {
-                let mut members = Vec::with_capacity(record.members.len());
-
-                for member in &record.members {
-                    members.push(seed::BitflagsMemberValue {
-                        name:  member.name.as_str().to_owned(),
-                        value: u.arbitrary()?,
-                    });
-                }
-
-                Value::Bitflags(seed::BitflagsValue(members))
-            },
-            | witx::Type::Record(_record) => todo!(),
-            | witx::Type::Variant(variant) => {
-                let &(idx, case) =
-                    u.choose(&variant.cases.iter().enumerate().collect::<Vec<_>>())?;
-
-                Value::Variant(VariantValue {
-                    idx:     idx as u64,
-                    name:    case.name.as_str().to_owned(),
-                    payload: case
-                        .tref
-                        .as_ref()
-                        .map(|tref| self.arbitrary_value_or_resource(u, spec, tref, None))
-                        .transpose()?
-                        .map(|value| Box::new(value)),
-                })
-            },
-            | witx::Type::Handle(_) => todo!(),
-            | witx::Type::List(tref) => {
-                // Pick a length.
-                let len = u.choose_index(4)?;
-                let mut values = Vec::with_capacity(len);
-
-                for _i in 0..len {
-                    values.push(self.arbitrary_value_or_resource(u, spec, tref, None)?);
-                }
-
-                Value::List(values)
-            },
-            | witx::Type::Pointer(tref) => todo!(),
-            | witx::Type::ConstPointer(_) => todo!(),
-            | witx::Type::Builtin(builtin) => Value::Builtin(match builtin {
-                | witx::BuiltinType::Char => seed::BuiltinValue::Char(u.arbitrary()?),
-                | witx::BuiltinType::U8 { .. } => seed::BuiltinValue::U8(u.arbitrary()?),
-                | witx::BuiltinType::U16 => todo!(),
-                | witx::BuiltinType::U32 { .. } => seed::BuiltinValue::U32(u.arbitrary()?),
-                | witx::BuiltinType::U64 => seed::BuiltinValue::U64(u.arbitrary()?),
-                | witx::BuiltinType::S8 => todo!(),
-                | witx::BuiltinType::S16 => todo!(),
-                | witx::BuiltinType::S32 => todo!(),
-                | witx::BuiltinType::S64 => seed::BuiltinValue::S64(u.arbitrary()?),
-                | witx::BuiltinType::F32 => unimplemented!(),
-                | witx::BuiltinType::F64 => unimplemented!(),
-            }),
-        })
-    }
-}
-
-#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
-#[serde(rename_all = "snake_case")]
-pub enum Value {
-    Bitflags(seed::BitflagsValue),
-    Record(RecordValue),
-    Variant(VariantValue),
-    Handle(u32),
-    List(Vec<Value>),
-    String(seed::StringValue),
-    Pointer(Vec<Value>),
-    ConstPointer(Vec<Value>),
-    Builtin(seed::BuiltinValue),
-}
-
-impl Value {
-    pub fn zero_value_from_spec(tref: &witx::TypeRef) -> Self {
-        match tref.type_().as_ref() {
-            | witx::Type::Record(record) if record.bitflags_repr().is_some() => {
-                Self::Bitflags(seed::BitflagsValue(
-                    record
-                        .members
-                        .iter()
-                        .map(|member| seed::BitflagsMemberValue {
-                            name:  member.name.as_str().to_owned(),
-                            value: false,
-                        })
-                        .collect(),
-                ))
-            },
-            | witx::Type::Record(record) => Self::Record(RecordValue {
-                members: record
-                    .members
-                    .iter()
-                    .map(|member| RecordMemberValue {
-                        name:  member.name.as_str().to_owned(),
-                        value: Value::zero_value_from_spec(&member.tref),
-                    })
-                    .collect(),
-            }),
-            | witx::Type::Variant(variant) => Self::Variant(VariantValue {
-                idx:     0,
-                name:    variant.cases[0].name.as_str().to_owned(),
-                payload: variant.cases[0]
-                    .tref
-                    .as_ref()
-                    .map(|tref| Box::new(Value::zero_value_from_spec(tref))),
-            }),
-            | witx::Type::Handle(_) => Self::Handle(0),
-            | witx::Type::List(_) => todo!(),
-            | witx::Type::Pointer(_tref) => Self::Pointer(vec![]),
-            | witx::Type::ConstPointer(_) => todo!(),
-            | witx::Type::Builtin(builtin) => Self::Builtin(match builtin {
-                | witx::BuiltinType::Char => todo!(),
-                | witx::BuiltinType::U8 { .. } => seed::BuiltinValue::U8(0),
-                | witx::BuiltinType::U16 => todo!(),
-                | witx::BuiltinType::U32 { .. } => seed::BuiltinValue::U32(0),
-                | witx::BuiltinType::U64 => seed::BuiltinValue::U64(0),
-                | witx::BuiltinType::S8 => todo!(),
-                | witx::BuiltinType::S16 => todo!(),
-                | witx::BuiltinType::S32 => todo!(),
-                | witx::BuiltinType::S64 => seed::BuiltinValue::S64(0),
-                | witx::BuiltinType::F32 => todo!(),
-                | witx::BuiltinType::F64 => todo!(),
-            }),
-        }
-    }
-
-    pub fn into_pb_value(self, ty: &witx::Type) -> executor_pb::Value {
-        let which = match (ty, self) {
-            | (witx::Type::Record(record_type), Value::Bitflags(bitflags))
-                if record_type.bitflags_repr().is_some() =>
-            {
-                executor_pb::value::Which::Bitflags(executor_pb::value::Bitflags {
-                    repr:           match record_type.bitflags_repr().unwrap() {
-                        | witx::IntRepr::U8 => executor_pb::IntRepr::U8,
-                        | witx::IntRepr::U16 => executor_pb::IntRepr::U16,
-                        | witx::IntRepr::U32 => executor_pb::IntRepr::U32,
-                        | witx::IntRepr::U64 => executor_pb::IntRepr::U64,
-                    }
-                    .into(),
-                    members:        bitflags
-                        .0
-                        .into_iter()
-                        .map(|member| executor_pb::value::bitflags::Member {
-                            name:           member.name,
-                            value:          member.value,
-                            special_fields: Default::default(),
-                        })
-                        .collect(),
-                    special_fields: Default::default(),
-                })
-            },
-            | (witx::Type::Record(record_type), Value::Record(record)) => {
-                executor_pb::value::Which::Record(executor_pb::value::Record {
-                    members:        record_type
-                        .member_layout()
-                        .into_iter()
-                        .zip(record_type.members.iter())
-                        .zip(record.members)
-                        .map(|((member_layout, member_type), member)| {
-                            executor_pb::value::record::Member {
-                                name:           member.name,
-                                value:          Some(
-                                    member
-                                        .value
-                                        .into_pb_value(member_type.tref.type_().as_ref()),
-                                )
-                                .into(),
-                                offset:         member_layout.offset as u32,
-                                special_fields: Default::default(),
-                            }
-                        })
-                        .collect(),
-                    size:           record_type.mem_size() as u32,
-                    special_fields: Default::default(),
-                })
-            },
-            | (witx::Type::Variant(variant_type), Value::Variant(variant)) => {
-                let (case_idx, case) = variant_type
-                    .cases
-                    .iter()
-                    .enumerate()
-                    .find(|(_i, case)| case.name.as_str() == variant.name)
-                    .unwrap();
-                let payload = match variant.payload {
-                    | Some(payload) => {
-                        executor_pb::value::variant::Payload_option::PayloadSome(Box::new(
-                            payload.into_pb_value(case.tref.as_ref().unwrap().type_().as_ref()),
-                        ))
-                    },
-                    | None => {
-                        executor_pb::value::variant::Payload_option::PayloadNone(Default::default())
-                    },
-                };
-
-                executor_pb::value::Which::Variant(Box::new(executor_pb::value::Variant {
-                    case_idx:       case_idx as u64,
-                    size:           variant_type.mem_size() as u32,
-                    tag_repr:       match variant_type.tag_repr {
-                        | witx::IntRepr::U8 => executor_pb::IntRepr::U8,
-                        | witx::IntRepr::U16 => executor_pb::IntRepr::U16,
-                        | witx::IntRepr::U32 => executor_pb::IntRepr::U32,
-                        | witx::IntRepr::U64 => executor_pb::IntRepr::U64,
-                    }
-                    .into(),
-                    payload_offset: variant_type.payload_offset() as u32,
-                    payload_option: Some(payload),
-                    special_fields: Default::default(),
-                }))
-            },
-            | (_, Value::Handle(handle)) => executor_pb::value::Which::Handle(handle),
-            | (witx::Type::List(item_tref), Value::List(items)) => {
-                executor_pb::value::Which::Array(executor_pb::value::Array {
-                    items:          items
-                        .into_iter()
-                        .map(|item| item.into_pb_value(item_tref.type_().as_ref()))
-                        .collect(),
-                    item_size:      item_tref.mem_size() as u32,
-                    special_fields: Default::default(),
-                })
-            },
-            | (_, Value::String(string)) => executor_pb::value::Which::String(string.into()),
-            | (witx::Type::Pointer(tref), Value::Pointer(values)) => {
-                executor_pb::value::Which::Pointer(executor_pb::value::Array {
-                    items:          values
-                        .into_iter()
-                        .map(|v| v.into_pb_value(tref.type_().as_ref()))
-                        .collect(),
-                    item_size:      tref.mem_size() as u32,
-                    special_fields: Default::default(),
-                })
-            },
-            | (witx::Type::ConstPointer(tref), Value::ConstPointer(items)) => {
-                executor_pb::value::Which::ConstPointer(executor_pb::value::Array {
-                    items:          items
-                        .into_iter()
-                        .map(|v| v.into_pb_value(tref.type_().as_ref()))
-                        .collect(),
-                    item_size:      tref.mem_size() as u32,
-                    special_fields: Default::default(),
-                })
-            },
-            | (_, Value::Builtin(builtin)) => executor_pb::value::Which::Builtin(builtin.into()),
-            | (_, Value::Bitflags(_))
-            | (_, Value::Record(_))
-            | (_, Value::Variant(_))
-            | (_, Value::List(_))
-            | (_, Value::Pointer(_))
-            | (_, Value::ConstPointer(_)) => panic!(),
+        let interface = u.choose(spec.interfaces())?;
+        let functions = interface.functions().collect::<Vec<_>>();
+        let function = *u.choose(&functions)?;
+        let result_valtypes = function.unpack_expected_result();
+        let mut params = Vec::with_capacity(function.params.len());
+        let mut results = Vec::with_capacity(result_valtypes.len());
+        let cset = match &function.spec {
+            | Some(prog) => wazzi_spec_constraint::evaluate(prog),
+            | None => wazzi_spec_constraint::program::ConstraintSet::new(),
         };
 
-        executor_pb::Value {
-            which:          Some(which),
-            special_fields: Default::default(),
-        }
-    }
-
-    fn from_pb_value(x: executor_pb::Value, ty: &witx::Type) -> Self {
-        match (ty, x.which.unwrap()) {
-            | (_, executor_pb::value::Which::Builtin(builtin)) => Self::Builtin(builtin.into()),
-            | (_, executor_pb::value::Which::String(string)) => {
-                Self::String(seed::StringValue::from(string))
-            },
-            | (_, executor_pb::value::Which::Bitflags(bitflags)) => {
-                Self::Bitflags(seed::BitflagsValue(
-                    bitflags
-                        .members
-                        .into_iter()
-                        .map(seed::BitflagsMemberValue::from)
-                        .collect(),
-                ))
-            },
-            | (_, executor_pb::value::Which::Handle(handle)) => Self::Handle(handle),
-            | (witx::Type::List(tref), executor_pb::value::Which::Array(array)) => Self::List(
-                array
-                    .items
-                    .into_iter()
-                    .map(|item| Self::from_pb_value(item, tref.type_().as_ref()))
-                    .collect(),
-            ),
-            | (witx::Type::Record(record_type), executor_pb::value::Which::Record(record)) => {
-                Self::Record(RecordValue {
-                    members: record_type
-                        .members
-                        .iter()
-                        .zip(record.members)
-                        .map(|(member_type, member)| RecordMemberValue {
-                            name:  member_type.name.as_str().to_owned(),
-                            value: Self::from_pb_value(
-                                member.value.unwrap(),
-                                member_type.tref.type_().as_ref(),
-                            ),
-                        })
-                        .collect(),
-                })
-            },
-            | (witx::Type::ConstPointer(tref), executor_pb::value::Which::ConstPointer(array)) => {
-                Self::ConstPointer(
-                    array
-                        .items
-                        .into_iter()
-                        .map(|item| Value::from_pb_value(item, tref.type_().as_ref()))
-                        .collect(),
+        for param_type in &function.params {
+            let param = self
+                .resource_ctx
+                .arbitrary_value_from_valtype(
+                    u,
+                    interface,
+                    &param_type.valtype,
+                    &cset,
+                    Some(wazzi_spec_constraint::program::TypeRef::Param {
+                        name: param_type.name.clone(),
+                    }),
                 )
-            },
-            | (witx::Type::Pointer(tref), executor_pb::value::Which::Pointer(list)) => {
-                let mut items = Vec::with_capacity(list.items.len());
+                .wrap_err("failed to get arbitrary param value")?;
 
-                for value in list.items {
-                    items.push(Self::from_pb_value(value, tref.type_().as_ref()));
-                }
-
-                Self::Pointer(items)
-            },
-            | (witx::Type::Variant(variant_type), executor_pb::value::Which::Variant(variant)) => {
-                let case = &variant_type.cases[variant.case_idx as usize];
-
-                Self::Variant(VariantValue {
-                    idx:     variant.case_idx,
-                    name:    case.name.as_str().to_owned(),
-                    payload: match variant.payload_option.unwrap() {
-                        | executor_pb::value::variant::Payload_option::PayloadSome(payload) => {
-                            Some(Box::new(Self::from_pb_value(
-                                *payload,
-                                case.tref.as_ref().unwrap().type_().as_ref(),
-                            )))
-                        },
-                        | executor_pb::value::variant::Payload_option::PayloadNone(_) => None,
-                        | _ => todo!(),
-                    },
-                })
-            },
-            | (_, executor_pb::value::Which::Variant(_)) => panic!(),
-            | (witx::Type::Builtin(_), _)
-            | (witx::Type::Record(_), _)
-            | (witx::Type::Handle(_), _)
-            | (witx::Type::Pointer(_), _)
-            | (witx::Type::ConstPointer(_), _)
-            | (witx::Type::List(_), _)
-            | (witx::Type::Variant(_), _) => panic!(),
+            params.push(param);
         }
-    }
-}
 
-#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct RecordValue {
-    pub members: Vec<RecordMemberValue>,
-}
-
-#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct RecordMemberValue {
-    pub name:  String,
-    pub value: Value,
-}
-
-#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
-#[serde(deny_unknown_fields)]
-pub struct VariantValue {
-    pub idx:     u64,
-    pub name:    String,
-    pub payload: Option<Box<Value>>,
-}
-
-pub(crate) fn register_resource_rec(
-    ctx: &mut ResourceContext,
-    spec: &witx::Document,
-    tref: &witx::TypeRef,
-    value: Value,
-    resource_id: Option<u64>,
-) {
-    if let Some(resource) = tref.resource(spec) {
-        match resource_id {
-            | Some(resource_id) => {
-                ctx.register_resource(resource.name.as_str(), value.clone(), resource_id)
-            },
-            | None => ctx.new_resource(resource.name.as_str(), value.clone()),
+        for result_valtype in &result_valtypes {
+            results.push(ValueMeta::zero_value_from_spec(interface, &result_valtype));
         }
-    }
 
-    match (tref.type_().as_ref(), value) {
-        | (witx::Type::Record(record_type), Value::Bitflags(_))
-            if record_type.bitflags_repr().is_some() => {},
-        | (witx::Type::Record(record_type), Value::Record(record)) => {
-            for (member_type, member) in record_type.members.iter().zip(record.members) {
-                register_resource_rec(ctx, spec, &member_type.tref, member.value, None);
-            }
-        },
-        | (witx::Type::Variant(variant_type), Value::Variant(variant)) => {
-            let case_type = variant_type.cases.get(variant.idx as usize).unwrap();
-
-            if let Some(case_tref) = &case_type.tref {
-                register_resource_rec(ctx, spec, case_tref, *variant.payload.unwrap(), None);
-            }
-        },
-        | (_, Value::Handle(_)) => (),
-        | (_, Value::List(_)) => (),
-        | (_, Value::String(_)) => (),
-        | (_, Value::Pointer(_)) => unimplemented!(),
-        | (_, Value::ConstPointer(_)) => unimplemented!(),
-        | (_, Value::Builtin(_)) => (),
-        | (_, Value::Bitflags(_)) | (_, Value::Record(_)) | (_, Value::Variant(_)) => panic!(),
+        self.call(interface, function, params, results, None)
     }
 }
-
-#[cfg(test)]
-mod tests {}

@@ -13,8 +13,8 @@ use wazzi_executor::ExecutorRunner;
 use wazzi_runners::Wasmtime;
 use wazzi_spec::{package::Package, parsers::Span};
 use wazzi_store::RuntimeStore;
+use wazzi_wasi::{prog::Prog, seed::Seed};
 use wazzi_wasi_component_model::value::Value;
-use wazzi_wazi::{prog::Prog, seed::Seed};
 
 fn main() -> Result<(), eyre::Error> {
     struct Case {
@@ -85,7 +85,7 @@ fn main() -> Result<(), eyre::Error> {
 
                 assert_eq!(call.errno, Some(0));
                 assert!(
-                    matches!(call.results.last().unwrap(), &Value::U32(1)),
+                    matches!(call.results.last().unwrap().value, Value::U32(1)),
                     "{:?}\n{}",
                     call.results,
                     run.stderr

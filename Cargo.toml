@@ -15,17 +15,14 @@ members = [
     "spec",
     "spec/constraint",
     "store",
-    "strace",
     "tmin",
     "wasi",
+    "wasi/component-model",
     "wasi-sdk/build",
-    "wazi",
-    "wazi/component-model",
     "witx",
 ]
 
 [workspace.dependencies]
-strace.path = "strace"
 wasi-sdk.path = "wasi-sdk/build"
 wazzi-compile-time.path = "compile-time"
 wazzi-executor.path = "executor"
@@ -39,8 +36,7 @@ wazzi-spec.path = "spec"
 wazzi-spec-constraint.path = "spec/constraint"
 wazzi-store.path = "store"
 wazzi-wasi.path = "wasi"
-wazzi-wazi.path = "wazi"
-wazzi-wasi-component-model.path = "wazi/component-model"
+wazzi-wasi-component-model.path = "wasi/component-model"
 wazzi-witx.path = "witx"
 
 arbitrary = "1"
@@ -80,7 +76,7 @@ edition.workspace = true
 wazzi-fuzzer.workspace = true
 wazzi-runners.workspace = true
 wazzi-store.workspace = true
-wazzi-wazi.workspace = true
+wazzi-wasi.workspace = true
 
 color-eyre.workspace = true
 clap = { version = "4", features = ["derive"] }
