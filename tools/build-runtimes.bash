@@ -49,7 +49,7 @@ function build_wasmedge {
 
   (
     cd "$build_path"
-    cmake -DCMAKE_BUILD_TYPE=Release ..
+    cmake -DCMAKE_BUILD_TYPE=Release -DWASMEDGE_LINK_LLVM_STATIC=ON ..
     make -j
   )
 
