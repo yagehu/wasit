@@ -1813,15 +1813,11 @@ dependencies = [
  "clap",
  "color-eyre",
  "petgraph",
- "serde_json",
  "tracing",
  "tracing-error",
  "tracing-subscriber",
- "wazzi-fuzzer",
- "wazzi-runners",
  "wazzi-spec",
  "wazzi-store",
- "wazzi-wazi",
 ]
 
 [[package]]

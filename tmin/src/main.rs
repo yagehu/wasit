@@ -2,8 +2,7 @@ use std::{
     collections::{HashMap, HashSet},
     fs,
     io,
-    path::{Path, PathBuf},
-    sync::Arc,
+    path::PathBuf,
 };
 
 use clap::Parser;
@@ -11,25 +10,16 @@ use color_eyre::eyre::{self, Context, ContextCompat};
 use petgraph::{graph::NodeIndex, stable_graph::StableDiGraph};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::layer::SubscriberExt as _;
-use wazzi_fuzzer::{Fuzzer, Runtime};
-use wazzi_runners::{Node, Wamr, Wasmedge, Wasmer, Wasmtime};
 use wazzi_spec::{
     package::{StateEffect, Typeidx, TypeidxBorrow, Valtype},
     parsers::Span,
 };
-use wazzi_store::{Action, FuzzStore, RunStore};
-use wazzi_wazi::seed::Seed;
+use wazzi_store::{Action, RunStore};
 
 #[derive(Parser, Clone, Debug)]
 struct Cmd {
     #[arg()]
     path: PathBuf,
-
-    #[arg()]
-    seed: PathBuf,
-
-    #[arg()]
-    workspace: PathBuf,
 
     #[arg()]
     action_idx: usize,
@@ -60,7 +50,7 @@ fn main() -> Result<(), eyre::Error> {
 
     let cmd = Cmd::parse();
     let run_store = RunStore::resume(&cmd.path)?;
-    let data = run_store.data().wrap_err("failed to read data")?;
+    let _data = run_store.data().wrap_err("failed to read data")?;
     let runtime_store = run_store.runtimes()?.next().unwrap();
     let mut calls = Vec::new();
 
@@ -74,54 +64,7 @@ fn main() -> Result<(), eyre::Error> {
         }
     }
 
-    let runtimes_dir = PathBuf::from("runtimes");
-    let seed: Seed = serde_json::from_reader(
-        fs::OpenOptions::new()
-            .read(true)
-            .open(&cmd.seed)
-            .wrap_err("failed to open seed file")?,
-    )
-    .wrap_err("failed to deserialize seed")?;
-
     tracing::info!("Found {} calls.", calls.len());
-    tracing::debug!("Sanity test.");
-
-    let mut fuzzer = Fuzzer::new(
-        seed,
-        [
-            Runtime {
-                name:   "node",
-                repo:   runtimes_dir.join("node"),
-                runner: Arc::new(Node::new(Path::new("node"))),
-            },
-            Runtime {
-                name:   "wamr",
-                repo:   runtimes_dir.join("wasm-micro-runtime"),
-                runner: Arc::new(Wamr::new(Path::new("iwasm"))),
-            },
-            Runtime {
-                name:   "wasmedge",
-                repo:   runtimes_dir.join("WasmEdge"),
-                runner: Arc::new(Wasmedge::new(Path::new("wasmedge"))),
-            },
-            Runtime {
-                name:   "wasmer",
-                repo:   runtimes_dir.join("wasmer"),
-                runner: Arc::new(Wasmer::new(Path::new("wasmer"))),
-            },
-            Runtime {
-                name:   "wasmtime",
-                repo:   runtimes_dir.join("wasmtime"),
-                runner: Arc::new(Wasmtime::new(Path::new("wasmtime"))),
-            },
-        ],
-    );
-    let mut fuzz_store = FuzzStore::new(&cmd.workspace.join("sanity"))
-        .wrap_err("failed to init sanity fuzz store")?;
-
-    // fuzzer
-    //     .fuzz_loop(&mut fuzz_store, Some(&data))
-    //     .wrap_err("failed to sanity fuzz")?;
 
     let mut graph = StableDiGraph::new();
     let mut call_node_map: HashMap<usize, NodeIndex> = HashMap::new();
