@@ -44,12 +44,17 @@ function build_wamr {
 function build_wasmedge {
   local repo_path="$1"
   local build_path="$repo_path/build"
+  local link_llvm_static=OFF
+
+  if [ "$os" == darwin ]; then
+    link_llvm_static=ON
+  fi
 
   mkdir -p "$build_path"
 
   (
     cd "$build_path"
-    cmake -DCMAKE_BUILD_TYPE=Release -DWASMEDGE_LINK_LLVM_STATIC=ON ..
+    cmake -DCMAKE_BUILD_TYPE=Release -DWASMEDGE_LINK_LLVM_STATIC="$link_llvm_static" ..
     make -j
   )
 
