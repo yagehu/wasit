@@ -1,0 +1,111 @@
+\section{Methodology}
+\label{sec:method}
+
+\usetikzlibrary{shapes.geometric}
+\usetikzlibrary{shapes.multipart}
+\usetikzlibrary{positioning}
+
+\begin{figure*}
+\centering
+\begin{tikzpicture}[
+    bigstep/.style={
+        rectangle split,
+        rectangle split ignore empty parts,
+    },
+    boxed/.style={
+        rectangle split,
+        rectangle split ignore empty parts,
+        draw=black,
+    },
+]
+
+\node[bigstep] (spec) {
+    \includesvg{assets/document}
+    \nodepart{two}
+        WASI spec
+};
+\node[bigstep] (analysis) [right=of spec] {
+    \tikz{
+        \node[boxed] {
+            \tikz{
+                \node[boxed] (resource-dep) {Resource dependency};
+                \node[boxed] [below=0.1cm of resource-dep] {Input constraints};
+            }
+        };
+    }
+    \nodepart{two}
+        Interface Analysis
+};
+\node[bigstep] (gen) [right=of analysis] {
+    \tikz{
+        \node[boxed] {
+            \tikz{
+                \node[boxed, align=center] (select-func)
+                    {Select callable function};
+                \node[boxed, align=center] (constrain-inputs)
+                    [below=of select-func]
+                    {Constrain inputs};
+                \node[boxed, align=center] (gen-primitive)
+                    [below=of constrain-inputs]
+                    {Generate primitive\\resource types};
+                \node[boxed, align=center] (select-resources)
+                    [below right=of select-func]
+                    {Select resources\\from context};
+
+                \draw[->] (select-func.south) -- (constrain-inputs.north);
+                \draw[->] (constrain-inputs.south) -- (gen-primitive.north);
+                \draw[->] (select-func.east) to [out=0, in=90] (select-resources.north);
+            }
+        };
+    }
+    \nodepart{two}
+        WASI Call Generation
+};
+\node[bigstep] (exec) [below=of gen] {
+    \tikz{
+        \node[boxed] {
+            adf
+        };
+    }
+    \nodepart{two}
+        \tikz{
+            \node[rectangle split horizontal] {
+                \includesvg[width=20pt]{assets/wasm.svg}
+                \nodepart{two}
+                    \begin{parbox}
+                    \begin{itemize}
+                        \item \nodejs{}
+                        \item \wasmtime{}
+                        \item \wasmer{}
+                        \item \wamr{}
+                        \item \wasmedge{}
+                    \end{itemize}
+                \end{parbox}
+            }
+        }
+    \nodepart{three}
+        Differential execution
+};
+% \node[automatic] (parse) [right=of annotate] {Parse spec};
+% \node[automatic] (call) [right=of parse] {Make call};
+% \node[automatic] (check) [right=of call] {Check output};
+% \node[automatic] (reduce) [right=of check] {Reduce sequence};
+% \node[manual] (verify) [right=of check] {Manually verify};
+% \node[automatic] (fuzz) [right=of parse] {
+%     Fuzz loop
+%     \nodepart{two} {
+%         \tikz{
+%             \node[automatic] (fuzz/adsf) {1};
+%             \node[automatic] (fuzz/two) {1};
+%         }
+%     }
+% };
+
+\draw[->] (spec.east) -- (analysis.west);
+\draw[->] (analysis.east) -- (gen.west);
+\draw[->] (gen.south) -- (exec.north);
+% \draw[->] (call.east) -- (check.west);
+% \draw[->] (check.east) -- (reduce.west);
+
+\end{tikzpicture}
+\end{figure*}
