@@ -1,0 +1,115 @@
+\usetikzlibrary{shapes.geometric}
+\usetikzlibrary{shapes.multipart}
+\usetikzlibrary{positioning}
+
+\begin{tikzpicture}[
+    remember picture,
+    bigstep/.style={
+        rectangle split,
+        rectangle split ignore empty parts,
+    },
+    boxed/.style={
+        rectangle split,
+        rectangle split ignore empty parts,
+        draw=black,
+    },
+]
+
+\node[bigstep] (spec) {
+    \includesvg{assets/document.svg}
+    \nodepart{two}
+        WASI spec
+};
+\node[bigstep] (analysis) [right=0.4cm of spec] {
+    \tikz{
+        \node[boxed] {
+            \tikz{
+                \node[boxed] (resource-dep) {Resource dependency};
+                \node[boxed] [below=0.1cm of resource-dep] {Input constraints};
+            }
+        };
+    }
+    \nodepart{two}
+        Interface Analysis
+};
+\node[bigstep] (gen) [right=0.4cm of analysis] {
+    \tikz{
+        \node[boxed] {
+            \tikz{
+                \node[boxed, align=center] (select-func)
+                    {Select callable function};
+                \node[boxed, align=center] (constrain-inputs)
+                    [below=0.4cm of select-func]
+                    {Constrain inputs};
+                \node[boxed, align=center] (gen-primitive)
+                    [below=0.4cm of constrain-inputs]
+                    {Generate primitive\\resource types};
+                \node[boxed, align=center] (select-resources)
+                    [below right=0.4cm of select-func]
+                    {Select resources\\from context};
+
+                \draw[->] (select-func.south) -- (constrain-inputs.north);
+                \draw[->] (constrain-inputs.south) -- (gen-primitive.north);
+                \draw[->] (select-func.east) to [out=0, in=90] (select-resources.north);
+            }
+        };
+    }
+    \nodepart{two}
+        WASI Call Generation
+};
+\node[bigstep] (exec) [below=of gen] {
+    \tikz{
+        \node[boxed] (executor) {
+            Executor
+        };
+        \node[fill=black!10, rectangle split horizontal] (runtimes) [below=of executor] {
+            \tikz{
+                \node[rectangle split horizontal] {
+                    \includesvg[width=20pt]{assets/wasm.svg}
+                    \nodepart{two}
+                    \nodepart{three}
+                        \parbox{2.6cm}{
+                            \begin{itemize}[leftmargin=*]
+                                \item[] \nodejs
+                                \item[] \wasmtime
+                                \item[] \wasmer
+                                \item[] \wamr
+                                \item[] \wasmedge
+                            \end{itemize}
+                        }
+                }
+            }
+        };
+
+        \draw[<->] (executor.south) -- (runtimes.north) node[midway, right] {WASI call};
+    }
+    \nodepart{two}
+        Differential Execution
+};
+\node[bigstep, align=center] (diff) [left=2cm of executor] {
+    \tikz{
+        \node[boxed] (diff-inner) {
+            \tikz{
+                \node[boxed] (observe-out) {Observe output};
+                \node[boxed] (observe-fx) [below=0.1cm of observe-out] {Observe side effects};
+                \node[boxed] (filter) [below=0.1cm of observe-fx] {Filter non-determinism};
+            }
+        };
+    }
+    \nodepart{two}
+        Inconsistent\\
+        Behavior Detection
+};
+\node[bigstep, boxed] (check) [below left=of diff] {
+    Manual Check
+};
+
+\draw[->] (spec.east) -- (analysis.west);
+\draw[->] (analysis.east) -- (gen.west);
+\draw[->] (gen.south) -- (exec.north) node[midway, right] {RPC};
+\draw[->] (executor.west) -- (diff.east);
+\draw[->] (diff-inner.south west) -- (check.north east);
+\draw[->] (check.north) -- (spec.south) node[midway, right] {Enrich};
+\draw[->] (check.east) -- (runtimes.west) node[midway, below] {File bug};
+
+\end{tikzpicture}

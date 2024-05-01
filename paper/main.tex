@@ -1,9 +1,13 @@
 \documentclass[conference]{IEEEtran}
 
+\usepackage{caption}
 \usepackage{cite}
 \usepackage{amsmath,amssymb,amsfonts}
 \usepackage{algorithmic}
+\usepackage[inline]{enumitem}
 \usepackage{graphicx}
+\usepackage{listings}
+\usepackage{subcaption}
 \usepackage{svg}
 \usepackage{textcomp}
 \usepackage{tikz}
@@ -16,7 +20,7 @@
 
 \begin{document}
 
-\title{[WIP] Differential testing WASI}
+\title{[WIP] Differential testing WASI paper}
 
 \author{
     \IEEEauthorblockN{Author One}
@@ -38,8 +42,12 @@
 
 \maketitle
 
-\input{abstract}
-\input{introduction}
-\input{methodology}
+\input{abstract.tex}
+\input{introduction.tex}
+\input{background.tex}
+\input{methodology.tex}
+
+\bibliographystyle{IEEEtran}
+\bibliography{ref}
 
 \end{document}
