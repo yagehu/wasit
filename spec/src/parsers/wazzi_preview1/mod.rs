@@ -813,6 +813,7 @@ impl From<Repr<'_>> for package::IntRepr {
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 enum Expr<'a> {
+    Annotation(AnnotationSpan<'a>),
     SymbolicIdx(Id<'a>),
     Keyword(KeywordSpan<'a>),
     NumLit(NumLit<'a>),
@@ -822,6 +823,7 @@ enum Expr<'a> {
 impl<'a> Expr<'a> {
     fn parse(input: Span<'a>) -> nom::IResult<Span, Self, ErrorTree<Span>> {
         let (input, expr) = alt((
+            AnnotationSpan::parse.map(Self::Annotation),
             Id::parse.map(Self::SymbolicIdx),
             KeywordSpan::parse.map(Self::Keyword),
             NumLit::parse.map(Self::NumLit),
@@ -867,6 +869,7 @@ impl<'a> Expr<'a> {
 
         fn into_expr(e: Expr) -> wazzi_spec_constraint::program::Expr {
             match e {
+                | Expr::Annotation(_) => todo!(),
                 | Expr::SymbolicIdx(_) => todo!(),
                 | Expr::Keyword(_) => todo!(),
                 | Expr::NumLit(_) => todo!(),
@@ -951,7 +954,7 @@ impl<'a> AnnotationSpan<'a> {
         let (input, pos) = position(input)?;
         let (input, (_, name)) = pair(
             char('@'),
-            take_while1(|c: char| c.is_alphanumeric() || c == '_'),
+            take_while1(|c: char| c.is_alphanumeric() || c == '_' || c == '-'),
         )
         .context("annotation-span")
         .parse(input)?;
@@ -979,6 +982,7 @@ pub enum Keyword {
     Handle,
     I64Const,
     I64GtU,
+    I64LeU,
     If,
     List,
     Module,
@@ -1015,6 +1019,7 @@ impl<'a> KeywordSpan<'a> {
                 tag("handle").map(|s| (s, Keyword::Handle)),
                 tag("i64.const").map(|s| (s, Keyword::I64Const)),
                 tag("i64.gt_u").map(|s| (s, Keyword::I64GtU)),
+                tag("i64.le_u").map(|s| (s, Keyword::I64LeU)),
                 tag("if").map(|s| (s, Keyword::If)),
                 tag("list").map(|s| (s, Keyword::List)),
                 tag("module").map(|s| (s, Keyword::Module)),
@@ -1024,9 +1029,9 @@ impl<'a> KeywordSpan<'a> {
                 tag("s64").map(|s| (s, Keyword::S64)),
                 tag("spec").map(|s| (s, Keyword::Spec)),
                 tag("state").map(|s| (s, Keyword::State)),
-                tag("tag").map(|s| (s, Keyword::Tag)),
             )),
             alt((
+                tag("tag").map(|s| (s, Keyword::Tag)),
                 tag("then").map(|s| (s, Keyword::Then)),
                 tag("typename").map(|s| (s, Keyword::Typename)),
                 tag("u8").map(|s| (s, Keyword::U8)),

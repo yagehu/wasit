@@ -1,4 +1,0 @@
-(module $wasi_snapshot_preview1
-  (typename $fd (handle))
-  (typename $fd_reg (handle) (@wazzi fulfills $fd))
-)

@@ -73,9 +73,13 @@
 </node>
 
 <edge visible="no">
-   <relation name="$param_of"> <type name="TypeDef"/> <type name="Function"/> </relation>
+   <relation name="$element_of"> <type name="Type"/> <type name="List"/> </relation>
+   <relation name="$member_of"> <type name="Type"/> <type name="Record"/> </relation>
+   <relation name="$structural"> <type name="Type"/> <type name="Container"/> </relation>
+   <relation name="$type_of"> <type name="ValType"/> <type name="TypeDef"/> </relation>
    <relation name="element"> <type name="List"/> <type name="Type"/> </relation>
    <relation name="fulfills"> <type name="TypeDef"/> <type name="TypeDef"/> </relation>
+   <relation name="input"> <type name="Input"/> <type name="Type"/> </relation>
    <relation name="member"> <type name="Record"/> <type name="Type"/> </relation>
    <relation name="param"> <type name="Function"/> <type name="TypeDef"/> </relation>
    <relation name="type"> <type name="TypeDef"/> <type name="ValType"/> </relation>

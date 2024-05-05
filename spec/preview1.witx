@@ -168,11 +168,9 @@
     (param $len $filesize)
     (param $advice $advice)
     (result $error (expected (error $errno)))
-    (@wazzi (spec
-      (if (i64.gt_u (param $len) (i64.const 9223372036854775807))
-        (then (unspecified (result $error)))
-      )
-    ))
+    (@wazzi (@constraint (@and
+      (i64.le_u (param $len) (i64.const 9223372036854775807))
+    )))
   )
 
   (@interface func (export "fd_allocate")
@@ -218,6 +216,9 @@
     (param $fd $fd (@wazzi (state write)))
     (param $flags $fdflags)
     (result $error (expected (error $errno)))
+    (@wazzi (@constraint (@and
+      (@flag-unset (param $flags) (field $nonblock))
+    )))
   )
 
   (@interface func (export "fd_fdstat_set_rights")
@@ -278,11 +279,9 @@
     (param $iovs $iovec_array)
     (param $offset $filesize)
     (result $error (expected $size (error $errno)))
-    (@wazzi (spec
-      (if (i64.gt_u (param $offset) (i64.const 17592186040320))
-        (then (unspecified (result $error)))
-      )
-    ))
+    (@wazzi (@constraint (@and
+      (i64.le_u (param $offset) (i64.const 17592186040320))
+    )))
   )
 
   (typename $preopentype

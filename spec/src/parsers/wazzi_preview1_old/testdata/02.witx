@@ -1,7 +1,0 @@
-(module $wasi_snapshot_preview1
-  (typename $lookupflags
-    (flags (@witx repr u32)
-      $symlink_follow
-    )
-  )
-)

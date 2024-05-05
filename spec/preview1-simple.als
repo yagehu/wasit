@@ -6,7 +6,7 @@ one sig Rng extends Input {}
 
 lone sig BaseDir extends Input {
 } {
-  input = FdDir
+  input = Fd
 }
 
 abstract sig Type {}
@@ -47,11 +47,6 @@ lone sig
 
 sig List extends Container {
   element: one Type,
-  len: set Type,
-} {
-  U32 in len
-
-  
 }
 
 fun element_of: Type -> List { ~element }
@@ -65,7 +60,7 @@ sig Record extends Container {
 fun member_of: Type -> Record { ~member }
 
 fun structural: Type -> Container {
-  member_of + element_of + ~len
+  member_of + element_of
 }
 
 sig Str extends Specialized {}
@@ -78,8 +73,6 @@ fact no_dangling_valtype {
 one sig
     Advice
   , Fd
-  , FdDir
-  , FdReg
   , Fdflags
   , FileOffset
   , FileSliceLen
@@ -95,12 +88,6 @@ one sig
 fact resources {
   Fd in Resource
   no Fd.fulfills
-
-  FdDir in Resource
-  FdDir.fulfills = Fd
-
-  FdReg in Resource
-  FdReg.fulfills = Fd
 
   FileOffset in Resource
   no FileOffset.fulfills
@@ -120,10 +107,6 @@ fact {
   Advice.type = Variant
 
   Fd.type = Handle
-
-  FdDir.type = Handle
-
-  FdReg.type = Handle
 
   Fdflags.type = Flags
 
@@ -149,22 +132,22 @@ fact {
 }
 
 fact fd_advise {
-  FdAdvise.param = FdReg + FileOffset + FileSliceLen + Advice
+  FdAdvise.param = Fd + FileOffset + FileSliceLen + Advice
   no FdAdvise.result
 }
 
 fact fd_read {
-  FdRead.param = FdReg + IovecArray
+  FdRead.param = Fd + IovecArray
   FdRead.result = NByte
 }
 
 fact fd_tell {
-  FdTell.param = FdReg
+  FdTell.param = Fd
   FdTell.result = FileOffset
 }
 
 fact path_open {
-  PathOpen.param = FdDir + Lookupflags + Path + Oflags + Rights + Fdflags
+  PathOpen.param = Fd + Lookupflags + Path + Oflags + Rights + Fdflags
   PathOpen.result = Fd
 }
 

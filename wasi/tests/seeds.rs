@@ -524,7 +524,7 @@ pub fn run(seed: Seed, spec_name: &str) -> Result<RunInstance, eyre::Error> {
 pub fn spec(name: &str) -> Result<Package, eyre::Error> {
     let spec_dir = wazzi_compile_time::root().join("spec");
     let spec = fs::read_to_string(spec_dir.join(name)).unwrap();
-    let result = wazzi_spec::parsers::wazzi_preview1_old::Document::parse(Span::new(&spec));
+    let result = wazzi_spec::parsers::wazzi_preview1::Document::parse(Span::new(&spec));
     let document = match result {
         | Ok(doc) => doc,
         | Err(err) => {
