@@ -22,3 +22,6 @@
 [submodule "baseline"]
 	path = baseline
 	url = git@github.com:yagehu/wazzi-baseline
+[submodule "runtimes/wazero"]
+	path = runtimes/wazero
+	url = git@github.com:yagehu/wazero.git

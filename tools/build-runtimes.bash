@@ -83,6 +83,17 @@ function build_wasmtime {
   extra_paths+=("$(realpath $path/target/release)")
 }
 
+function build_wazero {
+  local path="$1"
+
+  (
+    cd "$path"
+    CGO_ENABLED=0 go build ./cmd/wazero
+  )
+
+  extra_paths+=("$(realpath $path)")
+}
+
 case "$(uname -s)" in
   Linux*)  os=linux;;
   Darwin*) os=darwin;;
@@ -97,13 +108,14 @@ wamr_repo_dir="${WAMR_REPO_DIR:-runtimes/wasm-micro-runtime}"
 wasmedge_repo_dir="${WASMEDGE_REPO_DIR:-runtimes/WasmEdge}"
 wasmer_repo_dir="${WASMER_REPO_DIR:-runtimes/wasmer}"
 wasmtime_repo_dir="${WASMTIME_REPO_DIR:-runtimes/wasmtime}"
+wazero_repo_dir="${WAZERO_REPO_DIR:-runtimes/wazero}"
 
 build_node "$node_repo_dir"
 build_wamr "$wamr_repo_dir"
 build_wasmedge "$wasmedge_repo_dir"
 build_wasmer "$wasmer_repo_dir"
 build_wasmtime "$wasmtime_repo_dir"
+build_wazero "$wazero_repo_dir"
 
 extra_paths="$(join_by : ${extra_paths[*]})"
 PATH="$extra_paths:$PATH" "$SHELL"
-
