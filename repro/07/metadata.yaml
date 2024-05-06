@@ -1,0 +1,28 @@
+description: ""
+
+reports:
+  - url: https://github.com/bytecodealliance/wasm-micro-runtime/issues/3394
+
+wazzi:
+  commit: 55482ec0869834f56f16a9d86e5a7d4cb2ec2b9d
+
+runtimes:
+  node:
+    repository: git@github.com:yagehu/node.git
+    commit: refs/tags/case/05
+  wamr:
+    repository: https://github.com/bytecodealliance/wasm-micro-runtime.git
+    commit: refs/tags/case/07
+  wasmedge:
+    repository: git@github.com:yagehu/WasmEdge.git
+    commit: f930fffb6e8c1fbf5569e17c950682dc571b63d2
+  wasmer:
+    repository: git@github.com:yagehu/wasmer.git
+    commit: refs/tags/case/06
+  wasmtime:
+    repository: git@github.com:yagehu/wasmtime.git
+    commit: refs/tags/case/02
+
+tmin:
+  original_sequence_len: 37
+  minimized_len: 3
