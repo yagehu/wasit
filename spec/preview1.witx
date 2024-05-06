@@ -217,15 +217,8 @@
     (param $flags $fdflags)
     (result $error (expected (error $errno)))
     (@wazzi (@constraint (@and
-      (@flag-unset (param $flags) (field $nonblock))
+      (@flag-unset (param $flags) (field $dsync))
     )))
-  )
-
-  (@interface func (export "fd_fdstat_set_rights")
-    (param $fd $fd (@wazzi (state write)))
-    (param $fs_rights_base $rights)
-    (param $fs_rights_inheriting $rights)
-    (result $error (expected (error $errno)))
   )
 
   (typename $timestamp u64)
@@ -318,6 +311,9 @@
     (param $iovs $ciovec_array)
     (param $offset $filesize)
     (result $error (expected $size (error $errno)))
+    (@wazzi (@constraint (@and
+      (i64.le_u (param $offset) (i64.const 1000))
+    )))
   )
 
   (@interface func (export "fd_tell")
@@ -362,6 +358,9 @@
     (param $offset $filedelta)
     (param $whence $whence)
     (result $error (expected $filesize (error $errno)))
+    (@wazzi (@constraint (@and
+      (i64.le_u (param $offset) (i64.const 17592186040320))
+    )))
   )
 
   (typename $ciovec

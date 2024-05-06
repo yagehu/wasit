@@ -19,6 +19,7 @@ wazzi-wasi-component-model.workspace = true
 arbitrary.workspace = true
 eyre.workspace = true
 gcollections.workspace = true
+intervallum.workspace = true
 serde.workspace = true
 tracing.workspace = true
 

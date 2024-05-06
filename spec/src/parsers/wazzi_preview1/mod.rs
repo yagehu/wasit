@@ -850,30 +850,61 @@ impl<'a> Expr<'a> {
                 | Expr::SymbolicIdx(_) => todo!(),
                 | Expr::Keyword(_) => todo!(),
                 | Expr::NumLit(_) => todo!(),
-                | Expr::SExpr(exprs) => {
-                    match exprs.first().unwrap() {
-                        | Expr::Annotation(span) => match *span.name {
-                            | "and" => {},
-                        },
-                        | Expr::Keyword(span) => match span.keyword {
+                | Expr::SExpr(exprs) => match exprs.first().unwrap() {
+                    | Expr::Annotation(span) => match *span.name {
+                        | "and" => wazzi_spec_constraint::program::Expr::And(Box::new(
+                            wazzi_spec_constraint::program::And {
+                                clauses: exprs[1..]
+                                    .into_iter()
+                                    .map(|e| into_expr(e.to_owned()))
+                                    .collect(),
+                            },
+                        )),
+                        | "flag-unset" => wazzi_spec_constraint::program::Expr::Flag(
+                            wazzi_spec_constraint::program::Flag {
+                                tref:       match exprs.get(1).unwrap() {
+                                    | Expr::SExpr(exprs) => match exprs.get(1).unwrap() {
+                                        | Expr::SymbolicIdx(id) => {
+                                            wazzi_spec_constraint::program::TypeRef::Param {
+                                                name: id.name().to_owned(),
+                                            }
+                                        },
+                                        | _ => panic!(),
+                                    },
+                                    | _ => panic!(),
+                                },
+                                field:      match exprs.get(2).unwrap() {
+                                    | Expr::SExpr(exprs) => match exprs.get(1).unwrap() {
+                                        | Expr::SymbolicIdx(id) => id.name().to_owned(),
+                                        | _ => panic!(),
+                                    },
+                                    | _ => panic!(),
+                                },
+                                constraint: wazzi_spec_constraint::program::FlagConstraint::Unset,
+                            },
+                        ),
+                        | _ => panic!("{}", *span.name),
+                    },
+                    | Expr::Keyword(span) => {
+                        match span.keyword {
                             | Keyword::I64Const => wazzi_spec_constraint::program::Expr::Number(
                                 BigInt::from(match &exprs[1] {
                                     | Expr::NumLit(num) => num.0.parse::<u64>().unwrap(),
                                     | _ => panic!(),
                                 }),
                             ),
-                            | Keyword::I64GtU => wazzi_spec_constraint::program::Expr::U64Gt(
-                                Box::new(wazzi_spec_constraint::program::U64Gt {
+                            | Keyword::I64GtU => wazzi_spec_constraint::program::Expr::U64GtU(
+                                Box::new(wazzi_spec_constraint::program::U64GtU {
                                     lhs: into_expr(exprs[1].clone()),
                                     rhs: into_expr(exprs[2].clone()),
                                 }),
                             ),
-                            | Keyword::If => wazzi_spec_constraint::program::Expr::If(Box::new(
-                                wazzi_spec_constraint::program::If {
-                                    cond: into_expr(exprs[1].clone()),
-                                    then: into_unspecified(exprs[2].clone()),
-                                },
-                            )),
+                            | Keyword::I64LeU => wazzi_spec_constraint::program::Expr::U64LeU(
+                                Box::new(wazzi_spec_constraint::program::U64LeU {
+                                    lhs: into_expr(exprs[1].clone()),
+                                    rhs: into_expr(exprs[2].clone()),
+                                }),
+                            ),
                             | Keyword::Param => wazzi_spec_constraint::program::Expr::TypeRef(
                                 wazzi_spec_constraint::program::TypeRef::Param {
                                     name: match &exprs[1] {
@@ -883,9 +914,9 @@ impl<'a> Expr<'a> {
                                 },
                             ),
                             | _ => panic!("{:?}", span),
-                        },
-                        | _ => panic!(),
-                    }
+                        }
+                    },
+                    | _ => panic!(),
                 },
             }
         }

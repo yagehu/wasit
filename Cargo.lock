@@ -1764,6 +1764,7 @@ dependencies = [
  "intervallum",
  "num-bigint",
  "num-traits",
+ "thiserror",
 ]
 
 [[package]]
@@ -1799,6 +1800,7 @@ dependencies = [
  "color-eyre",
  "eyre",
  "gcollections",
+ "intervallum",
  "serde",
  "serde_json",
  "tempfile",

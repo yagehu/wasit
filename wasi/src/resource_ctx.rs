@@ -3,8 +3,10 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use arbitrary::Unstructured;
 use eyre::ContextCompat;
 use gcollections::ops::{Bounded as _, Cardinality as _};
+use interval::{ops::Range, IntervalSet};
 use serde::{Deserialize, Serialize};
 use wazzi_spec::package::{Defvaltype, Interface, Typeidx, TypeidxBorrow, Valtype};
+use wazzi_spec_constraint::program::{FlagConstraint, FlagsConstraint};
 use wazzi_wasi_component_model::value::{
     FlagsMember,
     FlagsValue,
@@ -166,7 +168,13 @@ impl ResourceContext {
             | (Defvaltype::U16, _) => Value::U16(u.arbitrary()?),
             | (Defvaltype::U32, _) => Value::U32(u.arbitrary()?),
             | (Defvaltype::U64, Some(tref)) => {
-                let iset = cset.get::<u64>(&tref);
+                let iset = match cset.get(&tref) {
+                    | Some(constraint) => match constraint {
+                        | wazzi_spec_constraint::program::Constraint::U64(iset) => iset.to_owned(),
+                        | _ => panic!(),
+                    },
+                    | None => IntervalSet::new(0, u64::MAX - 1),
+                };
                 let size = iset.iter().map(|i| i.size()).sum::<u64>() as usize;
                 let mut idx = u.choose_index(size)?;
                 let mut value = 0;
@@ -227,7 +235,57 @@ impl ResourceContext {
                 }))
             },
             | (Defvaltype::Handle, _) => Value::Handle(u.arbitrary()?),
-            | (Defvaltype::Flags(flags), _) => Value::Flags(FlagsValue {
+            | (Defvaltype::Flags(flags), Some(tref)) => {
+                let constraint = match cset.get(&tref) {
+                    | Some(constraint) => match constraint {
+                        | wazzi_spec_constraint::program::Constraint::Flags(flags) => {
+                            flags.to_owned()
+                        },
+                        | _ => panic!(),
+                    },
+                    | None => FlagsConstraint::default(),
+                };
+
+                Value::Flags(FlagsValue {
+                    members: flags
+                        .members
+                        .iter()
+                        .map(|member| -> Result<_, arbitrary::Error> {
+                            match constraint.0.get(member) {
+                                | Some(constraints) => {
+                                    if constraints.contains(&FlagConstraint::Set)
+                                        && constraints.contains(&FlagConstraint::Unset)
+                                    {
+                                        panic!();
+                                    }
+
+                                    if constraints.contains(&FlagConstraint::Set) {
+                                        Ok(FlagsMember {
+                                            name:  member.clone(),
+                                            value: true,
+                                        })
+                                    } else if constraints.contains(&FlagConstraint::Unset) {
+                                        Ok(FlagsMember {
+                                            name:  member.clone(),
+                                            value: false,
+                                        })
+                                    } else {
+                                        Ok(FlagsMember {
+                                            name:  member.clone(),
+                                            value: u.arbitrary()?,
+                                        })
+                                    }
+                                },
+                                | None => Ok(FlagsMember {
+                                    name:  member.clone(),
+                                    value: u.arbitrary()?,
+                                }),
+                            }
+                        })
+                        .collect::<Result<_, _>>()?,
+                })
+            },
+            | (Defvaltype::Flags(flags), None) => Value::Flags(FlagsValue {
                 members: flags
                     .members
                     .iter()

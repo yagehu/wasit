@@ -206,7 +206,8 @@ impl Prog {
         let mut params = Vec::with_capacity(function.params.len());
         let mut results = Vec::with_capacity(result_valtypes.len());
         let cset = match &function.spec {
-            | Some(prog) => wazzi_spec_constraint::evaluate(prog),
+            | Some(prog) => wazzi_spec_constraint::evaluate(prog)
+                .wrap_err("failed to evaluate function constraints")?,
             | None => wazzi_spec_constraint::program::ConstraintSet::new(),
         };
 
@@ -222,7 +223,10 @@ impl Prog {
                         name: param_type.name.clone(),
                     }),
                 )
-                .wrap_err("failed to get arbitrary param value")?;
+                .wrap_err(format!(
+                    "failed to get arbitrary param value: {} {}",
+                    function.name, param_type.name,
+                ))?;
 
             params.push(param);
         }

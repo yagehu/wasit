@@ -9,5 +9,6 @@ gcollections.workspace = true
 intervallum.workspace = true
 num-bigint.workspace = true
 num-traits = "*"
+thiserror.workspace = true
 
 [dev-dependencies]
