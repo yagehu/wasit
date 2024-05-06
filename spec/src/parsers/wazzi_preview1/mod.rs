@@ -244,8 +244,8 @@ impl<'a> Function<'a> {
                             Some(Expr::SExpr(exprs))
                             if matches!(
                                 exprs.first(),
-                                Some(Expr::Keyword(span))
-                                if span.keyword == Keyword::Spec
+                                Some(Expr::Annotation(span))
+                                if *span.name == "constraint"
                             )
                         )
                 })
@@ -844,29 +844,6 @@ impl<'a> Expr<'a> {
     }
 
     fn into_constraint(self) -> wazzi_spec_constraint::Program {
-        fn into_unspecified(e: Expr) -> wazzi_spec_constraint::program::Unspecified {
-            let exprs = match e {
-                | Expr::SExpr(exprs) => exprs,
-                | _ => panic!(),
-            };
-            let exprs = match exprs[1].clone() {
-                | Expr::SExpr(exprs) => exprs,
-                | _ => panic!(),
-            };
-            let exprs = match exprs[1].clone() {
-                | Expr::SExpr(exprs) => exprs,
-                | _ => panic!(),
-            };
-            let name = match exprs[1].clone() {
-                | Expr::SymbolicIdx(s) => s.name().to_owned(),
-                | _ => panic!("{:?}", exprs[1]),
-            };
-
-            wazzi_spec_constraint::program::Unspecified {
-                tref: wazzi_spec_constraint::program::TypeRef::Result { name },
-            }
-        }
-
         fn into_expr(e: Expr) -> wazzi_spec_constraint::program::Expr {
             match e {
                 | Expr::Annotation(_) => todo!(),
@@ -875,6 +852,9 @@ impl<'a> Expr<'a> {
                 | Expr::NumLit(_) => todo!(),
                 | Expr::SExpr(exprs) => {
                     match exprs.first().unwrap() {
+                        | Expr::Annotation(span) => match *span.name {
+                            | "and" => {},
+                        },
                         | Expr::Keyword(span) => match span.keyword {
                             | Keyword::I64Const => wazzi_spec_constraint::program::Expr::Number(
                                 BigInt::from(match &exprs[1] {
@@ -1000,7 +980,6 @@ pub enum Keyword {
     U32,
     U64,
     Union,
-    Unspecified,
     Write,
 }
 
@@ -1039,7 +1018,6 @@ impl<'a> KeywordSpan<'a> {
                 tag("u32").map(|s| (s, Keyword::U32)),
                 tag("u64").map(|s| (s, Keyword::U64)),
                 tag("union").map(|s| (s, Keyword::Union)),
-                tag("unspecified").map(|s| (s, Keyword::Unspecified)),
                 tag("write").map(|s| (s, Keyword::Write)),
             )),
         ))

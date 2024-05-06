@@ -1,7 +1,7 @@
 use core::fmt;
 use std::collections::HashMap;
 
-use gcollections::ops::{Bounded as _, Complement as _, Union as _};
+use gcollections::ops::{Bounded as _, Union as _};
 use interval::{
     interval_set::ToIntervalSet as _,
     ops::{Range, Width},
@@ -17,16 +17,6 @@ pub struct ConstraintSet(HashMap<TypeRef, IntervalSet<u64>>);
 impl ConstraintSet {
     pub fn new() -> Self {
         Self(Default::default())
-    }
-
-    fn invert(&self) -> ConstraintSet {
-        let mut cset = Self::new();
-
-        for (tref, iset) in &self.0 {
-            cset.0.insert(tref.to_owned(), iset.complement());
-        }
-
-        cset
     }
 
     pub fn get<T>(&self, tref: &TypeRef) -> IntervalSet<T>
@@ -61,11 +51,10 @@ pub struct Program {
 pub enum Expr {
     And(Box<And>),
     U64Gt(Box<U64Gt>),
+    U64Le(Box<U64Le>),
     U64Lt(Box<U64Lt>),
-    If(Box<If>),
     Number(BigInt),
     TypeRef(TypeRef),
-    Unspecified,
 }
 
 impl Expr {
@@ -74,10 +63,8 @@ impl Expr {
             | Expr::And(e) => e.eval(),
             | Expr::U64Gt(e) => e.eval(),
             | Expr::U64Lt(e) => e.eval(),
-            | Expr::If(e) => e.eval(),
             | Expr::Number(_) => todo!(),
             | Expr::TypeRef(_) => todo!(),
-            | Expr::Unspecified => todo!(),
         }
     }
 }
@@ -164,36 +151,8 @@ impl U64Lt {
     }
 }
 
-#[derive(PartialEq, Eq, Debug, Clone)]
-pub struct If {
-    pub cond: Expr,
-    pub then: Unspecified,
-}
-
-impl If {
-    fn eval(&self) -> ConstraintSet {
-        let cond = self.cond.eval();
-
-        // The then clause can only refer to the result for now.
-        let _tref = self.then.eval();
-
-        cond.invert()
-    }
-}
-
 #[derive(Hash, PartialEq, Eq, Debug, Clone)]
 pub enum TypeRef {
     Param { name: String },
     Result { name: String },
-}
-
-#[derive(Hash, PartialEq, Eq, Debug, Clone)]
-pub struct Unspecified {
-    pub tref: TypeRef,
-}
-
-impl Unspecified {
-    fn eval(&self) -> TypeRef {
-        self.tref.clone()
-    }
 }
