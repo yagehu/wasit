@@ -163,6 +163,31 @@ impl ResourceContext {
         tref: Option<wazzi_spec_constraint::program::TypeRef>,
     ) -> Result<Value, eyre::Error> {
         Ok(match (def, tref) {
+            | (Defvaltype::S64, Some(tref)) => {
+                let iset = match cset.get(&tref) {
+                    | Some(constraint) => match constraint {
+                        | wazzi_spec_constraint::program::Constraint::S64(iset) => iset.to_owned(),
+                        | _ => panic!(),
+                    },
+                    | None => IntervalSet::new(i64::MIN + 1, i64::MAX - 1),
+                };
+                let size = iset.iter().map(|i| i.size()).sum::<u64>() as usize;
+                let mut idx = u.choose_index(size)?;
+                let mut value = i64::MIN;
+
+                for int in iset.iter() {
+                    let size = int.size() as usize;
+
+                    if size > idx {
+                        value = iset.lower() + idx as i64;
+                        break;
+                    }
+
+                    idx -= size;
+                }
+
+                Value::S64(value)
+            },
             | (Defvaltype::S64, _) => Value::S64(u.arbitrary()?),
             | (Defvaltype::U8, _) => Value::U8(u.arbitrary()?),
             | (Defvaltype::U16, _) => Value::U16(u.arbitrary()?),

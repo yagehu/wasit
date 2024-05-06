@@ -899,6 +899,12 @@ impl<'a> Expr<'a> {
                                     rhs: into_expr(exprs[2].clone()),
                                 }),
                             ),
+                            | Keyword::I64LeS => wazzi_spec_constraint::program::Expr::U64LeS(
+                                Box::new(wazzi_spec_constraint::program::U64LeS {
+                                    lhs: into_expr(exprs[1].clone()),
+                                    rhs: into_expr(exprs[2].clone()),
+                                }),
+                            ),
                             | Keyword::I64LeU => wazzi_spec_constraint::program::Expr::U64LeU(
                                 Box::new(wazzi_spec_constraint::program::U64LeU {
                                     lhs: into_expr(exprs[1].clone()),
@@ -993,6 +999,7 @@ pub enum Keyword {
     Handle,
     I64Const,
     I64GtU,
+    I64LeS,
     I64LeU,
     If,
     List,
@@ -1029,6 +1036,7 @@ impl<'a> KeywordSpan<'a> {
                 tag("handle").map(|s| (s, Keyword::Handle)),
                 tag("i64.const").map(|s| (s, Keyword::I64Const)),
                 tag("i64.gt_u").map(|s| (s, Keyword::I64GtU)),
+                tag("i64.le_s").map(|s| (s, Keyword::I64LeS)),
                 tag("i64.le_u").map(|s| (s, Keyword::I64LeU)),
                 tag("if").map(|s| (s, Keyword::If)),
                 tag("list").map(|s| (s, Keyword::List)),
@@ -1038,9 +1046,9 @@ impl<'a> KeywordSpan<'a> {
                 tag("result").map(|s| (s, Keyword::Result)),
                 tag("s64").map(|s| (s, Keyword::S64)),
                 tag("spec").map(|s| (s, Keyword::Spec)),
-                tag("state").map(|s| (s, Keyword::State)),
             )),
             alt((
+                tag("state").map(|s| (s, Keyword::State)),
                 tag("tag").map(|s| (s, Keyword::Tag)),
                 tag("then").map(|s| (s, Keyword::Then)),
                 tag("typename").map(|s| (s, Keyword::Typename)),

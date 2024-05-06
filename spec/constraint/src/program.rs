@@ -21,6 +21,7 @@ pub enum ConstraintSetError {
 pub enum Constraint {
     Flags(FlagsConstraint),
     U64(IntervalSet<u64>),
+    S64(IntervalSet<i64>),
 }
 
 impl Constraint {
@@ -30,7 +31,8 @@ impl Constraint {
         match (&mut ret, other) {
             | (Constraint::Flags(l), Constraint::Flags(r)) => *l = l.union(r),
             | (Constraint::U64(l), Constraint::U64(r)) => *l = l.union(r),
-            | (Self::Flags(_), _) | (Constraint::U64(_), _) => {
+            | (Constraint::S64(l), Constraint::S64(r)) => *l = l.union(r),
+            | (Self::Flags(_), _) | (Constraint::U64(_), _) | (Constraint::S64(_), _) => {
                 return Err(ConstraintError::Conflict)
             },
         }
@@ -116,6 +118,7 @@ impl Expr {
             | Expr::And(e) => e.eval()?,
             | Expr::Flag(e) => e.eval(),
             | Expr::U64GtU(e) => e.eval(),
+            | Expr::U64LeS(e) => e.eval(),
             | Expr::U64LeU(e) => e.eval(),
             | Expr::U64LtU(e) => e.eval(),
             | Expr::Number(_) => todo!(),
@@ -193,6 +196,40 @@ impl U64GtU {
                 );
             },
             | _ => panic!("u64.gt"),
+        }
+
+        cset
+    }
+}
+
+#[derive(PartialEq, Eq, Debug, Clone)]
+pub struct U64LeS {
+    pub lhs: Expr,
+    pub rhs: Expr,
+}
+
+impl U64LeS {
+    fn eval(&self) -> ConstraintSet {
+        let mut cset = ConstraintSet::new();
+
+        match (&self.lhs, &self.rhs) {
+            | (Expr::Number(num), Expr::TypeRef(tref)) => {
+                cset.0.insert(
+                    tref.to_owned(),
+                    Constraint::S64(
+                        vec![(i64::try_from(num).unwrap(), i64::MAX - 1)].to_interval_set(),
+                    ),
+                );
+            },
+            | (Expr::TypeRef(tref), Expr::Number(num)) => {
+                cset.0.insert(
+                    tref.to_owned(),
+                    Constraint::S64(
+                        vec![(i64::MIN + 1, i64::try_from(num).unwrap())].to_interval_set(),
+                    ),
+                );
+            },
+            | _ => panic!("u64.le_s"),
         }
 
         cset

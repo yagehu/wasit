@@ -218,6 +218,8 @@
     (result $error (expected (error $errno)))
     (@wazzi (@constraint (@and
       (@flag-unset (param $flags) (field $dsync))
+      (@flag-unset (param $flags) (field $rsync))
+      (@flag-unset (param $flags) (field $sync))
     )))
   )
 
@@ -359,7 +361,7 @@
     (param $whence $whence)
     (result $error (expected $filesize (error $errno)))
     (@wazzi (@constraint (@and
-      (i64.le_u (param $offset) (i64.const 17592186040320))
+      (i64.le_s (param $offset) (i64.const 17592186040320))
     )))
   )
 
