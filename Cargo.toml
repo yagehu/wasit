@@ -6,6 +6,7 @@ publish = false
 resolver = "2"
 members = [
     "compile-time",
+    "dyn-spec",
     "executor",
     "executor/pb/c",
     "executor/pb/rust",

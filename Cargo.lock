@@ -1681,6 +1681,13 @@ name = "wazzi-compile-time"
 version = "0.1.0"
 
 [[package]]
+name = "wazzi-dyn-spec"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
 name = "wazzi-executor"
 version = "0.1.0"
 dependencies = [
