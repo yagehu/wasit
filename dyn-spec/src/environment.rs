@@ -416,4 +416,116 @@ mod tests {
 
         assert_eq!(solution.params, vec![Param::Resource(fd_resource)]);
     }
+
+    #[test]
+    fn conjunction() {
+        let mut env = Environment::new();
+        let fd_idx = env.resource_types_mut().push(
+            "fd".to_owned(),
+            ResourceType {
+                wasi_type:  wasi::Type::Handle,
+                attributes: HashMap::from([("offset".to_owned(), wasi::Type::U64)]),
+            },
+        );
+
+        env.functions_mut().push(
+            "fd_seek".to_owned(),
+            Function {
+                params: vec![FunctionParam {
+                    name:              "fd".to_owned(),
+                    resource_type_idx: fd_idx,
+                }],
+            },
+        );
+
+        let mut u = Unstructured::new(&[]);
+        let fd_resource = env.insert_resource(
+            "fd".to_owned(),
+            Resource {
+                value: wasi::Value::I64(3),
+                attrs: HashMap::from([("offset".to_owned(), wasi::Value::I64(10))]),
+            },
+        );
+        let solution = env
+            .solve(
+                &mut u,
+                &Term::Conj(term::Conj {
+                    clauses: vec![
+                        Term::I64Ge(Box::new(term::I64Ge {
+                            lhs: Term::Attr(term::Attr {
+                                param: "fd".to_owned(),
+                                name:  "offset".to_owned(),
+                            }),
+                            rhs: Term::Value(wasi::Value::I64(10)),
+                        })),
+                        Term::I64Ge(Box::new(term::I64Ge {
+                            lhs: Term::Attr(term::Attr {
+                                param: "fd".to_owned(),
+                                name:  "offset".to_owned(),
+                            }),
+                            rhs: Term::Value(wasi::Value::I64(0)),
+                        })),
+                    ],
+                }),
+                &Idx::Symbolic("fd_seek".to_owned()),
+            )
+            .expect("no solution found");
+
+        assert_eq!(solution.params, vec![Param::Resource(fd_resource)]);
+    }
+
+    #[test]
+    fn conjunction_no_solution() {
+        let mut env = Environment::new();
+        let fd_idx = env.resource_types_mut().push(
+            "fd".to_owned(),
+            ResourceType {
+                wasi_type:  wasi::Type::Handle,
+                attributes: HashMap::from([("offset".to_owned(), wasi::Type::U64)]),
+            },
+        );
+
+        env.functions_mut().push(
+            "fd_seek".to_owned(),
+            Function {
+                params: vec![FunctionParam {
+                    name:              "fd".to_owned(),
+                    resource_type_idx: fd_idx,
+                }],
+            },
+        );
+
+        let mut u = Unstructured::new(&[]);
+        let fd_resource = env.insert_resource(
+            "fd".to_owned(),
+            Resource {
+                value: wasi::Value::I64(3),
+                attrs: HashMap::from([("offset".to_owned(), wasi::Value::I64(9))]),
+            },
+        );
+        let maybe_solution = env.solve(
+            &mut u,
+            &Term::Conj(term::Conj {
+                clauses: vec![
+                    Term::I64Ge(Box::new(term::I64Ge {
+                        lhs: Term::Attr(term::Attr {
+                            param: "fd".to_owned(),
+                            name:  "offset".to_owned(),
+                        }),
+                        rhs: Term::Value(wasi::Value::I64(10)),
+                    })),
+                    Term::I64Ge(Box::new(term::I64Ge {
+                        lhs: Term::Attr(term::Attr {
+                            param: "fd".to_owned(),
+                            name:  "offset".to_owned(),
+                        }),
+                        rhs: Term::Value(wasi::Value::I64(0)),
+                    })),
+                ],
+            }),
+            &Idx::Symbolic("fd_seek".to_owned()),
+        );
+
+        assert!(maybe_solution.is_none());
+    }
 }
