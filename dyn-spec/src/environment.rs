@@ -2,13 +2,12 @@ use std::collections::{BTreeSet, HashMap};
 
 use arbitrary::Unstructured;
 
-use crate::{
-    ast::Idx,
-    term::{self, Variable},
-    wasi,
-    IndexSpace,
-    Term,
-};
+use crate::{ast::Idx, term, wasi, IndexSpace, Term};
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub enum Variable {
+    Resource(Resource),
+}
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Function {
@@ -30,6 +29,7 @@ pub struct ResourceType {
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Resource {
     pub value: wasi::Value,
+    pub attrs: HashMap<String, wasi::Value>,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -102,8 +102,8 @@ impl Environment {
             },
         };
         let param_name = match &var {
-            | Variable::Attr(attr) => &attr.param,
-            | Variable::Param(param) => &param.name,
+            | term::Variable::Attr(attr) => &attr.param,
+            | term::Variable::Param(param) => &param.name,
         }
         .to_owned();
         let function = self.functions.get(function_idx).unwrap();
@@ -111,10 +111,6 @@ impl Environment {
             .params
             .iter()
             .find(|p| p.name == param_name)
-            .unwrap();
-        let resource_type = self
-            .resource_types
-            .get(&Idx::Numeric(param.resource_type_idx))
             .unwrap();
         let mut resource_idxs = self
             .resources_by_types
@@ -146,7 +142,7 @@ impl Environment {
 
             solution.push(Param::Resource(resource_idx));
 
-            let guess = self.guess_variable(&var, resource.value.clone(), t);
+            let guess = self.guess_variable(&var, Variable::Resource(resource.clone()), t);
             let solved = self.solve_helper(u, &guess, function_idx, solution);
 
             if solved {
@@ -159,13 +155,13 @@ impl Environment {
         false
     }
 
-    fn guess_variable(&self, variable: &Variable, value: wasi::Value, t: &Term) -> Term {
+    fn guess_variable(&self, replace: &term::Variable, with: Variable, t: &Term) -> Term {
         match t {
             | Term::Conj(conj) => {
                 let mut clauses = Vec::new();
 
                 for clause in &conj.clauses {
-                    let clause = self.guess_variable(variable, value.clone(), clause);
+                    let clause = self.guess_variable(replace, with.clone(), clause);
 
                     match clause {
                         | Term::Value(wasi::Value::Bool(b)) => {
@@ -189,27 +185,33 @@ impl Environment {
             },
             | Term::Disj(disj) => todo!(),
             | Term::Attr(attr) => {
-                if let Variable::Attr(a) = variable {
-                    if a == attr {
-                        return Term::Value(value);
-                    }
+                match (replace, with) {
+                    | (term::Variable::Attr(a), Variable::Resource(resource)) => {
+                        if a == attr {
+                            return Term::Value(resource.attrs.get(&a.name).unwrap().to_owned());
+                        }
+                    },
+                    | _ => panic!(),
                 }
 
                 return t.to_owned();
             },
             | Term::Param(param) => {
-                if let Variable::Param(p) = variable {
-                    if p == param {
-                        return Term::Value(value);
-                    }
+                match (replace, with) {
+                    | (term::Variable::Param(p), Variable::Resource(resource)) => {
+                        if p == param {
+                            return Term::Value(resource.value.clone());
+                        }
+                    },
+                    | _ => panic!(),
                 }
 
                 return t.to_owned();
             },
             | Term::Value(_v) => t.to_owned(),
             | Term::I64Ge(op) => {
-                let lhs = self.guess_variable(variable, value.clone(), &op.lhs);
-                let rhs = self.guess_variable(variable, value, &op.rhs);
+                let lhs = self.guess_variable(replace, with.clone(), &op.lhs);
+                let rhs = self.guess_variable(replace, with, &op.rhs);
 
                 match (&lhs, &rhs) {
                     | (
@@ -225,7 +227,7 @@ impl Environment {
         }
     }
 
-    fn free_variable(&self, term: &Term) -> Option<Variable> {
+    fn free_variable(&self, term: &Term) -> Option<term::Variable> {
         match term {
             | Term::Conj(conj) => {
                 let mut var = None;
@@ -253,8 +255,8 @@ impl Environment {
 
                 var
             },
-            | Term::Attr(attr) => Some(Variable::Attr(attr.to_owned())),
-            | Term::Param(param) => Some(Variable::Param(param.to_owned())),
+            | Term::Attr(attr) => Some(term::Variable::Attr(attr.to_owned())),
+            | Term::Param(param) => Some(term::Variable::Param(param.to_owned())),
             | Term::Value(_) => None,
             | Term::I64Ge(op) => {
                 if let Some(var) = self.free_variable(&op.lhs) {
@@ -314,6 +316,7 @@ mod tests {
             "filedelta".to_owned(),
             Resource {
                 value: wasi::Value::I64(0),
+                attrs: Default::default(),
             },
         );
         let solution = env
@@ -333,7 +336,7 @@ mod tests {
     }
 
     #[test]
-    fn simple_clause_no_solution() {
+    fn simple_clause_no_resource() {
         let mut env = Environment::new();
         let filedelta_idx = env.resource_types_mut().push(
             "filedelta".to_owned(),
@@ -366,5 +369,51 @@ mod tests {
         );
 
         assert!(maybe_solution.is_none(), "{:?}", maybe_solution);
+    }
+
+    #[test]
+    fn simple_clause_attribute() {
+        let mut env = Environment::new();
+        let fd_idx = env.resource_types_mut().push(
+            "fd".to_owned(),
+            ResourceType {
+                wasi_type:  wasi::Type::Handle,
+                attributes: HashMap::from([("offset".to_owned(), wasi::Type::U64)]),
+            },
+        );
+
+        env.functions_mut().push(
+            "fd_seek".to_owned(),
+            Function {
+                params: vec![FunctionParam {
+                    name:              "fd".to_owned(),
+                    resource_type_idx: fd_idx,
+                }],
+            },
+        );
+
+        let mut u = Unstructured::new(&[]);
+        let fd_resource = env.insert_resource(
+            "fd".to_owned(),
+            Resource {
+                value: wasi::Value::I64(3),
+                attrs: HashMap::from([("offset".to_owned(), wasi::Value::I64(10))]),
+            },
+        );
+        let solution = env
+            .solve(
+                &mut u,
+                &Term::I64Ge(Box::new(term::I64Ge {
+                    lhs: Term::Attr(term::Attr {
+                        param: "fd".to_owned(),
+                        name:  "offset".to_owned(),
+                    }),
+                    rhs: Term::Value(wasi::Value::I64(10)),
+                })),
+                &Idx::Symbolic("fd_seek".to_owned()),
+            )
+            .expect("no solution found");
+
+        assert_eq!(solution.params, vec![Param::Resource(fd_resource)]);
     }
 }
