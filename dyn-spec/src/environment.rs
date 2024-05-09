@@ -79,22 +79,9 @@ impl Environment {
 
         self.solve_helper(u, t, function, &mut solution);
 
-        // for (i, param) in function.params.iter().enumerate() {
-        //     match bound_params.get(bound_param_idx) {
-        //         | Some(bound_param) if bound_param.name == param.name => {
-        //             // Fungibility
-
-        //             let resource_type = self
-        //                 .resource_types
-        //                 .get(&Idx::Numeric(param.resource_type_idx));
-        //             let resources = self.resources_by_types.get(&param.resource_type_idx)?;
-        //             let resource_pool = resources.into_iter().cloned().collect::<Vec<_>>();
-
-        //             for resource_idx in resource_pool {}
-        //         },
-        //         | _ => todo!(),
-        //     }
-        // }
+        if solution.is_empty() {
+            return None;
+        }
 
         Some(Solution::new(solution))
     }
@@ -132,10 +119,14 @@ impl Environment {
         let mut resource_idxs = self
             .resources_by_types
             .get(&param.resource_type_idx)
-            .unwrap()
-            .iter()
             .cloned()
+            .unwrap_or_default()
+            .into_iter()
             .collect::<Vec<_>>();
+
+        if resource_idxs.is_empty() {
+            return false;
+        }
 
         // Shuffle the resource pool.
 
@@ -298,41 +289,12 @@ mod tests {
     use crate::term;
 
     #[test]
-    fn ok() {
+    fn simple_clause() {
         let mut env = Environment::new();
-        let fd_idx = env.resource_types_mut().push(
-            "fd".to_owned(),
-            ResourceType {
-                wasi_type:  wasi::Type::Handle,
-                attributes: HashMap::from([("offset".to_owned(), wasi::Type::U64)]),
-            },
-        );
         let filedelta_idx = env.resource_types_mut().push(
             "filedelta".to_owned(),
             ResourceType {
                 wasi_type:  wasi::Type::I64,
-                attributes: Default::default(),
-            },
-        );
-        let whence_idx = env.resource_types_mut().push(
-            "whence".to_owned(),
-            ResourceType {
-                wasi_type:  wasi::Type::Variant(wasi::VariantType {
-                    cases: vec![
-                        wasi::CaseType {
-                            name:    "set".to_owned(),
-                            payload: None,
-                        },
-                        wasi::CaseType {
-                            name:    "cur".to_owned(),
-                            payload: None,
-                        },
-                        wasi::CaseType {
-                            name:    "end".to_owned(),
-                            payload: None,
-                        },
-                    ],
-                }),
                 attributes: Default::default(),
             },
         );
@@ -368,5 +330,41 @@ mod tests {
             .expect("no solution found");
 
         assert_eq!(solution.params, vec![Param::Resource(filedelta_resource)]);
+    }
+
+    #[test]
+    fn simple_clause_no_solution() {
+        let mut env = Environment::new();
+        let filedelta_idx = env.resource_types_mut().push(
+            "filedelta".to_owned(),
+            ResourceType {
+                wasi_type:  wasi::Type::I64,
+                attributes: Default::default(),
+            },
+        );
+
+        env.functions_mut().push(
+            "fd_seek".to_owned(),
+            Function {
+                params: vec![FunctionParam {
+                    name:              "offset".to_owned(),
+                    resource_type_idx: filedelta_idx,
+                }],
+            },
+        );
+
+        let mut u = Unstructured::new(&[]);
+        let maybe_solution = env.solve(
+            &mut u,
+            &Term::I64Ge(Box::new(term::I64Ge {
+                lhs: Term::Param(term::Param {
+                    name: "offset".to_owned(),
+                }),
+                rhs: Term::Value(wasi::Value::I64(0)),
+            })),
+            &Idx::Symbolic("fd_seek".to_owned()),
+        );
+
+        assert!(maybe_solution.is_none(), "{:?}", maybe_solution);
     }
 }
