@@ -15,6 +15,7 @@ pub enum Type {
     I64,
     U32,
     U64,
+    Handle,
     Variant(VariantType),
 }
 

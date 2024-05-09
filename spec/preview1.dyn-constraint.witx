@@ -81,6 +81,19 @@
     )
   )
 
+  (typename $filetype
+    (enum (@witx tag u8)
+      $unknown
+      $block_device
+      $character_device
+      $directory
+      $regular_file
+      $socket_dgram
+      $socket_stream
+      $symbolic_link
+    )
+  )
+
   (typename $fd (handle))
 
   (@resource $fd
@@ -88,6 +101,7 @@
     (@attribute $flags $fdflags)
     (@attribute $rights-base $rights)
     (@attribute $rights-inheriting $rights)
+    (@attribute $file-type $filetype)
   )
 
   (typename $fdflags
@@ -164,16 +178,62 @@
     (param $fdflags $fdflags)
     (result $error (expected $fd (error $errno)))
     (@spec
-      (if
-        (@value.eq (result $errno) (enum $errno $success))
-        (then
-          (@attr.set (result $fd) $offset (i64.const 0))
-          (@attr.set (result $fd) $flags (param $fdflags))
-          (@attr.set (result $fd) $rights-base (param $fs_rights_base))
-          (@attr.set (result $fd) $rights-inheriting
-            (@value $param.fs_rights_inheriting)
+      (@attr.set (result $fd) $offset (i64.const 0))
+      (@attr.set (result $fd) $flags (param $fdflags))
+      (@attr.set (result $fd) $rights-base (param $fs_rights_base))
+      (@attr.set (result $fd) $rights-inheriting (@value $param.fs_rights_inheriting))
+      (@attr.set (result $fd) $path
+        (@path.join
+          (@attr.get (param $fd) $path)
+          (param $path)
+        )
+      )
+      (@attr.set (result $fd) $file-type
+        (@fs.resolve-type
+          (@attr.get (param $fd) $path)
+          (param $path)
+        )
+      )
+    )
+  )
+
+  (typename $whence
+    (enum (@witx tag u8)
+      $set
+      $cur
+      $end
+    )
+  )
+
+  (@interface func (export "fd_seek")
+    (param $fd $fd)
+    (param $offset $filedelta)
+    (param $whence $whence)
+    (result $error (expected $filesize (error $errno)))
+    (@contract
+      (@or
+        (@and
+          (@value.eq (param $whence) (enum $whence $set))
+          (i64.le_s (param $offset) (i64.const 17592186040320))
+          (i64.ge_s (param $offset) (i64.const 0))
+        )
+        (@and
+          (@value.eq (param $whence) (enum $whence $cur))
+          (i64.le_s
+            (i64.add (param $offset) (@attr.get (param $fd) $offset))
+            (i64.const 17592186040320)
+          )
+          (i64.ge_s
+            (i64.add (param $offset) (@attr.get (param $fd) $offset))
+            (i64.const 0)
           )
         )
+      )
+    )
+    (@spec
+      (if
+        (@value.ne (result $errno) (enum $errno $success))
+        (then (@unchanged))
       )
     )
   )
