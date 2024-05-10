@@ -1,8 +1,4 @@
-use crate::{
-    environment::{Function, FunctionParam},
-    wasi,
-    Environment,
-};
+use crate::wasi;
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum Variable {
@@ -20,59 +16,9 @@ pub enum Term {
 
     Value(wasi::Value),
 
+    ValueEq(Box<ValueEq>),
     I64Ge(Box<I64Ge>),
-}
-
-impl Term {
-    pub fn bound_params(&self, env: &Environment, function: &Function) -> Vec<FunctionParam> {
-        fn helper(
-            term: &Term,
-            env: &Environment,
-            function: &Function,
-            list: &mut Vec<FunctionParam>,
-        ) {
-            match term {
-                | Term::Conj(conj) => {
-                    for clause in &conj.clauses {
-                        helper(clause, env, function, list);
-                    }
-                },
-                | Term::Disj(disj) => {
-                    for clause in &disj.clauses {
-                        helper(clause, env, function, list);
-                    }
-                },
-                | Term::Attr(attr) => {
-                    let param = function
-                        .params
-                        .iter()
-                        .find(|p| p.name == attr.param)
-                        .unwrap();
-
-                    list.push(param.to_owned());
-                },
-                | Term::Param(param) => list.push(
-                    function
-                        .params
-                        .iter()
-                        .find(|p| p.name == param.name)
-                        .unwrap()
-                        .to_owned(),
-                ),
-                | Term::Value(_) => return,
-                | Term::I64Ge(op) => {
-                    helper(&op.lhs, env, function, list);
-                    helper(&op.rhs, env, function, list);
-                },
-            }
-        }
-
-        let mut ret = Vec::new();
-
-        helper(self, env, function, &mut ret);
-
-        ret
-    }
+    I64Le(Box<I64Le>),
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -97,7 +43,19 @@ pub struct Param {
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
+pub struct ValueEq {
+    pub lhs: Term,
+    pub rhs: Term,
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct I64Ge {
+    pub lhs: Term,
+    pub rhs: Term,
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct I64Le {
     pub lhs: Term,
     pub rhs: Term,
 }

@@ -46,6 +46,7 @@ pub enum Value {
     I64(i64),
     U32(i32),
     U64(u64),
+    Handle(u32),
     Flags(Flags),
     Variant(Box<Variant>),
 }
