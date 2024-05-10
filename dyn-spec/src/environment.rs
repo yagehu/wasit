@@ -150,7 +150,7 @@ impl Environment {
 
                 solution.push(Param::Resource(resource_idx));
 
-                let guess = self.guess_variable(&var, Variable::Resource(resource.clone()), t);
+                let guess = self.guess_variable(u, &var, Variable::Resource(resource.clone()), t);
                 let solved = self.solve_helper(u, &guess, function_idx, solution);
 
                 if solved {
@@ -166,7 +166,7 @@ impl Environment {
 
                 solution.push(Param::Value(value.clone()));
 
-                let guess = self.guess_variable(&var, Variable::Value(value.clone()), t);
+                let guess = self.guess_variable(u, &var, Variable::Value(value.clone()), t);
                 let solved = self.solve_helper(u, &guess, function_idx, solution);
 
                 if solved {
@@ -229,13 +229,19 @@ impl Environment {
         }
     }
 
-    fn guess_variable(&self, replace: &term::Variable, with: Variable, t: &Term) -> Term {
+    fn guess_variable(
+        &self,
+        u: &mut Unstructured,
+        replace: &term::Variable,
+        with: Variable,
+        t: &Term,
+    ) -> Term {
         match t {
             | Term::Conj(conj) => {
                 let mut clauses = Vec::new();
 
                 for clause in &conj.clauses {
-                    let clause = self.guess_variable(replace, with.clone(), clause);
+                    let clause = self.guess_variable(u, replace, with.clone(), clause);
 
                     match clause {
                         | Term::Value(wasi::Value::Bool(b)) => {
@@ -258,10 +264,24 @@ impl Environment {
                 Term::Conj(term::Conj { clauses })
             },
             | Term::Disj(disj) => {
+                // Shuffle the clauses.
+
+                let mut shuffled_clauses = disj.clauses.clone();
+                let mut to_permute = shuffled_clauses.as_mut_slice();
+
+                while to_permute.len() > 1 {
+                    let idx = u.choose_index(to_permute.len()).unwrap();
+
+                    to_permute.swap(0, idx);
+                    to_permute = &mut to_permute[1..];
+                }
+
+                // The clauses are shuffled.
+
                 let mut clauses = Vec::new();
 
-                for clause in &disj.clauses {
-                    let clause = self.guess_variable(replace, with.clone(), clause);
+                for clause in &shuffled_clauses {
+                    let clause = self.guess_variable(u, replace, with.clone(), clause);
 
                     match clause {
                         | Term::Value(wasi::Value::Bool(b)) => {
@@ -317,8 +337,8 @@ impl Environment {
             },
             | Term::Value(_v) => t.to_owned(),
             | Term::ValueEq(op) => {
-                let lhs = self.guess_variable(replace, with.clone(), &op.lhs);
-                let rhs = self.guess_variable(replace, with, &op.rhs);
+                let lhs = self.guess_variable(u, replace, with.clone(), &op.lhs);
+                let rhs = self.guess_variable(u, replace, with, &op.rhs);
 
                 match (&lhs, &rhs) {
                     | (Term::Value(l), Term::Value(r)) => Term::Value(wasi::Value::Bool(l == r)),
@@ -326,8 +346,8 @@ impl Environment {
                 }
             },
             | Term::I64Add(op) => {
-                let l = self.guess_variable(replace, with.clone(), &op.l);
-                let r = self.guess_variable(replace, with, &op.r);
+                let l = self.guess_variable(u, replace, with.clone(), &op.l);
+                let r = self.guess_variable(u, replace, with, &op.r);
 
                 match (&l, &r) {
                     | (&Term::Value(wasi::Value::I64(l)), &Term::Value(wasi::Value::I64(r))) => {
@@ -340,8 +360,8 @@ impl Environment {
                 }
             },
             | Term::I64Ge(op) => {
-                let lhs = self.guess_variable(replace, with.clone(), &op.lhs);
-                let rhs = self.guess_variable(replace, with, &op.rhs);
+                let lhs = self.guess_variable(u, replace, with.clone(), &op.lhs);
+                let rhs = self.guess_variable(u, replace, with, &op.rhs);
 
                 match (&lhs, &rhs) {
                     | (
@@ -355,8 +375,8 @@ impl Environment {
                 }
             },
             | Term::I64Le(op) => {
-                let lhs = self.guess_variable(replace, with.clone(), &op.lhs);
-                let rhs = self.guess_variable(replace, with, &op.rhs);
+                let lhs = self.guess_variable(u, replace, with.clone(), &op.lhs);
+                let rhs = self.guess_variable(u, replace, with, &op.rhs);
 
                 match (&lhs, &rhs) {
                     | (
