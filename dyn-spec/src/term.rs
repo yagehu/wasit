@@ -17,6 +17,7 @@ pub enum Term {
     Value(wasi::Value),
 
     ValueEq(Box<ValueEq>),
+    I64Add(Box<I64Add>),
     I64Ge(Box<I64Ge>),
     I64Le(Box<I64Le>),
 }
@@ -46,6 +47,12 @@ pub struct Param {
 pub struct ValueEq {
     pub lhs: Term,
     pub rhs: Term,
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct I64Add {
+    pub l: Term,
+    pub r: Term,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]

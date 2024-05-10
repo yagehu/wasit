@@ -79,9 +79,7 @@ impl Environment {
     pub fn solve(&self, u: &mut Unstructured, t: &Term, function: &Idx) -> Option<Solution> {
         let mut solution = Vec::new();
 
-        self.solve_helper(u, t, function, &mut solution);
-
-        if solution.is_empty() {
+        if !self.solve_helper(u, t, function, &mut solution) {
             return None;
         }
 
@@ -298,7 +296,7 @@ impl Environment {
                 return t.to_owned();
             },
             | Term::Param(param) => {
-                match (replace, with) {
+                match (replace, &with) {
                     | (term::Variable::Param(p), Variable::Resource(resource)) => {
                         if p == param {
                             return Term::Value(resource.value.clone());
@@ -306,10 +304,13 @@ impl Environment {
                     },
                     | (term::Variable::Param(p), Variable::Value(value)) => {
                         if p == param {
-                            return Term::Value(value);
+                            return Term::Value(value.to_owned());
                         }
                     },
-                    | _ => panic!(),
+                    | (term::Variable::Attr(attr), Variable::Resource(resource)) => {
+                        return Term::Value(resource.attrs.get(&attr.name).unwrap().clone());
+                    },
+                    | _ => panic!("{:?} {:?}", replace, with),
                 }
 
                 return t.to_owned();
@@ -321,6 +322,20 @@ impl Environment {
 
                 match (&lhs, &rhs) {
                     | (Term::Value(l), Term::Value(r)) => Term::Value(wasi::Value::Bool(l == r)),
+                    | _ => t.to_owned(),
+                }
+            },
+            | Term::I64Add(op) => {
+                let l = self.guess_variable(replace, with.clone(), &op.l);
+                let r = self.guess_variable(replace, with, &op.r);
+
+                match (&l, &r) {
+                    | (&Term::Value(wasi::Value::I64(l)), &Term::Value(wasi::Value::I64(r))) => {
+                        Term::Value(wasi::Value::I64(l.checked_add(r).unwrap()))
+                    },
+                    | (Term::Value(_), Term::Value(_)) => {
+                        panic!("expect i64, got {:?} and {:?}", l, r)
+                    },
                     | _ => t.to_owned(),
                 }
             },
@@ -394,6 +409,13 @@ impl Environment {
                 }
 
                 self.free_variable(&op.rhs)
+            },
+            | Term::I64Add(op) => {
+                if let Some(var) = self.free_variable(&op.l) {
+                    return Some(var);
+                }
+
+                self.free_variable(&op.r)
             },
             | Term::I64Ge(op) => {
                 if let Some(var) = self.free_variable(&op.lhs) {
@@ -853,6 +875,113 @@ mod tests {
                     payload:   None,
                 }
             )))]
+        );
+    }
+
+    #[test]
+    fn nested_disj_conj_arith() {
+        let mut env = Environment::new();
+        let fd_idx = env.resource_types_mut().push(
+            "fd".to_owned(),
+            ResourceType {
+                wasi_type:  wasi::Type::Handle,
+                attributes: HashMap::from([("offset".to_owned(), wasi::Type::U64)]),
+                fungible:   false,
+            },
+        );
+        let whence_idx = env.resource_types_mut().push(
+            "whence".to_owned(),
+            ResourceType {
+                wasi_type:  wasi::Type::Variant(wasi::VariantType {
+                    cases: vec![
+                        wasi::CaseType {
+                            name:    "set".to_owned(),
+                            payload: None,
+                        },
+                        wasi::CaseType {
+                            name:    "cur".to_owned(),
+                            payload: None,
+                        },
+                        wasi::CaseType {
+                            name:    "end".to_owned(),
+                            payload: None,
+                        },
+                    ],
+                }),
+                attributes: Default::default(),
+                fungible:   true,
+            },
+        );
+
+        env.functions_mut().push(
+            "fd_seek".to_owned(),
+            Function {
+                params: vec![
+                    FunctionParam {
+                        name:              "fd".to_owned(),
+                        resource_type_idx: fd_idx,
+                    },
+                    FunctionParam {
+                        name:              "whence".to_owned(),
+                        resource_type_idx: whence_idx,
+                    },
+                ],
+            },
+        );
+
+        let mut u = Unstructured::new(&[]);
+        let fd_resource = env.insert_resource(
+            "fd".to_owned(),
+            Resource {
+                value: wasi::Value::I64(3),
+                attrs: HashMap::from([("offset".to_owned(), wasi::Value::I64(10))]),
+            },
+        );
+        let solution = env
+            .solve(
+                &mut u,
+                &Term::Disj(term::Disj {
+                    clauses: vec![Term::Conj(term::Conj {
+                        clauses: vec![
+                            Term::ValueEq(Box::new(term::ValueEq {
+                                lhs: Term::Param(term::Param {
+                                    name: "whence".to_owned(),
+                                }),
+                                rhs: Term::Value(wasi::Value::Variant(Box::new(wasi::Variant {
+                                    case_idx:  1,
+                                    case_name: "cur".to_owned(),
+                                    payload:   None,
+                                }))),
+                            })),
+                            Term::I64Ge(Box::new(term::I64Ge {
+                                lhs: Term::I64Add(Box::new(term::I64Add {
+                                    l: Term::Attr(term::Attr {
+                                        param: "fd".to_owned(),
+                                        name:  "offset".to_owned(),
+                                    }),
+                                    r: Term::Param(term::Param {
+                                        name: "offset".to_owned(),
+                                    }),
+                                })),
+                                rhs: Term::Value(wasi::Value::I64(10)),
+                            })),
+                        ],
+                    })],
+                }),
+                &Idx::Symbolic("fd_seek".to_owned()),
+            )
+            .expect("no solution found");
+
+        assert_eq!(
+            solution.params,
+            vec![
+                Param::Value(wasi::Value::Variant(Box::new(wasi::Variant {
+                    case_idx:  1,
+                    case_name: "cur".to_owned(),
+                    payload:   None,
+                }))),
+                Param::Resource(fd_resource)
+            ]
         );
     }
 }
