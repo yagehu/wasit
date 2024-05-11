@@ -86,7 +86,7 @@ fn ok() {
             }
             panic!();
         },
-        | Err(GenericErrorTree::Base { location, kind }) => {
+        | Err(GenericErrorTree::Base { location, kind: _ }) => {
             eprintln!("{location}");
             panic!();
         },

@@ -4,7 +4,6 @@ use nom::{
     character::complete::{char, multispace0, multispace1, none_of, one_of},
     combinator::{eof, peek, success},
     error::ParseError,
-    multi::{many0, separated_list0, separated_list1},
     sequence::{delimited, pair, tuple},
     Parser,
 };
@@ -94,8 +93,8 @@ impl<'a> Module<'a> {
         }
 
         for typename in typenames {
-            let defvaltype = typename.tref.into_package(&interface)?;
-            let resource_name = typename.id.map(|id| id.name().to_owned());
+            let _defvaltype = typename.tref.into_package(&interface)?;
+            let _resource_name = typename.id.map(|id| id.name().to_owned());
 
             todo!();
             // interface.register_resource(defvaltype, resource_name)?;

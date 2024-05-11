@@ -13,7 +13,8 @@ pub enum Variable {
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Function {
-    pub params: Vec<FunctionParam>,
+    pub params:         Vec<FunctionParam>,
+    pub input_contract: Option<Term>,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -65,7 +66,7 @@ impl Environment {
                     self.functions.push(
                         Some(function.name.to_owned()),
                         Function {
-                            params: function
+                            params:         function
                                 .params
                                 .iter()
                                 .map(|p| {
@@ -84,6 +85,13 @@ impl Environment {
                                     }
                                 })
                                 .collect(),
+                            input_contract: function
+                                .annotations
+                                .iter()
+                                .find(|annot| annot.span.name == "input-contract")
+                                .map(|annot| {
+                                    Term::from_preview1_annotation(self, annot.to_owned())
+                                }),
                         },
                     );
                 },
@@ -604,10 +612,11 @@ mod tests {
         env.functions_mut().push(
             Some("fd_seek".to_owned()),
             Function {
-                params: vec![FunctionParam {
+                params:         vec![FunctionParam {
                     name:              "offset".to_owned(),
                     resource_type_idx: filedelta_idx,
                 }],
+                input_contract: None,
             },
         );
 
@@ -650,10 +659,11 @@ mod tests {
         env.functions_mut().push(
             Some("fd_seek".to_owned()),
             Function {
-                params: vec![FunctionParam {
+                params:         vec![FunctionParam {
                     name:              "offset".to_owned(),
                     resource_type_idx: filedelta_idx,
                 }],
+                input_contract: None,
             },
         );
 
@@ -689,10 +699,11 @@ mod tests {
         env.functions_mut().push(
             Some("fd_seek".to_owned()),
             Function {
-                params: vec![FunctionParam {
+                params:         vec![FunctionParam {
                     name:              "fd".to_owned(),
                     resource_type_idx: fd_idx,
                 }],
+                input_contract: None,
             },
         );
 
@@ -736,10 +747,11 @@ mod tests {
         env.functions_mut().push(
             Some("fd_seek".to_owned()),
             Function {
-                params: vec![FunctionParam {
+                params:         vec![FunctionParam {
                     name:              "fd".to_owned(),
                     resource_type_idx: fd_idx,
                 }],
+                input_contract: None,
             },
         );
 
@@ -794,10 +806,11 @@ mod tests {
         env.functions_mut().push(
             Some("fd_seek".to_owned()),
             Function {
-                params: vec![FunctionParam {
+                params:         vec![FunctionParam {
                     name:              "fd".to_owned(),
                     resource_type_idx: fd_idx,
                 }],
+                input_contract: None,
             },
         );
 
@@ -850,10 +863,11 @@ mod tests {
         env.functions_mut().push(
             Some("fd_seek".to_owned()),
             Function {
-                params: vec![FunctionParam {
+                params:         vec![FunctionParam {
                     name:              "fd".to_owned(),
                     resource_type_idx: fd_idx,
                 }],
+                input_contract: None,
             },
         );
 
@@ -931,7 +945,7 @@ mod tests {
         env.functions_mut().push(
             Some("fd_seek".to_owned()),
             Function {
-                params: vec![
+                params:         vec![
                     FunctionParam {
                         name:              "fd".to_owned(),
                         resource_type_idx: fd_idx,
@@ -941,6 +955,7 @@ mod tests {
                         resource_type_idx: whence_idx,
                     },
                 ],
+                input_contract: None,
             },
         );
 
@@ -1048,7 +1063,7 @@ mod tests {
         env.functions_mut().push(
             Some("fd_seek".to_owned()),
             Function {
-                params: vec![
+                params:         vec![
                     FunctionParam {
                         name:              "fd".to_owned(),
                         resource_type_idx: fd_idx,
@@ -1058,6 +1073,7 @@ mod tests {
                         resource_type_idx: whence_idx,
                     },
                 ],
+                input_contract: None,
             },
         );
 
