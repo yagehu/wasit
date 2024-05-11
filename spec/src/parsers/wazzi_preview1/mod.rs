@@ -170,10 +170,10 @@ impl<'a> Typename<'a> {
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Function<'a> {
-    name:        &'a str,
-    params:      Vec<FuncParam<'a>>,
-    results:     Vec<FuncResult<'a>>,
-    annotations: Vec<Annotation<'a>>,
+    pub name:        &'a str,
+    pub params:      Vec<FuncParam<'a>>,
+    pub results:     Vec<FuncResult<'a>>,
+    pub annotations: Vec<Annotation<'a>>,
 }
 
 impl<'a> Function<'a> {
@@ -264,10 +264,10 @@ impl<'a> Function<'a> {
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-struct FuncParam<'a> {
-    name:        Id<'a>,
-    tref:        TypeRef<'a>,
-    annotations: Vec<Annotation<'a>>,
+pub struct FuncParam<'a> {
+    pub name:        Id<'a>,
+    pub tref:        TypeRef<'a>,
+    pub annotations: Vec<Annotation<'a>>,
 }
 
 impl<'a> FuncParam<'a> {
@@ -335,10 +335,10 @@ impl<'a> FuncParam<'a> {
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-struct FuncResult<'a> {
-    name:        Id<'a>,
-    tref:        TypeRef<'a>,
-    annotations: Vec<Annotation<'a>>,
+pub struct FuncResult<'a> {
+    pub name:        Id<'a>,
+    pub tref:        TypeRef<'a>,
+    pub annotations: Vec<Annotation<'a>>,
 }
 
 impl<'a> FuncResult<'a> {
@@ -543,8 +543,8 @@ impl<'a> RecordType<'a> {
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct EnumType<'a> {
-    repr:  Repr<'a>,
-    cases: Vec<Id<'a>>,
+    pub repr:  Repr<'a>,
+    pub cases: Vec<Id<'a>>,
 }
 
 impl<'a> EnumType<'a> {

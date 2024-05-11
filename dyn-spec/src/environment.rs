@@ -61,26 +61,93 @@ impl Environment {
                 | wazzi_preview1::Decl::Typename(typename) => {
                     self.ingest_preview1_typename(typename);
                 },
-                | wazzi_preview1::Decl::Function(_) => todo!(),
+                | wazzi_preview1::Decl::Function(function) => {
+                    self.functions.push(
+                        Some(function.name.to_owned()),
+                        Function {
+                            params: function
+                                .params
+                                .iter()
+                                .map(|p| {
+                                    let resource_type_idx = match &p.tref {
+                                        | &wazzi_preview1::TypeRef::Numeric(i) => i as usize,
+                                        | wazzi_preview1::TypeRef::Symbolic(id) => self
+                                            .resource_types
+                                            .resolve_idx(&Idx::Symbolic(id.name().to_owned()))
+                                            .expect(&format!("{}", id.name())),
+                                        | wazzi_preview1::TypeRef::Type(_) => todo!(),
+                                    };
+
+                                    FunctionParam {
+                                        name: p.name.name().to_owned(),
+                                        resource_type_idx,
+                                    }
+                                })
+                                .collect(),
+                        },
+                    );
+                },
             }
         }
     }
 
     fn ingest_preview1_typename(&mut self, typename: &wazzi_preview1::Typename) {
-        match &typename.tref {
-            | &wazzi_preview1::TypeRef::Numeric(i) => todo!(),
-            | wazzi_preview1::TypeRef::Symbolic(nameg) => todo!(),
-            | wazzi_preview1::TypeRef::Type(ty) => todo!(),
-        }
+        let wasi_type = match &typename.tref {
+            | &wazzi_preview1::TypeRef::Numeric(i) => self
+                .resource_types
+                .get(&Idx::Numeric(i as usize))
+                .unwrap()
+                .wasi_type
+                .clone(),
+            | wazzi_preview1::TypeRef::Symbolic(name) => self
+                .resource_types
+                .get(&Idx::Symbolic(name.name().to_owned()))
+                .unwrap()
+                .wasi_type
+                .clone(),
+            | wazzi_preview1::TypeRef::Type(ty) => wasi::Type::from_preview1_type(ty),
+        };
 
         self.resource_types.push(
             typename.id.as_ref().map(|id| id.name().to_owned()),
             ResourceType {
-                wasi_type:  todo!(),
-                attributes: todo!(),
-                fungible:   todo!(),
+                wasi_type,
+                attributes: typename
+                    .annotations
+                    .iter()
+                    .filter(|annot| annot.span.name == "attribute")
+                    .map(|annot| {
+                        let name = annot
+                            .exprs
+                            .first()
+                            .unwrap()
+                            .symbolic_idx()
+                            .unwrap()
+                            .name()
+                            .to_owned();
+                        let ty_expr = annot.exprs.get(1).unwrap();
+
+                        (name, self.preview1_expr_as_wasi_type(ty_expr))
+                    })
+                    .collect(),
+                fungible: true,
             },
         );
+    }
+
+    fn preview1_expr_as_wasi_type(&self, expr: &wazzi_preview1::Expr) -> wasi::Type {
+        match expr {
+            | wazzi_preview1::Expr::Annotation(_) => todo!(),
+            | wazzi_preview1::Expr::SymbolicIdx(id) => self
+                .resource_types
+                .get(&Idx::Symbolic(id.name().to_owned()))
+                .expect(&format!("{}", id.name()))
+                .wasi_type
+                .clone(),
+            | wazzi_preview1::Expr::Keyword(_) => todo!(),
+            | wazzi_preview1::Expr::NumLit(_) => todo!(),
+            | wazzi_preview1::Expr::SExpr(_) => todo!(),
+        }
     }
 
     pub fn insert_resource(&mut self, resource_type: String, resource: Resource) -> usize {
@@ -240,6 +307,21 @@ impl Environment {
             | wasi::Type::U32 => todo!(),
             | wasi::Type::U64 => todo!(),
             | wasi::Type::Handle => wasi::Value::Handle(u.arbitrary().unwrap()),
+            | wasi::Type::Flags(flags) => {
+                let mut fields = Vec::with_capacity(flags.fields.len());
+
+                for field in flags.fields.iter() {
+                    fields.push(wasi::FlagField {
+                        name:  field.clone(),
+                        value: u.arbitrary().unwrap(),
+                    })
+                }
+
+                wasi::Value::Flags(wasi::Flags {
+                    repr: flags.repr.into(),
+                    fields,
+                })
+            },
             | wasi::Type::Variant(variant) => {
                 let cases = variant.cases.iter().enumerate().collect::<Vec<_>>();
                 let &(case_idx, case) = u.choose(&cases).unwrap();
@@ -255,6 +337,7 @@ impl Environment {
                     payload,
                 }))
             },
+            | wasi::Type::String => wasi::Value::String(u.arbitrary().unwrap()),
         }
     }
 

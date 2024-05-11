@@ -81,56 +81,6 @@
     )
   )
 
-  (typename $filetype
-    (enum (@witx tag u8)
-      $unknown
-      $block_device
-      $character_device
-      $directory
-      $regular_file
-      $socket_dgram
-      $socket_stream
-      $symbolic_link
-    )
-  )
-
-  (typename $fd (handle)
-    (@attribute $offset u64)
-    (@attribute $flags $fdflags)
-    (@attribute $rights-base $rights)
-    (@attribute $rights-inheriting $rights)
-    (@attribute $file-type $filetype)
-  )
-
-  (typename $file_offset u64)
-
-  (typename $lookupflags
-    (flags (@witx repr u32)
-      $symlink_follow
-    )
-  )
-
-  (typename $fdflags
-    (flags (@witx repr u16)
-      $append
-      $dsync
-      $nonblock
-      $rsync
-      $sync
-    )
-  )
-
-  (typename $oflags
-    (flags (@witx repr u16)
-      $creat
-      $directory
-      $excl
-      $trunc
-    )
-  )
-
-  (typename $path string)
-
   (typename $rights
     (flags (@witx repr u64)
       $fd_datasync
@@ -165,6 +115,56 @@
       $sock_accept
     )
   )
+
+  (typename $filetype
+    (enum (@witx tag u8)
+      $unknown
+      $block_device
+      $character_device
+      $directory
+      $regular_file
+      $socket_dgram
+      $socket_stream
+      $symbolic_link
+    )
+  )
+
+  (typename $filesize u64)
+
+  (typename $fdflags
+    (flags (@witx repr u16)
+      $append
+      $dsync
+      $nonblock
+      $rsync
+      $sync
+    )
+  )
+
+  (typename $fd (handle)
+    (@attribute $offset $filesize)
+    (@attribute $flags $fdflags)
+    (@attribute $rights-base $rights)
+    (@attribute $rights-inheriting $rights)
+    (@attribute $file-type $filetype)
+  )
+
+  (typename $lookupflags
+    (flags (@witx repr u32)
+      $symlink_follow
+    )
+  )
+
+  (typename $oflags
+    (flags (@witx repr u16)
+      $creat
+      $directory
+      $excl
+      $trunc
+    )
+  )
+
+  (typename $path string)
 
   (@interface func (export "path_open")
     (param $fd $fd)
@@ -202,6 +202,8 @@
       $end
     )
   )
+
+  (typename $filedelta s64)
 
   (@interface func (export "fd_seek")
     (param $fd $fd)

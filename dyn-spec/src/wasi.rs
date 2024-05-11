@@ -7,7 +7,9 @@ pub enum TopLevelType {
     I64,
     U32,
     U64,
+    Flags,
     Variant,
+    String,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -18,7 +20,9 @@ pub enum Type {
     U32,
     U64,
     Handle,
+    Flags(FlagsType),
     Variant(VariantType),
+    String,
 }
 
 impl Type {
@@ -29,7 +33,7 @@ impl Type {
         }
     }
 
-    fn from_preview1_type(ty: &wazzi_preview1::Type) -> Self {
+    pub fn from_preview1_type(ty: &wazzi_preview1::Type) -> Self {
         match ty {
             | wazzi_preview1::Type::S64(_) => Self::S64,
             | wazzi_preview1::Type::U8(_) => todo!(),
@@ -37,15 +41,37 @@ impl Type {
             | wazzi_preview1::Type::U32(_) => Self::U32,
             | wazzi_preview1::Type::U64(_) => Self::U64,
             | wazzi_preview1::Type::Record(_) => todo!(),
-            | wazzi_preview1::Type::Enum(_) => todo!(),
+            | wazzi_preview1::Type::Enum(e) => Self::Variant(VariantType {
+                cases: e
+                    .cases
+                    .iter()
+                    .map(|case| CaseType {
+                        name:    case.name().to_owned(),
+                        payload: None,
+                    })
+                    .collect(),
+            }),
             | wazzi_preview1::Type::Union(_) => todo!(),
             | wazzi_preview1::Type::List(_) => todo!(),
             | wazzi_preview1::Type::Handle(_) => Self::Handle,
-            | wazzi_preview1::Type::Flags(_) => todo!(),
+            | wazzi_preview1::Type::Flags(flags) => Self::Flags(FlagsType {
+                repr:   flags.repr.clone().into(),
+                fields: flags
+                    .members
+                    .iter()
+                    .map(|id| id.name().to_owned())
+                    .collect(),
+            }),
             | wazzi_preview1::Type::Result(_) => todo!(),
-            | wazzi_preview1::Type::String => todo!(),
+            | wazzi_preview1::Type::String => Self::String,
         }
     }
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct FlagsType {
+    pub repr:   IntRepr,
+    pub fields: Vec<String>,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -69,6 +95,7 @@ pub enum Value {
     Handle(u32),
     Flags(Flags),
     Variant(Box<Variant>),
+    String(Vec<u8>),
 }
 
 impl Value {
@@ -105,4 +132,15 @@ pub enum IntRepr {
     U16,
     U32,
     U64,
+}
+
+impl From<wazzi_preview1::Repr<'_>> for IntRepr {
+    fn from(value: wazzi_preview1::Repr) -> Self {
+        match value {
+            | wazzi_preview1::Repr::U8(_) => Self::U8,
+            | wazzi_preview1::Repr::U16(_) => Self::U16,
+            | wazzi_preview1::Repr::U32(_) => Self::U32,
+            | wazzi_preview1::Repr::U64(_) => Self::U64,
+        }
+    }
 }
