@@ -1,4 +1,3 @@
-use color_eyre::eyre;
 use nom_supreme::{
     error::{ErrorTree, GenericErrorTree},
     final_parser::{final_parser, Location, RecreateContext},
@@ -7,7 +6,7 @@ use wazzi_dyn_spec::{environment::ResourceType, wasi, Environment, Term};
 use wazzi_spec::parsers::wazzi_preview1;
 
 #[test]
-fn ok() {
+fn annotation_to_term() {
     let input_contract = r#"
         (@input-contract
           (@or
@@ -44,7 +43,7 @@ fn ok() {
     let mut env = Environment::new();
 
     env.resource_types_mut().push(
-        "whence".to_owned(),
+        Some("whence".to_owned()),
         ResourceType {
             wasi_type:  wasi::Type::Variant(wasi::VariantType {
                 cases: vec![
@@ -68,4 +67,42 @@ fn ok() {
     );
 
     Term::from_preview1_annotation(&env, annot);
+}
+
+const PREVIEW1_SPEC: &str = include_str!("../../spec/preview1.dyn-constraint.witx");
+
+#[test]
+fn ok() {
+    let mut env = Environment::new();
+    let document = match wazzi_preview1::Document::parse(PREVIEW1_SPEC) {
+        | Ok(doc) => doc,
+        | Err(GenericErrorTree::Stack { base: _, contexts }) => {
+            for context in contexts {
+                eprintln!(
+                    "{} {}",
+                    Location::recreate_context(PREVIEW1_SPEC, context.0),
+                    context.1
+                )
+            }
+            panic!();
+        },
+        | Err(GenericErrorTree::Base { location, kind }) => {
+            eprintln!("{location}");
+            panic!();
+        },
+        | Err(GenericErrorTree::Alt(alt)) => {
+            for e in alt {
+                eprintln!("{:?}", e);
+            }
+
+            panic!();
+        },
+    };
+    let module = document
+        .modules
+        .iter()
+        .find(|module| module.id.as_ref().unwrap().name() == "wasi_snapshot_preview1")
+        .unwrap();
+
+    env.ingest_preview1_spec(module.to_owned());
 }

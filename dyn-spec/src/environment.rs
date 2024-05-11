@@ -1,6 +1,7 @@
 use std::collections::{BTreeSet, HashMap};
 
 use arbitrary::Unstructured;
+use wazzi_spec::parsers::wazzi_preview1;
 
 use crate::{ast::Idx, term, wasi, IndexSpace, Term};
 
@@ -52,6 +53,34 @@ impl Environment {
             resources:          Default::default(),
             resources_by_types: Default::default(),
         }
+    }
+
+    pub fn ingest_preview1_spec(&mut self, module: wazzi_preview1::Module) {
+        for decl in &module.decls {
+            match decl {
+                | wazzi_preview1::Decl::Typename(typename) => {
+                    self.ingest_preview1_typename(typename);
+                },
+                | wazzi_preview1::Decl::Function(_) => todo!(),
+            }
+        }
+    }
+
+    fn ingest_preview1_typename(&mut self, typename: &wazzi_preview1::Typename) {
+        match &typename.tref {
+            | &wazzi_preview1::TypeRef::Numeric(i) => todo!(),
+            | wazzi_preview1::TypeRef::Symbolic(nameg) => todo!(),
+            | wazzi_preview1::TypeRef::Type(ty) => todo!(),
+        }
+
+        self.resource_types.push(
+            typename.id.as_ref().map(|id| id.name().to_owned()),
+            ResourceType {
+                wasi_type:  todo!(),
+                attributes: todo!(),
+                fungible:   todo!(),
+            },
+        );
     }
 
     pub fn insert_resource(&mut self, resource_type: String, resource: Resource) -> usize {
@@ -207,7 +236,7 @@ impl Environment {
         match ty {
             | wasi::Type::Unit => todo!(),
             | wasi::Type::Bool => wasi::Value::Bool(u.arbitrary().unwrap()),
-            | wasi::Type::I64 => wasi::Value::I64(u.arbitrary().unwrap()),
+            | wasi::Type::S64 => wasi::Value::I64(u.arbitrary().unwrap()),
             | wasi::Type::U32 => todo!(),
             | wasi::Type::U64 => todo!(),
             | wasi::Type::Handle => wasi::Value::Handle(u.arbitrary().unwrap()),
@@ -481,16 +510,16 @@ mod tests {
     fn simple_clause() {
         let mut env = Environment::new();
         let filedelta_idx = env.resource_types_mut().push(
-            "filedelta".to_owned(),
+            Some("filedelta".to_owned()),
             ResourceType {
-                wasi_type:  wasi::Type::I64,
+                wasi_type:  wasi::Type::S64,
                 attributes: Default::default(),
                 fungible:   true,
             },
         );
 
         env.functions_mut().push(
-            "fd_seek".to_owned(),
+            Some("fd_seek".to_owned()),
             Function {
                 params: vec![FunctionParam {
                     name:              "offset".to_owned(),
@@ -527,16 +556,16 @@ mod tests {
     fn simple_clause_no_resource() {
         let mut env = Environment::new();
         let filedelta_idx = env.resource_types_mut().push(
-            "filedelta".to_owned(),
+            Some("filedelta".to_owned()),
             ResourceType {
-                wasi_type:  wasi::Type::I64,
+                wasi_type:  wasi::Type::S64,
                 attributes: Default::default(),
                 fungible:   true,
             },
         );
 
         env.functions_mut().push(
-            "fd_seek".to_owned(),
+            Some("fd_seek".to_owned()),
             Function {
                 params: vec![FunctionParam {
                     name:              "offset".to_owned(),
@@ -566,7 +595,7 @@ mod tests {
     fn simple_clause_attribute() {
         let mut env = Environment::new();
         let fd_idx = env.resource_types_mut().push(
-            "fd".to_owned(),
+            Some("fd".to_owned()),
             ResourceType {
                 wasi_type:  wasi::Type::Handle,
                 attributes: HashMap::from([("offset".to_owned(), wasi::Type::U64)]),
@@ -575,7 +604,7 @@ mod tests {
         );
 
         env.functions_mut().push(
-            "fd_seek".to_owned(),
+            Some("fd_seek".to_owned()),
             Function {
                 params: vec![FunctionParam {
                     name:              "fd".to_owned(),
@@ -613,7 +642,7 @@ mod tests {
     fn conjunction() {
         let mut env = Environment::new();
         let fd_idx = env.resource_types_mut().push(
-            "fd".to_owned(),
+            Some("fd".to_owned()),
             ResourceType {
                 wasi_type:  wasi::Type::Handle,
                 attributes: HashMap::from([("offset".to_owned(), wasi::Type::U64)]),
@@ -622,7 +651,7 @@ mod tests {
         );
 
         env.functions_mut().push(
-            "fd_seek".to_owned(),
+            Some("fd_seek".to_owned()),
             Function {
                 params: vec![FunctionParam {
                     name:              "fd".to_owned(),
@@ -671,7 +700,7 @@ mod tests {
     fn conjunction_no_solution() {
         let mut env = Environment::new();
         let fd_idx = env.resource_types_mut().push(
-            "fd".to_owned(),
+            Some("fd".to_owned()),
             ResourceType {
                 wasi_type:  wasi::Type::Handle,
                 attributes: HashMap::from([("offset".to_owned(), wasi::Type::U64)]),
@@ -680,7 +709,7 @@ mod tests {
         );
 
         env.functions_mut().push(
-            "fd_seek".to_owned(),
+            Some("fd_seek".to_owned()),
             Function {
                 params: vec![FunctionParam {
                     name:              "fd".to_owned(),
@@ -727,7 +756,7 @@ mod tests {
     fn disjunction() {
         let mut env = Environment::new();
         let fd_idx = env.resource_types_mut().push(
-            "fd".to_owned(),
+            Some("fd".to_owned()),
             ResourceType {
                 wasi_type:  wasi::Type::Handle,
                 attributes: HashMap::from([("offset".to_owned(), wasi::Type::U64)]),
@@ -736,7 +765,7 @@ mod tests {
         );
 
         env.functions_mut().push(
-            "fd_seek".to_owned(),
+            Some("fd_seek".to_owned()),
             Function {
                 params: vec![FunctionParam {
                     name:              "fd".to_owned(),
@@ -785,7 +814,7 @@ mod tests {
     fn nested_disj_conj() {
         let mut env = Environment::new();
         let fd_idx = env.resource_types_mut().push(
-            "fd".to_owned(),
+            Some("fd".to_owned()),
             ResourceType {
                 wasi_type:  wasi::Type::Handle,
                 attributes: HashMap::from([("offset".to_owned(), wasi::Type::U64)]),
@@ -793,7 +822,7 @@ mod tests {
             },
         );
         let whence_idx = env.resource_types_mut().push(
-            "whence".to_owned(),
+            Some("whence".to_owned()),
             ResourceType {
                 wasi_type:  wasi::Type::Variant(wasi::VariantType {
                     cases: vec![
@@ -817,7 +846,7 @@ mod tests {
         );
 
         env.functions_mut().push(
-            "fd_seek".to_owned(),
+            Some("fd_seek".to_owned()),
             Function {
                 params: vec![
                     FunctionParam {
@@ -902,7 +931,7 @@ mod tests {
     fn nested_disj_conj_arith() {
         let mut env = Environment::new();
         let fd_idx = env.resource_types_mut().push(
-            "fd".to_owned(),
+            Some("fd".to_owned()),
             ResourceType {
                 wasi_type:  wasi::Type::Handle,
                 attributes: HashMap::from([("offset".to_owned(), wasi::Type::U64)]),
@@ -910,7 +939,7 @@ mod tests {
             },
         );
         let whence_idx = env.resource_types_mut().push(
-            "whence".to_owned(),
+            Some("whence".to_owned()),
             ResourceType {
                 wasi_type:  wasi::Type::Variant(wasi::VariantType {
                     cases: vec![
@@ -934,7 +963,7 @@ mod tests {
         );
 
         env.functions_mut().push(
-            "fd_seek".to_owned(),
+            Some("fd_seek".to_owned()),
             Function {
                 params: vec![
                     FunctionParam {

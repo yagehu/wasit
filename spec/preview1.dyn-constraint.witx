@@ -94,14 +94,20 @@
     )
   )
 
-  (typename $fd (handle))
-
-  (@resource $fd
+  (typename $fd (handle)
     (@attribute $offset u64)
     (@attribute $flags $fdflags)
     (@attribute $rights-base $rights)
     (@attribute $rights-inheriting $rights)
     (@attribute $file-type $filetype)
+  )
+
+  (typename $file_offset u64)
+
+  (typename $lookupflags
+    (flags (@witx repr u32)
+      $symlink_follow
+    )
   )
 
   (typename $fdflags
@@ -111,14 +117,6 @@
       $nonblock
       $rsync
       $sync
-    )
-  )
-
-  (typename $file_offset u64)
-
-  (typename $lookupflags
-    (flags (@witx repr u32)
-      $symlink_follow
     )
   )
 
@@ -181,7 +179,7 @@
       (@attr.set (result $fd) $offset (i64.const 0))
       (@attr.set (result $fd) $flags (param $fdflags))
       (@attr.set (result $fd) $rights-base (param $fs_rights_base))
-      (@attr.set (result $fd) $rights-inheriting (@value $param.fs_rights_inheriting))
+      (@attr.set (result $fd) $rights-inheriting (@value (param $fs_rights_inheriting)))
       (@attr.set (result $fd) $path
         (@path.join
           (@attr.get (param $fd) $path)

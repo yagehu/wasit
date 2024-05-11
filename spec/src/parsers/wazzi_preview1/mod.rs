@@ -4,6 +4,7 @@ use nom::{
     character::complete::{char, multispace0, multispace1, none_of, one_of},
     combinator::{eof, peek, success},
     error::ParseError,
+    multi::{many0, separated_list0, separated_list1},
     sequence::{delimited, pair, tuple},
     Parser,
 };
@@ -22,7 +23,7 @@ use crate::{
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub struct Document<'a> {
-    modules: Vec<Module<'a>>,
+    pub modules: Vec<Module<'a>>,
 }
 
 impl<'a> Document<'a> {
@@ -53,10 +54,10 @@ impl<'a> Document<'a> {
 }
 
 #[derive(PartialEq, Eq, Debug, Clone)]
-struct Module<'a> {
-    pos:   KeywordSpan<'a>,
-    id:    Option<Id<'a>>,
-    decls: Vec<Decl<'a>>,
+pub struct Module<'a> {
+    pub pos:   KeywordSpan<'a>,
+    pub id:    Option<Id<'a>>,
+    pub decls: Vec<Decl<'a>>,
 }
 
 impl<'a> Module<'a> {
@@ -93,10 +94,11 @@ impl<'a> Module<'a> {
         }
 
         for typename in typenames {
-            let defvaltype = typename.ty.into_package(&interface)?;
+            let defvaltype = typename.tref.into_package(&interface)?;
             let resource_name = typename.id.map(|id| id.name().to_owned());
 
-            interface.register_resource(defvaltype, resource_name)?;
+            todo!();
+            // interface.register_resource(defvaltype, resource_name)?;
         }
 
         for function in functions {
@@ -111,7 +113,7 @@ impl<'a> Module<'a> {
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-enum Decl<'a> {
+pub enum Decl<'a> {
     Typename(Typename<'a>),
     Function(Function<'a>),
 }
@@ -122,25 +124,26 @@ impl<'a> Decl<'a> {
             ws(Typename::parse).map(Self::Typename),
             ws(Function::parse).map(Self::Function),
         ))
+        .cut()
         .context("decl")
         .parse(input)
     }
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-struct Typename<'a> {
-    pos:         KeywordSpan<'a>,
-    id:          Option<Id<'a>>,
-    ty:          Type<'a>,
-    annotations: Vec<Annotation<'a>>,
+pub struct Typename<'a> {
+    pub pos:         KeywordSpan<'a>,
+    pub id:          Option<Id<'a>>,
+    pub tref:        TypeRef<'a>,
+    pub annotations: Vec<Annotation<'a>>,
 }
 
 impl<'a> Typename<'a> {
     fn parse(input: &'a str) -> nom::IResult<&str, Self, ErrorTree<&str>> {
-        let (input, (pos, id, ty, annotations)) = paren(tuple((
+        let (input, (pos, id, tref, annotations)) = paren(tuple((
             ws(KeywordSpan::parse).verify(|span| span.keyword == Keyword::Typename),
             ws(Id::parse).opt(),
-            ws(Type::parse),
+            ws(TypeRef::parse).context("typename-typeref"),
             alt((
                 collect_separated_terminated(
                     Annotation::parse,
@@ -158,7 +161,7 @@ impl<'a> Typename<'a> {
             Self {
                 pos,
                 id,
-                ty,
+                tref,
                 annotations,
             },
         ))
@@ -166,7 +169,7 @@ impl<'a> Typename<'a> {
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-struct Function<'a> {
+pub struct Function<'a> {
     name:        &'a str,
     params:      Vec<FuncParam<'a>>,
     results:     Vec<FuncResult<'a>>,
@@ -378,7 +381,7 @@ impl<'a> FuncResult<'a> {
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-enum TypeRef<'a> {
+pub enum TypeRef<'a> {
     Numeric(u32),
     Symbolic(Id<'a>),
     Type(Box<Type<'a>>),
@@ -427,7 +430,7 @@ impl<'a> TypeRef<'a> {
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-enum Type<'a> {
+pub enum Type<'a> {
     // Fundamental numerical value types
     S64(KeywordSpan<'a>),
     U8(KeywordSpan<'a>),
@@ -470,11 +473,11 @@ impl<'a> Type<'a> {
             EnumType::parse.map(Self::Enum),
             UnionType::parse.map(Self::Union),
             ListType::parse.map(Self::List),
+            FlagsType::parse.map(Self::Flags),
+            ResultType::parse.map(Self::Result),
             paren(ws(KeywordSpan::parse))
                 .verify(|span| span.keyword == Keyword::Handle)
                 .map(|span| Self::Handle(span)),
-            FlagsType::parse.map(Self::Flags),
-            ResultType::parse.map(Self::Result),
             tag("string").value(Self::String),
         ))
         .context("type")
@@ -508,7 +511,7 @@ impl<'a> Type<'a> {
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-struct RecordType<'a> {
+pub struct RecordType<'a> {
     fields: Vec<RecordField<'a>>,
 }
 
@@ -539,7 +542,7 @@ impl<'a> RecordType<'a> {
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-struct EnumType<'a> {
+pub struct EnumType<'a> {
     repr:  Repr<'a>,
     cases: Vec<Id<'a>>,
 }
@@ -579,7 +582,7 @@ impl From<EnumType<'_>> for package::Variant {
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-struct UnionType<'a> {
+pub struct UnionType<'a> {
     tag:   Id<'a>,
     cases: Vec<Id<'a>>,
 }
@@ -700,17 +703,13 @@ pub struct FlagsType<'a> {
 impl<'a> FlagsType<'a> {
     pub fn parse(input: &'a str) -> nom::IResult<&str, Self, ErrorTree<&str>> {
         let (input, (_, (_, _, repr), members)) = paren(ws(tuple((
-            ws(tag("flags")),
-            ws(paren(tuple((
-                ws(tag("@witx")),
-                ws(tag("repr")),
-                ws(Repr::parse),
-            )))),
-            collect_separated_terminated(
+            ws(KeywordSpan::parse.verify(|span| span.keyword == Keyword::Flags)),
+            paren(tuple((ws(tag("@witx")), ws(tag("repr")), ws(Repr::parse)))),
+            ws(collect_separated_terminated(
                 Id::parse,
                 multispace1,
                 multispace0.terminated(char(')')).peek(),
-            ),
+            )),
         ))))
         .context("flags")
         .parse(input)?;
@@ -733,7 +732,7 @@ impl From<FlagsType<'_>> for package::FlagsType {
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-struct ResultType<'a> {
+pub struct ResultType<'a> {
     ok:    Option<TypeRef<'a>>,
     error: TypeRef<'a>,
 }
@@ -1118,7 +1117,7 @@ impl<'a> Id<'a> {
     pub fn parse(input: &'a str) -> nom::IResult<&'a str, Self, ErrorTree<&str>> {
         let (input, (_, name)) = pair(
             char('$'),
-            take_while1(|c: char| c.is_alphanumeric() || c == '_'),
+            take_while1(|c: char| c.is_alphanumeric() || c == '_' || c == '-'),
         )
         .context("id")
         .parse(input)?;
@@ -1160,7 +1159,7 @@ fn paren<'a, F: 'a, O, E: ParseError<&'a str>>(
 where
     F: nom::Parser<&'a str, O, E>,
 {
-    delimited(char('('), inner, char(')'))
+    delimited(char('('), inner, char(')').preceded_by(multispace0).cut())
 }
 
 fn uint32(input: &str) -> nom::IResult<&str, u32, ErrorTree<&str>> {

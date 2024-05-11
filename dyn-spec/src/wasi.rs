@@ -1,3 +1,5 @@
+use wazzi_spec::parsers::wazzi_preview1;
+
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum TopLevelType {
     Unit,
@@ -12,7 +14,7 @@ pub enum TopLevelType {
 pub enum Type {
     Unit,
     Bool,
-    I64,
+    S64,
     U32,
     U64,
     Handle,
@@ -24,6 +26,24 @@ impl Type {
         match self {
             | Self::Variant(x) => Some(x),
             | _ => None,
+        }
+    }
+
+    fn from_preview1_type(ty: &wazzi_preview1::Type) -> Self {
+        match ty {
+            | wazzi_preview1::Type::S64(_) => Self::S64,
+            | wazzi_preview1::Type::U8(_) => todo!(),
+            | wazzi_preview1::Type::U16(_) => todo!(),
+            | wazzi_preview1::Type::U32(_) => Self::U32,
+            | wazzi_preview1::Type::U64(_) => Self::U64,
+            | wazzi_preview1::Type::Record(_) => todo!(),
+            | wazzi_preview1::Type::Enum(_) => todo!(),
+            | wazzi_preview1::Type::Union(_) => todo!(),
+            | wazzi_preview1::Type::List(_) => todo!(),
+            | wazzi_preview1::Type::Handle(_) => Self::Handle,
+            | wazzi_preview1::Type::Flags(_) => todo!(),
+            | wazzi_preview1::Type::Result(_) => todo!(),
+            | wazzi_preview1::Type::String => todo!(),
         }
     }
 }

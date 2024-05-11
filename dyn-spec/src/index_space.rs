@@ -16,9 +16,12 @@ impl<T> IndexSpace<T> {
         }
     }
 
-    pub fn push(&mut self, name: String, item: T) -> usize {
+    pub fn push(&mut self, name: Option<String>, item: T) -> usize {
         self.stack.push(item);
-        self.map.insert(name, self.stack.len() - 1);
+
+        if let Some(name) = name {
+            self.map.insert(name, self.stack.len() - 1);
+        }
 
         self.stack.len() - 1
     }
