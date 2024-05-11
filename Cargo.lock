@@ -190,12 +190,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ea184aa71bb362a1157c896979544cc23974e08fd265f29ea96b59f0b4a555b"
 
 [[package]]
-name = "bytecount"
-version = "0.6.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1e5f035d16fc623ae5f74981db80a439803888314e3a555fd6f04acd51a3205"
-
-[[package]]
 name = "cc"
 version = "1.0.83"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -800,17 +794,6 @@ dependencies = [
  "brownstone",
  "indent_write",
  "joinery",
- "memchr",
- "nom",
-]
-
-[[package]]
-name = "nom_locate"
-version = "4.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e3c83c053b0713da60c5b8de47fe8e494fe3ece5267b2f23090a07a053ba8f3"
-dependencies = [
- "bytecount",
  "memchr",
  "nom",
 ]
@@ -1685,7 +1668,11 @@ name = "wazzi-dyn-spec"
 version = "0.1.0"
 dependencies = [
  "arbitrary",
+ "color-eyre",
+ "nom",
+ "nom-supreme",
  "thiserror",
+ "wazzi-spec",
 ]
 
 [[package]]
@@ -1757,7 +1744,6 @@ dependencies = [
  "eyre",
  "nom",
  "nom-supreme",
- "nom_locate",
  "num-bigint",
  "petgraph",
  "thiserror",

@@ -9,7 +9,6 @@ wazzi-spec-constraint.workspace = true
 
 eyre.workspace = true
 nom.workspace = true
-nom_locate.workspace = true
 nom-supreme.workspace = true
 num-bigint.workspace = true
 petgraph.workspace = true

@@ -36,8 +36,8 @@ pub struct Resource {
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Environment {
-    functions:      IndexSpace<Function>,
-    resource_types: IndexSpace<ResourceType>,
+    functions:                 IndexSpace<Function>,
+    pub(crate) resource_types: IndexSpace<ResourceType>,
 
     resources:          Vec<Resource>,
     resources_by_types: HashMap<usize, BTreeSet<usize>>,

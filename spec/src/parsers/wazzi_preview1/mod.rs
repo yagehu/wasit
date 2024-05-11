@@ -2,12 +2,11 @@ use nom::{
     branch::alt,
     bytes::complete::{escaped, tag, take_while1},
     character::complete::{char, multispace0, multispace1, none_of, one_of},
-    combinator::{eof, peek},
+    combinator::{eof, peek, success},
     error::ParseError,
     sequence::{delimited, pair, tuple},
     Parser,
 };
-use nom_locate::position;
 use nom_supreme::{
     error::ErrorTree,
     final_parser::final_parser,
@@ -16,7 +15,6 @@ use nom_supreme::{
 };
 use num_bigint::BigInt;
 
-use super::Span;
 use crate::{
     package::{self, Defvaltype, Package, StateEffect},
     Error,
@@ -28,7 +26,7 @@ pub struct Document<'a> {
 }
 
 impl<'a> Document<'a> {
-    pub fn parse(input: Span<'a>) -> Result<Self, ErrorTree<Span>> {
+    pub fn parse(input: &'a str) -> Result<Self, ErrorTree<&str>> {
         let modules = final_parser(
             alt((
                 collect_separated_terminated(Module::parse, multispace0, ws(eof)),
@@ -62,7 +60,7 @@ struct Module<'a> {
 }
 
 impl<'a> Module<'a> {
-    fn parse(input: Span<'a>) -> nom::IResult<Span, Self, ErrorTree<Span>> {
+    fn parse(input: &'a str) -> nom::IResult<&str, Self, ErrorTree<&str>> {
         let (input, (pos, id, decls)) = paren(tuple((
             ws(KeywordSpan::parse),
             ws(Id::parse).opt(),
@@ -119,7 +117,7 @@ enum Decl<'a> {
 }
 
 impl<'a> Decl<'a> {
-    pub fn parse(input: Span<'a>) -> nom::IResult<Span, Self, ErrorTree<Span>> {
+    pub fn parse(input: &'a str) -> nom::IResult<&str, Self, ErrorTree<&str>> {
         alt((
             ws(Typename::parse).map(Self::Typename),
             ws(Function::parse).map(Self::Function),
@@ -138,7 +136,7 @@ struct Typename<'a> {
 }
 
 impl<'a> Typename<'a> {
-    fn parse(input: Span<'a>) -> nom::IResult<Span, Self, ErrorTree<Span>> {
+    fn parse(input: &'a str) -> nom::IResult<&str, Self, ErrorTree<&str>> {
         let (input, (pos, id, ty, annotations)) = paren(tuple((
             ws(KeywordSpan::parse).verify(|span| span.keyword == Keyword::Typename),
             ws(Id::parse).opt(),
@@ -169,14 +167,14 @@ impl<'a> Typename<'a> {
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 struct Function<'a> {
-    name:        Span<'a>,
+    name:        &'a str,
     params:      Vec<FuncParam<'a>>,
     results:     Vec<FuncResult<'a>>,
     annotations: Vec<Annotation<'a>>,
 }
 
 impl<'a> Function<'a> {
-    fn parse(input: Span<'a>) -> nom::IResult<Span, Self, ErrorTree<Span>> {
+    fn parse(input: &'a str) -> nom::IResult<&str, Self, ErrorTree<&str>> {
         let (input, (_, _, (_, name), params, results, annotations)) = paren(tuple((
             ws(tag("@interface")),
             ws(KeywordSpan::parse.verify(|span| span.keyword == Keyword::Func)),
@@ -238,14 +236,14 @@ impl<'a> Function<'a> {
                 .annotations
                 .iter()
                 .find(|annot| {
-                    *annot.span.name == "wazzi"
+                    annot.span.name == "wazzi"
                         && matches!(
                             annot.exprs.first(),
                             Some(Expr::SExpr(exprs))
                             if matches!(
                                 exprs.first(),
                                 Some(Expr::Annotation(span))
-                                if *span.name == "constraint"
+                                if span.name == "constraint"
                             )
                         )
                 })
@@ -270,7 +268,7 @@ struct FuncParam<'a> {
 }
 
 impl<'a> FuncParam<'a> {
-    fn parse(input: Span<'a>) -> nom::IResult<Span, Self, ErrorTree<Span>> {
+    fn parse(input: &'a str) -> nom::IResult<&str, Self, ErrorTree<&str>> {
         let (input, (_, name, tref, annotations)) = paren(tuple((
             ws(KeywordSpan::parse.verify(|span| span.keyword == Keyword::Param)),
             ws(Id::parse),
@@ -305,7 +303,7 @@ impl<'a> FuncParam<'a> {
                 .annotations
                 .iter()
                 .find_map(|annot| {
-                    if *annot.span.name != "wazzi" {
+                    if annot.span.name != "wazzi" {
                         return None;
                     }
 
@@ -322,7 +320,7 @@ impl<'a> FuncParam<'a> {
                         Expr::Keyword(span) => match span.keyword {
                             Keyword::Read => Some(Ok(StateEffect::Read)),
                             Keyword::Write => Some(Ok(StateEffect::Write)),
-                            _ => Some(Err(Error::UnexpectedToken { token: span.pos.to_string(), offset: span.pos.location_offset() })),
+                            _ => Some(Err(Error::UnexpectedToken { token: span.pos.to_string() })),
                         },
                         _ => None,
                     }
@@ -341,7 +339,7 @@ struct FuncResult<'a> {
 }
 
 impl<'a> FuncResult<'a> {
-    fn parse(input: Span<'a>) -> nom::IResult<Span, Self, ErrorTree<Span>> {
+    fn parse(input: &'a str) -> nom::IResult<&str, Self, ErrorTree<&str>> {
         let (input, (_, name, tref, annotations)) = paren(tuple((
             ws(KeywordSpan::parse.verify(|span| span.keyword == Keyword::Result)),
             ws(Id::parse),
@@ -387,7 +385,7 @@ enum TypeRef<'a> {
 }
 
 impl<'a> TypeRef<'a> {
-    fn parse(input: Span<'a>) -> nom::IResult<Span, Self, ErrorTree<Span>> {
+    fn parse(input: &'a str) -> nom::IResult<&str, Self, ErrorTree<&str>> {
         alt((
             uint32.map(Self::Numeric),
             Id::parse.map(Self::Symbolic),
@@ -451,7 +449,7 @@ enum Type<'a> {
 }
 
 impl<'a> Type<'a> {
-    fn parse(input: Span<'a>) -> nom::IResult<Span, Self, ErrorTree<Span>> {
+    fn parse(input: &'a str) -> nom::IResult<&str, Self, ErrorTree<&str>> {
         alt((
             KeywordSpan::parse
                 .verify(|span| span.keyword == Keyword::S64)
@@ -515,7 +513,7 @@ struct RecordType<'a> {
 }
 
 impl<'a> RecordType<'a> {
-    fn parse(input: Span<'a>) -> nom::IResult<Span, Self, ErrorTree<Span>> {
+    fn parse(input: &'a str) -> nom::IResult<&str, Self, ErrorTree<&str>> {
         let (input, (_, fields)) = paren(tuple((
             ws(tag("record")),
             ws(collect_separated_terminated(
@@ -547,7 +545,7 @@ struct EnumType<'a> {
 }
 
 impl<'a> EnumType<'a> {
-    fn parse(input: Span<'a>) -> nom::IResult<Span, Self, ErrorTree<Span>> {
+    fn parse(input: &'a str) -> nom::IResult<&str, Self, ErrorTree<&str>> {
         let (input, (_, (_, _, repr), cases)) = paren(tuple((
             ws(KeywordSpan::parse.verify(|span| span.keyword == Keyword::Enum)),
             paren(tuple((ws(tag("@witx")), ws(tag("tag")), ws(Repr::parse)))),
@@ -587,7 +585,7 @@ struct UnionType<'a> {
 }
 
 impl<'a> UnionType<'a> {
-    fn parse(input: Span<'a>) -> nom::IResult<Span, Self, ErrorTree<Span>> {
+    fn parse(input: &'a str) -> nom::IResult<&str, Self, ErrorTree<&str>> {
         let (input, (_, (_, _, tag), cases)) = paren(tuple((
             ws(KeywordSpan::parse.verify(|span| span.keyword == Keyword::Union)),
             ws(paren(tuple((
@@ -650,7 +648,7 @@ struct RecordField<'a> {
 }
 
 impl<'a> RecordField<'a> {
-    fn parse(input: Span<'a>) -> nom::IResult<Span, Self, ErrorTree<Span>> {
+    fn parse(input: &'a str) -> nom::IResult<&str, Self, ErrorTree<&str>> {
         let (input, (_, name, tref)) = paren(tuple((
             ws(KeywordSpan::parse.verify(|span| span.keyword == Keyword::Field)),
             ws(Id::parse),
@@ -675,7 +673,7 @@ pub struct ListType<'a> {
 }
 
 impl<'a> ListType<'a> {
-    fn parse(input: Span<'a>) -> nom::IResult<Span, Self, ErrorTree<Span>> {
+    fn parse(input: &'a str) -> nom::IResult<&str, Self, ErrorTree<&str>> {
         let (input, (_, tref)) = paren(pair(
             ws(KeywordSpan::parse.verify(|span| span.keyword == Keyword::List)),
             ws(TypeRef::parse),
@@ -700,7 +698,7 @@ pub struct FlagsType<'a> {
 }
 
 impl<'a> FlagsType<'a> {
-    pub fn parse(input: Span<'a>) -> nom::IResult<Span, Self, ErrorTree<Span>> {
+    pub fn parse(input: &'a str) -> nom::IResult<&str, Self, ErrorTree<&str>> {
         let (input, (_, (_, _, repr), members)) = paren(ws(tuple((
             ws(tag("flags")),
             ws(paren(tuple((
@@ -741,7 +739,7 @@ struct ResultType<'a> {
 }
 
 impl<'a> ResultType<'a> {
-    fn parse(input: Span<'a>) -> nom::IResult<Span, Self, ErrorTree<Span>> {
+    fn parse(input: &'a str) -> nom::IResult<&str, Self, ErrorTree<&str>> {
         let (input, (_, ok, (_, error))) = paren(tuple((
             ws(KeywordSpan::parse.verify(|span| span.keyword == Keyword::Expected)),
             ws(TypeRef::parse.context("result-type-ok")).opt(),
@@ -777,7 +775,7 @@ pub enum Repr<'a> {
 }
 
 impl<'a> Repr<'a> {
-    fn parse(input: Span<'a>) -> nom::IResult<Span, Self, ErrorTree<Span>> {
+    fn parse(input: &'a str) -> nom::IResult<&str, Self, ErrorTree<&str>> {
         let (input, repr) = alt((
             KeywordSpan::parse
                 .verify(|span| span.keyword == Keyword::U8)
@@ -812,7 +810,7 @@ impl From<Repr<'_>> for package::IntRepr {
 }
 
 #[derive(PartialEq, Eq, Debug, Clone)]
-enum Expr<'a> {
+pub enum Expr<'a> {
     Annotation(AnnotationSpan<'a>),
     SymbolicIdx(Id<'a>),
     Keyword(KeywordSpan<'a>),
@@ -821,21 +819,28 @@ enum Expr<'a> {
 }
 
 impl<'a> Expr<'a> {
-    fn parse(input: Span<'a>) -> nom::IResult<Span, Self, ErrorTree<Span>> {
+    fn parse(input: &'a str) -> nom::IResult<&str, Self, ErrorTree<&str>> {
         let (input, expr) = alt((
-            AnnotationSpan::parse.map(Self::Annotation),
-            Id::parse.map(Self::SymbolicIdx),
-            KeywordSpan::parse.map(Self::Keyword),
-            NumLit::parse.map(Self::NumLit),
+            AnnotationSpan::parse
+                .map(Self::Annotation)
+                .context("expr-annotation-span"),
+            Id::parse
+                .map(Self::SymbolicIdx)
+                .context("expr-symbolic-idx"),
+            KeywordSpan::parse
+                .map(Self::Keyword)
+                .context("expr-keyword-span"),
+            NumLit::parse.map(Self::NumLit).context("expr-num-lit"),
             paren(alt((
                 collect_separated_terminated(
                     ws(Self::parse),
                     multispace0,
                     multispace0.terminated(char(')')).peek(),
                 ),
-                char(')').peek().value(vec![]),
+                success(vec![]), // char(')').peek().value(vec![]),
             )))
-            .map(|exprs| Self::SExpr(exprs)),
+            .map(|exprs| Self::SExpr(exprs))
+            .context("expr-sexpr"),
         ))
         .context("expr")
         .parse(input)?;
@@ -851,7 +856,7 @@ impl<'a> Expr<'a> {
                 | Expr::Keyword(_) => todo!(),
                 | Expr::NumLit(_) => todo!(),
                 | Expr::SExpr(exprs) => match exprs.first().unwrap() {
-                    | Expr::Annotation(span) => match *span.name {
+                    | Expr::Annotation(span) => match span.name {
                         | "and" => wazzi_spec_constraint::program::Expr::And(Box::new(
                             wazzi_spec_constraint::program::And {
                                 clauses: exprs[1..]
@@ -883,7 +888,7 @@ impl<'a> Expr<'a> {
                                 constraint: wazzi_spec_constraint::program::FlagConstraint::Unset,
                             },
                         ),
-                        | _ => panic!("{}", *span.name),
+                        | _ => panic!("{}", span.name),
                     },
                     | Expr::Keyword(span) => {
                         match span.keyword {
@@ -931,27 +936,62 @@ impl<'a> Expr<'a> {
             expr: into_expr(self),
         }
     }
+
+    pub fn annotation(&self) -> Option<&AnnotationSpan> {
+        match self {
+            | Expr::Annotation(a) => Some(a),
+            | _ => None,
+        }
+    }
+
+    pub fn num_lit(&self) -> Option<&NumLit> {
+        match self {
+            | Expr::NumLit(a) => Some(a),
+            | _ => None,
+        }
+    }
+
+    pub fn keyword(&self) -> Option<&KeywordSpan> {
+        match self {
+            | Expr::Keyword(kw) => Some(kw),
+            | _ => None,
+        }
+    }
+
+    pub fn sexpr(&self) -> Option<&[Expr]> {
+        match self {
+            | Expr::SExpr(exprs) => Some(exprs.as_slice()),
+            | _ => None,
+        }
+    }
+
+    pub fn symbolic_idx(&self) -> Option<&Id> {
+        match self {
+            | Expr::SymbolicIdx(id) => Some(id),
+            | _ => None,
+        }
+    }
 }
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub struct Annotation<'a> {
-    span:  AnnotationSpan<'a>,
-    exprs: Vec<Expr<'a>>,
+    pub span:  AnnotationSpan<'a>,
+    pub exprs: Vec<Expr<'a>>,
 }
 
 impl<'a> Annotation<'a> {
-    fn parse(input: Span<'a>) -> nom::IResult<Span, Self, ErrorTree<Span>> {
+    pub fn parse(input: &'a str) -> nom::IResult<&str, Self, ErrorTree<&str>> {
         let (input, (span, exprs)) = paren(pair(
             ws(AnnotationSpan::parse),
             alt((
                 collect_separated_terminated(
-                    Expr::parse,
+                    ws(Expr::parse),
                     multispace0,
                     multispace0.terminated(char(')')).peek(),
                 ),
-                peek::<_, _, ErrorTree<_>, _>(char(')')).value(vec![]),
+                success(vec![]),
             ))
-            .cut(),
+            .context("annotation-exprs"),
         ))
         .context("annotation")
         .parse(input)?;
@@ -962,28 +1002,26 @@ impl<'a> Annotation<'a> {
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub struct AnnotationSpan<'a> {
-    pos:  Span<'a>,
-    name: Span<'a>,
+    pub name: &'a str,
 }
 
 impl<'a> AnnotationSpan<'a> {
-    pub fn parse(input: Span<'a>) -> nom::IResult<Span<'a>, Self, ErrorTree<Span>> {
-        let (input, pos) = position(input)?;
+    pub fn parse(input: &'a str) -> nom::IResult<&'a str, Self, ErrorTree<&str>> {
         let (input, (_, name)) = pair(
             char('@'),
-            take_while1(|c: char| c.is_alphanumeric() || c == '_' || c == '-'),
+            take_while1(|c: char| c.is_alphanumeric() || c == '_' || c == '-' || c == '.'),
         )
         .context("annotation-span")
         .parse(input)?;
 
-        Ok((input, Self { pos, name }))
+        Ok((input, Self { name }))
     }
 }
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub struct KeywordSpan<'a> {
-    pos:     Span<'a>,
-    keyword: Keyword,
+    pub pos:     &'a str,
+    pub keyword: Keyword,
 }
 
 #[derive(PartialEq, Eq, Debug, Clone)]
@@ -997,7 +1035,9 @@ pub enum Keyword {
     Fulfills,
     Func,
     Handle,
+    I64Add,
     I64Const,
+    I64GeS,
     I64GtU,
     I64LeS,
     I64LeU,
@@ -1022,7 +1062,7 @@ pub enum Keyword {
 }
 
 impl<'a> KeywordSpan<'a> {
-    fn parse(input: Span<'a>) -> nom::IResult<Span, Self, ErrorTree<Span>> {
+    fn parse(input: &'a str) -> nom::IResult<&str, Self, ErrorTree<&str>> {
         let (input, (span, keyword)) = alt((
             alt((
                 tag("enum").map(|s| (s, Keyword::Enum)),
@@ -1034,7 +1074,9 @@ impl<'a> KeywordSpan<'a> {
                 tag("fulfills").map(|s| (s, Keyword::Fulfills)),
                 tag("func").map(|s| (s, Keyword::Func)),
                 tag("handle").map(|s| (s, Keyword::Handle)),
+                tag("i64.add").map(|s| (s, Keyword::I64Add)),
                 tag("i64.const").map(|s| (s, Keyword::I64Const)),
+                tag("i64.ge_s").map(|s| (s, Keyword::I64GeS)),
                 tag("i64.gt_u").map(|s| (s, Keyword::I64GtU)),
                 tag("i64.le_s").map(|s| (s, Keyword::I64LeS)),
                 tag("i64.le_u").map(|s| (s, Keyword::I64LeU)),
@@ -1044,10 +1086,10 @@ impl<'a> KeywordSpan<'a> {
                 tag("param").map(|s| (s, Keyword::Param)),
                 tag("read").map(|s| (s, Keyword::Read)),
                 tag("result").map(|s| (s, Keyword::Result)),
-                tag("s64").map(|s| (s, Keyword::S64)),
-                tag("spec").map(|s| (s, Keyword::Spec)),
             )),
             alt((
+                tag("s64").map(|s| (s, Keyword::S64)),
+                tag("spec").map(|s| (s, Keyword::Spec)),
                 tag("state").map(|s| (s, Keyword::State)),
                 tag("tag").map(|s| (s, Keyword::Tag)),
                 tag("then").map(|s| (s, Keyword::Then)),
@@ -1069,13 +1111,11 @@ impl<'a> KeywordSpan<'a> {
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Id<'a> {
-    pos:  Span<'a>,
-    name: Span<'a>,
+    name: &'a str,
 }
 
 impl<'a> Id<'a> {
-    pub fn parse(input: Span<'a>) -> nom::IResult<Span<'a>, Self, ErrorTree<Span>> {
-        let (input, pos) = position(input)?;
+    pub fn parse(input: &'a str) -> nom::IResult<&'a str, Self, ErrorTree<&str>> {
         let (input, (_, name)) = pair(
             char('$'),
             take_while1(|c: char| c.is_alphanumeric() || c == '_'),
@@ -1083,7 +1123,7 @@ impl<'a> Id<'a> {
         .context("id")
         .parse(input)?;
 
-        Ok((input, Self { pos, name }))
+        Ok((input, Self { name }))
     }
 
     pub fn name(&self) -> &str {
@@ -1092,10 +1132,10 @@ impl<'a> Id<'a> {
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-struct NumLit<'a>(Span<'a>);
+pub struct NumLit<'a>(pub &'a str);
 
 impl<'a> NumLit<'a> {
-    fn parse(input: Span<'a>) -> nom::IResult<Span, Self, ErrorTree<Span>> {
+    fn parse(input: &'a str) -> nom::IResult<&str, Self, ErrorTree<&str>> {
         let (input, span) = take_while1(|c: char| c.is_numeric())
             .context("numeric-literal")
             .parse(input)?;
@@ -1104,7 +1144,7 @@ impl<'a> NumLit<'a> {
     }
 }
 
-fn quoted_string(input: Span) -> nom::IResult<Span, Span, ErrorTree<Span>> {
+fn quoted_string(input: &str) -> nom::IResult<&str, &str, ErrorTree<&str>> {
     delimited(
         char('"'),
         escaped(none_of(r#"\""#), '\\', one_of(r#"\""#)),
@@ -1114,26 +1154,26 @@ fn quoted_string(input: Span) -> nom::IResult<Span, Span, ErrorTree<Span>> {
     .parse(input)
 }
 
-fn paren<'a, F: 'a, O, E: ParseError<Span<'a>>>(
+fn paren<'a, F: 'a, O, E: ParseError<&'a str>>(
     inner: F,
-) -> impl FnMut(Span<'a>) -> nom::IResult<Span, O, E>
+) -> impl FnMut(&'a str) -> nom::IResult<&str, O, E>
 where
-    F: nom::Parser<Span<'a>, O, E>,
+    F: nom::Parser<&'a str, O, E>,
 {
     delimited(char('('), inner, char(')'))
 }
 
-fn uint32(input: Span) -> nom::IResult<Span, u32, ErrorTree<Span>> {
+fn uint32(input: &str) -> nom::IResult<&str, u32, ErrorTree<&str>> {
     take_while1(|c: char| c.is_numeric())
-        .map_res(|res: Span| u32::from_str_radix(*res, 10))
+        .map_res(|res: &str| u32::from_str_radix(res, 10))
         .parse(input)
 }
 
-fn ws<'a, F: 'a, O, E: ParseError<Span<'a>>>(
+pub fn ws<'a, F: 'a, O, E: ParseError<&'a str>>(
     inner: F,
-) -> impl FnMut(Span<'a>) -> nom::IResult<Span, O, E>
+) -> impl FnMut(&'a str) -> nom::IResult<&str, O, E>
 where
-    F: nom::Parser<Span<'a>, O, E>,
+    F: nom::Parser<&'a str, O, E>,
 {
     delimited(multispace0, inner, multispace0)
 }
@@ -1235,7 +1275,7 @@ mod tests {
         ];
 
         for (i, case) in cases.into_iter().enumerate() {
-            let result = Document::parse(Span::new(case.input));
+            let result = Document::parse(case.input);
 
             match result {
                 | Ok(doc) => (case.assert)(doc),

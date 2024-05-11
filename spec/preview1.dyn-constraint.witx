@@ -210,7 +210,7 @@
     (param $offset $filedelta)
     (param $whence $whence)
     (result $error (expected $filesize (error $errno)))
-    (@contract
+    (@input-contract
       (@or
         (@and
           (@value.eq (param $whence) (enum $whence $set))

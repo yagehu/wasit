@@ -9,5 +9,5 @@ pub enum Error {
     InvalidTypeidx(Typeidx),
 
     #[error("unexpected token: {token}")]
-    UnexpectedToken { token: String, offset: usize },
+    UnexpectedToken { token: String },
 }

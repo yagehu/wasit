@@ -1,9 +1,10 @@
 pub mod ast;
+pub mod environment;
 pub mod term;
 pub mod wasi;
 
 mod context;
-mod environment;
+
 mod index_space;
 mod interface;
 
