@@ -1,6 +1,7 @@
 use std::collections::{BTreeSet, HashMap};
 
 use arbitrary::Unstructured;
+use thiserror::Error;
 use wazzi_spec::parsers::wazzi_preview1;
 
 use crate::{ast::Idx, term, wasi, IndexSpace, Term};
@@ -14,7 +15,7 @@ pub enum Variable {
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Function {
     pub params:         Vec<FunctionParam>,
-    pub input_contract: Option<Term>,
+    pub input_contract: Term,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -56,6 +57,24 @@ impl Environment {
         }
     }
 
+    pub fn call(&mut self, u: &mut Unstructured, function_name: &str) -> Result<(), Error> {
+        let function = self
+            .functions
+            .get(&Idx::Symbolic(function_name.to_owned()))
+            .unwrap();
+        let solution = self
+            .solve(
+                u,
+                &function.input_contract,
+                &Idx::Symbolic(function_name.to_owned()),
+            )
+            .ok_or_else(|| Error::NoSolution {
+                function: function_name.to_owned(),
+            })?;
+
+        Ok(())
+    }
+
     pub fn ingest_preview1_spec(&mut self, module: wazzi_preview1::Module) {
         for decl in &module.decls {
             match decl {
@@ -89,9 +108,8 @@ impl Environment {
                                 .annotations
                                 .iter()
                                 .find(|annot| annot.span.name == "input-contract")
-                                .map(|annot| {
-                                    Term::from_preview1_annotation(self, annot.to_owned())
-                                }),
+                                .map(|annot| Term::from_preview1_annotation(self, annot.to_owned()))
+                                .unwrap(),
                         },
                     );
                 },
@@ -252,7 +270,10 @@ impl Environment {
                 let resource_idx = *resource_idxs.get(i).unwrap();
                 let resource = self.resources.get(resource_idx).unwrap();
 
-                solution.push(Param::Resource(resource_idx));
+                solution.push(Param {
+                    name:  param.name.clone(),
+                    inner: ParamInner::Resource(resource_idx),
+                });
 
                 let guess = self.guess_variable(u, &var, Variable::Resource(resource.clone()), t);
                 let solved = self.solve_helper(u, &guess, function_idx, solution);
@@ -268,7 +289,10 @@ impl Environment {
                     break;
                 }
 
-                solution.push(Param::Value(value.clone()));
+                solution.push(Param {
+                    name:  param.name.clone(),
+                    inner: ParamInner::Value(value.clone()),
+                });
 
                 let guess = self.guess_variable(u, &var, Variable::Value(value.clone()), t);
                 let solved = self.solve_helper(u, &guess, function_idx, solution);
@@ -575,6 +599,15 @@ impl Environment {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error(transparent)]
+    Unknown(#[from] eyre::Error),
+
+    #[error("no solution found for input contract for function: {function}")]
+    NoSolution { function: String },
+}
+
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Solution {
     params: Vec<Param>,
@@ -587,7 +620,13 @@ impl Solution {
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub enum Param {
+pub struct Param {
+    name:  String,
+    inner: ParamInner,
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub enum ParamInner {
     Resource(usize),
     Value(wasi::Value),
 }
@@ -616,7 +655,7 @@ mod tests {
                     name:              "offset".to_owned(),
                     resource_type_idx: filedelta_idx,
                 }],
-                input_contract: None,
+                input_contract: Term::Value(wasi::Value::Bool(true)),
             },
         );
 
@@ -641,7 +680,13 @@ mod tests {
             )
             .expect("no solution found");
 
-        assert_eq!(solution.params, vec![Param::Resource(filedelta_resource)]);
+        assert_eq!(
+            solution.params,
+            vec![Param {
+                name:  "offset".to_owned(),
+                inner: ParamInner::Resource(filedelta_resource),
+            }],
+        );
     }
 
     #[test]
@@ -663,7 +708,7 @@ mod tests {
                     name:              "offset".to_owned(),
                     resource_type_idx: filedelta_idx,
                 }],
-                input_contract: None,
+                input_contract: Term::Value(wasi::Value::Bool(true)),
             },
         );
 
@@ -681,7 +726,13 @@ mod tests {
             )
             .expect("no solution found");
 
-        assert_eq!(solution.params, vec![Param::Value(wasi::Value::I64(3))]);
+        assert_eq!(
+            solution.params,
+            vec![Param {
+                name:  "offset".to_owned(),
+                inner: ParamInner::Value(wasi::Value::I64(3)),
+            }]
+        );
     }
 
     #[test]
@@ -703,7 +754,7 @@ mod tests {
                     name:              "fd".to_owned(),
                     resource_type_idx: fd_idx,
                 }],
-                input_contract: None,
+                input_contract: Term::Value(wasi::Value::Bool(true)),
             },
         );
 
@@ -729,7 +780,13 @@ mod tests {
             )
             .expect("no solution found");
 
-        assert_eq!(solution.params, vec![Param::Resource(fd_resource)]);
+        assert_eq!(
+            solution.params,
+            vec![Param {
+                name:  "fd".to_owned(),
+                inner: ParamInner::Resource(fd_resource),
+            }]
+        );
     }
 
     #[test]
@@ -751,7 +808,7 @@ mod tests {
                     name:              "fd".to_owned(),
                     resource_type_idx: fd_idx,
                 }],
-                input_contract: None,
+                input_contract: Term::Value(wasi::Value::Bool(true)),
             },
         );
 
@@ -788,7 +845,13 @@ mod tests {
             )
             .expect("no solution found");
 
-        assert_eq!(solution.params, vec![Param::Resource(fd_resource)]);
+        assert_eq!(
+            solution.params,
+            vec![Param {
+                name:  "fd".to_owned(),
+                inner: ParamInner::Resource(fd_resource),
+            }]
+        );
     }
 
     #[test]
@@ -810,7 +873,7 @@ mod tests {
                     name:              "fd".to_owned(),
                     resource_type_idx: fd_idx,
                 }],
-                input_contract: None,
+                input_contract: Term::Value(wasi::Value::Bool(true)),
             },
         );
 
@@ -867,7 +930,7 @@ mod tests {
                     name:              "fd".to_owned(),
                     resource_type_idx: fd_idx,
                 }],
-                input_contract: None,
+                input_contract: Term::Value(wasi::Value::Bool(true)),
             },
         );
 
@@ -904,7 +967,13 @@ mod tests {
             )
             .expect("no solution found");
 
-        assert_eq!(solution.params, vec![Param::Resource(fd_resource)]);
+        assert_eq!(
+            solution.params,
+            vec![Param {
+                name:  "fd".to_owned(),
+                inner: ParamInner::Resource(fd_resource),
+            }]
+        );
     }
 
     #[test]
@@ -955,7 +1024,7 @@ mod tests {
                         resource_type_idx: whence_idx,
                     },
                 ],
-                input_contract: None,
+                input_contract: Term::Value(wasi::Value::Bool(true)),
             },
         );
 
@@ -1015,13 +1084,14 @@ mod tests {
 
         assert_eq!(
             solution.params,
-            vec![Param::Value(wasi::Value::Variant(Box::new(
-                wasi::Variant {
+            vec![Param {
+                name:  "whence".to_owned(),
+                inner: ParamInner::Value(wasi::Value::Variant(Box::new(wasi::Variant {
                     case_idx:  1,
                     case_name: "cur".to_owned(),
                     payload:   None,
-                }
-            )))]
+                }))),
+            }]
         );
     }
 
@@ -1073,7 +1143,7 @@ mod tests {
                         resource_type_idx: whence_idx,
                     },
                 ],
-                input_contract: None,
+                input_contract: Term::Value(wasi::Value::Bool(true)),
             },
         );
 
@@ -1123,12 +1193,18 @@ mod tests {
         assert_eq!(
             solution.params,
             vec![
-                Param::Value(wasi::Value::Variant(Box::new(wasi::Variant {
-                    case_idx:  1,
-                    case_name: "cur".to_owned(),
-                    payload:   None,
-                }))),
-                Param::Resource(fd_resource)
+                Param {
+                    name:  "whence".to_owned(),
+                    inner: ParamInner::Value(wasi::Value::Variant(Box::new(wasi::Variant {
+                        case_idx:  1,
+                        case_name: "cur".to_owned(),
+                        payload:   None,
+                    }))),
+                },
+                Param {
+                    name:  "fd".to_owned(),
+                    inner: ParamInner::Resource(fd_resource),
+                },
             ]
         );
     }

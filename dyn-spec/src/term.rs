@@ -41,7 +41,10 @@ impl Term {
         match expr {
             | wazzi_preview1::Expr::Annotation(_) => todo!(),
             | wazzi_preview1::Expr::SymbolicIdx(_) => todo!(),
-            | wazzi_preview1::Expr::Keyword(_) => todo!(),
+            | wazzi_preview1::Expr::Keyword(span) => match span.keyword {
+                | wazzi_preview1::Keyword::True => Self::Value(wasi::Value::Bool(true)),
+                | _ => panic!(),
+            },
             | wazzi_preview1::Expr::NumLit(_) => todo!(),
             | wazzi_preview1::Expr::SExpr(exprs) => {
                 if let Some(annot) = exprs.first().unwrap().annotation() {

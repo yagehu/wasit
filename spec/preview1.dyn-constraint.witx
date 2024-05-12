@@ -175,6 +175,9 @@
     (param $fs_rights_inheriting $rights)
     (param $fdflags $fdflags)
     (result $error (expected $fd (error $errno)))
+    (@input-contract
+      true
+    )
     (@spec
       (@attr.set (result $fd) $offset (i64.const 0))
       (@attr.set (result $fd) $flags (param $fdflags))

@@ -1668,6 +1668,7 @@ name = "wazzi-dyn-spec"
 version = "0.1.0"
 dependencies = [
  "arbitrary",
+ "eyre",
  "nom",
  "nom-supreme",
  "thiserror",
