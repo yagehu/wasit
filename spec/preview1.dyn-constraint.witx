@@ -176,7 +176,11 @@
     (param $fdflags $fdflags)
     (result $error (expected $fd (error $errno)))
     (@input-contract
-      true
+      (@and
+        (@flag.unset (param $fdflags) $dsync)
+        (@flag.unset (param $fdflags) $rsync)
+        (@flag.unset (param $fdflags) $sync)
+      )
     )
     (@spec
       (@attr.set (result $fd) $offset (i64.const 0))

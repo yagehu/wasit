@@ -489,6 +489,21 @@ impl Environment {
                     | _ => t.to_owned(),
                 }
             },
+            | Term::FlagUnset(op) => {
+                let target = self.guess_variable(u, replace, with, &op.target);
+
+                match target {
+                    | Term::Value(wasi::Value::Flags(flags)) => Term::Value(wasi::Value::Bool(
+                        !flags
+                            .fields
+                            .iter()
+                            .find(|field| field.name == op.flag)
+                            .unwrap()
+                            .value,
+                    )),
+                    | _ => panic!(),
+                }
+            },
             | Term::I64Add(op) => {
                 let l = self.guess_variable(u, replace, with.clone(), &op.l);
                 let r = self.guess_variable(u, replace, with, &op.r);
@@ -574,6 +589,7 @@ impl Environment {
 
                 self.free_variable(&op.rhs)
             },
+            | Term::FlagUnset(op) => self.free_variable(&op.target),
             | Term::I64Add(op) => {
                 if let Some(var) = self.free_variable(&op.l) {
                     return Some(var);

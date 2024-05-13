@@ -19,6 +19,7 @@ pub enum Term {
     Value(wasi::Value),
 
     ValueEq(Box<ValueEq>),
+    FlagUnset(Box<FlagUnset>),
     I64Add(Box<I64Add>),
     I64Ge(Box<I64Ge>),
     I64Le(Box<I64Le>),
@@ -78,6 +79,12 @@ impl Term {
                             let name = exprs[2].symbolic_idx().unwrap().name().to_owned();
 
                             return Self::Attr(Attr { param, name });
+                        },
+                        | "flag.unset" => {
+                            return Self::FlagUnset(Box::new(FlagUnset {
+                                target: Self::from_preview1_expr(env, &exprs[1]),
+                                flag:   exprs[2].symbolic_idx().unwrap().name().to_owned(),
+                            }))
                         },
                         | "value.eq" => {
                             return Self::ValueEq(Box::new(ValueEq {
@@ -203,6 +210,12 @@ pub struct Param {
 pub struct ValueEq {
     pub lhs: Term,
     pub rhs: Term,
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct FlagUnset {
+    pub target: Term,
+    pub flag:   String,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
