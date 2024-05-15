@@ -16,7 +16,10 @@ pub enum Term {
     Attr(Attr),
     Param(Param),
 
-    Value(wasi::Value),
+    Value {
+        ty:    wasi::Type,
+        inner: wasi::Value,
+    },
 
     ValueEq(Box<ValueEq>),
     FlagUnset(Box<FlagUnset>),
@@ -43,7 +46,10 @@ impl Term {
             | wazzi_preview1::Expr::Annotation(_) => todo!(),
             | wazzi_preview1::Expr::SymbolicIdx(_) => todo!(),
             | wazzi_preview1::Expr::Keyword(span) => match span.keyword {
-                | wazzi_preview1::Keyword::True => Self::Value(wasi::Value::Bool(true)),
+                | wazzi_preview1::Keyword::True => Self::Value {
+                    ty:    wasi::Type::Bool,
+                    inner: wasi::Value::Bool(true),
+                },
                 | _ => panic!(),
             },
             | wazzi_preview1::Expr::NumLit(_) => todo!(),
@@ -133,17 +139,19 @@ impl Term {
                                 | _ => panic!("not a variant"),
                             };
 
-                            return Self::Value(wasi::Value::Variant(Box::new(wasi::Variant {
-                                case_idx: variant
-                                    .cases
-                                    .iter()
-                                    .enumerate()
-                                    .find(|(_, case)| case.name == case_name)
-                                    .unwrap()
-                                    .0,
-                                case_name,
-                                payload: None,
-                            })));
+                            return Self::Value {
+                                ty:    resource_type.wasi_type.clone(),
+                                inner: wasi::Value::Variant(Box::new(wasi::Variant {
+                                    case_idx: variant
+                                        .cases
+                                        .iter()
+                                        .enumerate()
+                                        .find(|(_, case)| case.name == case_name)
+                                        .unwrap()
+                                        .0,
+                                    payload:  None,
+                                })),
+                            };
                         },
                         | Keyword::I64Add => {
                             return Self::I64Add(Box::new(I64Add {
@@ -152,16 +160,19 @@ impl Term {
                             }));
                         },
                         | Keyword::I64Const => {
-                            return Self::Value(wasi::Value::I64(
-                                exprs
-                                    .get(1)
-                                    .unwrap()
-                                    .num_lit()
-                                    .unwrap()
-                                    .0
-                                    .parse::<i64>()
-                                    .unwrap(),
-                            ))
+                            return Self::Value {
+                                ty:    wasi::Type::S64,
+                                inner: wasi::Value::S64(
+                                    exprs
+                                        .get(1)
+                                        .unwrap()
+                                        .num_lit()
+                                        .unwrap()
+                                        .0
+                                        .parse::<i64>()
+                                        .unwrap(),
+                                ),
+                            }
                         },
                         | Keyword::I64LeS => {
                             return Self::I64Le(Box::new(I64Le {

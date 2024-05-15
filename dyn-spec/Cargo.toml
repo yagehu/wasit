@@ -12,5 +12,10 @@ eyre.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+wazzi-executor.workspace = true
+wazzi-executor-pb-rust.workspace = true
+wazzi-runners.workspace = true
+
 nom.workspace = true
 nom-supreme.workspace = true
+tempfile.workspace = true

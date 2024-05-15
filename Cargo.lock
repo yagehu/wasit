@@ -1671,7 +1671,11 @@ dependencies = [
  "eyre",
  "nom",
  "nom-supreme",
+ "tempfile",
  "thiserror",
+ "wazzi-executor",
+ "wazzi-executor-pb-rust",
+ "wazzi-runners",
  "wazzi-spec",
 ]
 

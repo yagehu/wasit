@@ -109,7 +109,6 @@ impl Context {
 
                 wasi::Value::Variant(Box::new(wasi::Variant {
                     case_idx,
-                    case_name: case.name.clone(),
                     payload: None,
                 }))
             },
@@ -142,7 +141,7 @@ impl Context {
 
     fn resolve_value(&self, value: &ast::Value) -> Result<wasi::Value, Error> {
         Ok(match value {
-            | &ast::Value::I64(i) => wasi::Value::I64(i),
+            | &ast::Value::I64(i) => wasi::Value::S64(i),
             | &ast::Value::U64(i) => wasi::Value::U64(i),
             | ast::Value::Param(idx) => self.param(idx)?.value.clone(),
             | ast::Value::Result(idx) => self.result(idx)?.value.clone(),
@@ -309,9 +308,8 @@ mod tests {
             "errno".to_owned(),
             Variable {
                 value:      Value::Variant(Box::new(Variant {
-                    case_idx:  0,
-                    case_name: "success".to_owned(),
-                    payload:   None,
+                    case_idx: 0,
+                    payload:  None,
                 })),
                 attributes: Default::default(),
             },

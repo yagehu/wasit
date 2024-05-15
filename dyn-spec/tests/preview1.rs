@@ -1,8 +1,16 @@
+use std::{
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex},
+};
+
+use arbitrary::Unstructured;
 use nom_supreme::{
     error::{ErrorTree, GenericErrorTree},
     final_parser::{final_parser, Location, RecreateContext},
 };
-use wazzi_dyn_spec::{environment::ResourceType, wasi, Environment, Term};
+use tempfile::tempdir;
+use wazzi_dyn_spec::{environment::ResourceType, wasi, Environment, ResourceContext, Term};
+use wazzi_executor::{ExecutorRunner, RunningExecutor};
 use wazzi_spec::parsers::wazzi_preview1;
 
 #[test]
@@ -74,6 +82,7 @@ const PREVIEW1_SPEC: &str = include_str!("../../spec/preview1.dyn-constraint.wit
 #[test]
 fn ok() {
     let mut env = Environment::new();
+    let mut ctx = ResourceContext::new();
     let document = match wazzi_preview1::Document::parse(PREVIEW1_SPEC) {
         | Ok(doc) => doc,
         | Err(GenericErrorTree::Stack { base: _, contexts }) => {
@@ -105,4 +114,30 @@ fn ok() {
         .unwrap();
 
     env.ingest_preview1_spec(module.to_owned());
+
+    let mut u = Unstructured::new(&[]);
+    let wasmtime = wazzi_runners::Wasmtime::new(Path::new("wasmtime"));
+    let tmpdir = tempdir().unwrap();
+    let stderr = Arc::new(Mutex::new(Vec::new()));
+    let executor = ExecutorRunner::new(
+        &wasmtime,
+        PathBuf::from("../target/debug/wazzi-executor-pb.wasm")
+            .canonicalize()
+            .unwrap(),
+        tmpdir.path().to_path_buf(),
+        Some(tmpdir.path().to_path_buf()),
+    )
+    .run(stderr)
+    .unwrap();
+
+    executor.call(wazzi_executor_pb_rust::request::Call {
+        func:           <&str as TryInto<wazzi_executor_pb_rust::WasiFunc>>::try_into("path_open")
+            .unwrap()
+            .into(),
+        params:         todo!(),
+        results:        todo!(),
+        special_fields: Default::default(),
+    });
+
+    let solution = env.call(&mut u, &ctx, "path_open").unwrap();
 }

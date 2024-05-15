@@ -1,3 +1,4 @@
+use arbitrary::Unstructured;
 use wazzi_spec::parsers::wazzi_preview1;
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
@@ -89,7 +90,7 @@ pub struct CaseType {
 pub enum Value {
     Unit,
     Bool(bool),
-    I64(i64),
+    S64(i64),
     U32(i32),
     U64(u64),
     Handle(u32),
@@ -99,6 +100,35 @@ pub enum Value {
 }
 
 impl Value {
+    pub fn arbitrary(ty: &Type, u: &mut Unstructured) -> Result<Self, arbitrary::Error> {
+        Ok(match ty {
+            | Type::Unit => Self::Unit,
+            | Type::Bool => Self::Bool(u.arbitrary()?),
+            | Type::S64 => Self::S64(u.arbitrary()?),
+            | Type::U32 => Self::U32(u.arbitrary()?),
+            | Type::U64 => Self::U64(u.arbitrary()?),
+            | Type::Handle => Self::Handle(u.arbitrary()?),
+            | Type::Flags(flags) => Self::Flags(Flags {
+                repr:   flags.repr,
+                fields: flags
+                    .fields
+                    .iter()
+                    .map(|_| u.arbitrary::<bool>())
+                    .collect::<Result<_, _>>()?,
+            }),
+            | Type::Variant(variant) => {
+                let cases = variant.cases.iter().enumerate().collect::<Vec<_>>();
+                let &(case_idx, _case) = u.choose(&cases)?;
+
+                Self::Variant(Box::new(Variant {
+                    case_idx,
+                    payload: None,
+                }))
+            },
+            | Type::String => Self::String(u.arbitrary()?),
+        })
+    }
+
     pub fn bool_(&self) -> Option<bool> {
         match self {
             | &Value::Bool(b) => Some(b),
@@ -110,20 +140,13 @@ impl Value {
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Flags {
     pub repr:   IntRepr,
-    pub fields: Vec<FlagField>,
-}
-
-#[derive(PartialEq, Eq, Clone, Debug)]
-pub struct FlagField {
-    pub name:  String,
-    pub value: bool,
+    pub fields: Vec<bool>,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Variant {
-    pub case_idx:  usize,
-    pub case_name: String,
-    pub payload:   Option<Value>,
+    pub case_idx: usize,
+    pub payload:  Option<Value>,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
