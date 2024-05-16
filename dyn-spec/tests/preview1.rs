@@ -9,7 +9,14 @@ use nom_supreme::{
     final_parser::{final_parser, Location, RecreateContext},
 };
 use tempfile::tempdir;
-use wazzi_dyn_spec::{environment::ResourceType, wasi, Environment, ResourceContext, Term};
+use wazzi_dyn_spec::{
+    ast::Idx,
+    environment::ResourceType,
+    wasi,
+    Environment,
+    ResourceContext,
+    Term,
+};
 use wazzi_executor::{ExecutorRunner, RunningExecutor};
 use wazzi_spec::parsers::wazzi_preview1;
 
@@ -129,15 +136,44 @@ fn ok() {
     )
     .run(stderr)
     .unwrap();
+    let solution = env.call(&mut u, &ctx, "path_open").unwrap();
+    let function = env
+        .functions_mut()
+        .get(&Idx::Symbolic("path_open".to_owned()))
+        .unwrap()
+        .clone();
 
     executor.call(wazzi_executor_pb_rust::request::Call {
         func:           <&str as TryInto<wazzi_executor_pb_rust::WasiFunc>>::try_into("path_open")
             .unwrap()
             .into(),
-        params:         todo!(),
-        results:        todo!(),
+        params:         solution
+            .params
+            .into_iter()
+            .zip(function.params.iter())
+            .map(|(p, func_param)| {
+                let resource_type = env
+                    .resource_types_mut()
+                    .get(&Idx::Numeric(func_param.resource_type_idx))
+                    .unwrap();
+
+                p.inner.into_pb(&ctx, &resource_type.wasi_type)
+            })
+            .collect(),
+        results:        function
+            .results
+            .iter()
+            .map(|r| {
+                let ty = env
+                    .resource_types_mut()
+                    .get(&Idx::Numeric(r.resource_type_idx))
+                    .unwrap();
+
+                wasi::Value::arbitrary(&ty.wasi_type, &mut u)
+                    .unwrap()
+                    .into_pb(&ty.wasi_type)
+            })
+            .collect(),
         special_fields: Default::default(),
     });
-
-    let solution = env.call(&mut u, &ctx, "path_open").unwrap();
 }

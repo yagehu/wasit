@@ -5,6 +5,7 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+wazzi-executor-pb-rust.workspace = true
 wazzi-spec.workspace = true
 
 arbitrary.workspace = true
@@ -13,7 +14,6 @@ thiserror.workspace = true
 
 [dev-dependencies]
 wazzi-executor.workspace = true
-wazzi-executor-pb-rust.workspace = true
 wazzi-runners.workspace = true
 
 nom.workspace = true

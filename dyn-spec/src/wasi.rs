@@ -91,7 +91,7 @@ pub enum Value {
     Unit,
     Bool(bool),
     S64(i64),
-    U32(i32),
+    U32(u32),
     U64(u64),
     Handle(u32),
     Flags(Flags),
@@ -109,7 +109,6 @@ impl Value {
             | Type::U64 => Self::U64(u.arbitrary()?),
             | Type::Handle => Self::Handle(u.arbitrary()?),
             | Type::Flags(flags) => Self::Flags(Flags {
-                repr:   flags.repr,
                 fields: flags
                     .fields
                     .iter()
@@ -129,6 +128,66 @@ impl Value {
         })
     }
 
+    pub fn into_pb(self, ty: &Type) -> wazzi_executor_pb_rust::Value {
+        let which = match (ty, self) {
+            | (_, Self::Unit) => unimplemented!(),
+            | (_, Self::Bool(_)) => unimplemented!(),
+            | (_, Self::S64(i)) => wazzi_executor_pb_rust::value::Which::Builtin(
+                wazzi_executor_pb_rust::value::Builtin {
+                    which:          Some(wazzi_executor_pb_rust::value::builtin::Which::S64(i)),
+                    special_fields: Default::default(),
+                },
+            ),
+            | (_, Self::U32(i)) => wazzi_executor_pb_rust::value::Which::Builtin(
+                wazzi_executor_pb_rust::value::Builtin {
+                    which:          Some(wazzi_executor_pb_rust::value::builtin::Which::U32(i)),
+                    special_fields: Default::default(),
+                },
+            ),
+            | (_, Self::U64(i)) => wazzi_executor_pb_rust::value::Which::Builtin(
+                wazzi_executor_pb_rust::value::Builtin {
+                    which:          Some(wazzi_executor_pb_rust::value::builtin::Which::U64(i)),
+                    special_fields: Default::default(),
+                },
+            ),
+            | (_, Self::Handle(handle)) => wazzi_executor_pb_rust::value::Which::Handle(handle),
+            | (Type::Flags(flags_type), Self::Flags(flags)) => {
+                wazzi_executor_pb_rust::value::Which::Bitflags(
+                    wazzi_executor_pb_rust::value::Bitflags {
+                        repr:           match flags_type.repr {
+                            | IntRepr::U8 => wazzi_executor_pb_rust::IntRepr::U8,
+                            | IntRepr::U16 => wazzi_executor_pb_rust::IntRepr::U16,
+                            | IntRepr::U32 => wazzi_executor_pb_rust::IntRepr::U32,
+                            | IntRepr::U64 => wazzi_executor_pb_rust::IntRepr::U64,
+                        }
+                        .into(),
+                        members:        flags
+                            .fields
+                            .iter()
+                            .zip(flags_type.fields.iter())
+                            .map(
+                                |(&f, name)| wazzi_executor_pb_rust::value::bitflags::Member {
+                                    name:           name.to_owned(),
+                                    value:          f,
+                                    special_fields: Default::default(),
+                                },
+                            )
+                            .collect(),
+                        special_fields: Default::default(),
+                    },
+                )
+            },
+            | (_, Self::Variant(_)) => todo!(),
+            | (_, Self::String(bytes)) => wazzi_executor_pb_rust::value::Which::String(bytes),
+            | (_, Self::Flags(_)) => unreachable!(),
+        };
+
+        wazzi_executor_pb_rust::Value {
+            which:          Some(which),
+            special_fields: Default::default(),
+        }
+    }
+
     pub fn bool_(&self) -> Option<bool> {
         match self {
             | &Value::Bool(b) => Some(b),
@@ -139,7 +198,6 @@ impl Value {
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Flags {
-    pub repr:   IntRepr,
     pub fields: Vec<bool>,
 }
 

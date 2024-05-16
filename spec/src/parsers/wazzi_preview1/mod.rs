@@ -732,8 +732,8 @@ impl From<FlagsType<'_>> for package::FlagsType {
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct ResultType<'a> {
-    ok:    Option<TypeRef<'a>>,
-    error: TypeRef<'a>,
+    pub ok:    Option<TypeRef<'a>>,
+    pub error: TypeRef<'a>,
 }
 
 impl<'a> ResultType<'a> {

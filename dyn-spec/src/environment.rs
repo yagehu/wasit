@@ -22,11 +22,18 @@ pub enum Variable {
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Function {
     pub params:         Vec<FunctionParam>,
+    pub results:        Vec<FunctionResult>,
     pub input_contract: Term,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct FunctionParam {
+    pub name:              String,
+    pub resource_type_idx: usize,
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct FunctionResult {
     pub name:              String,
     pub resource_type_idx: usize,
 }
@@ -103,6 +110,44 @@ impl Environment {
                                         name: p.name.name().to_owned(),
                                         resource_type_idx,
                                     }
+                                })
+                                .collect(),
+                            results:        function
+                                .results
+                                .iter()
+                                .flat_map(|r| match &r.tref {
+                                    | wazzi_preview1::TypeRef::Type(ty) => match &**ty {
+                                        | wazzi_preview1::Type::Result(result) => {
+                                            match &result.ok {
+                                                | Some(ok_tref) => match ok_tref {
+                                                    | &wazzi_preview1::TypeRef::Numeric(i) => {
+                                                        vec![FunctionResult {
+                                                            name:              "expected"
+                                                                .to_owned(),
+                                                            resource_type_idx: i as usize,
+                                                        }]
+                                                    },
+                                                    | wazzi_preview1::TypeRef::Symbolic(id) => {
+                                                        vec![FunctionResult {
+                                                            name:              "expected"
+                                                                .to_owned(),
+                                                            resource_type_idx: self
+                                                                .resource_types
+                                                                .resolve_idx(&Idx::Symbolic(
+                                                                    id.name().to_owned(),
+                                                                ))
+                                                                .unwrap(),
+                                                        }]
+                                                    },
+                                                    | wazzi_preview1::TypeRef::Type(_ty) => todo!(),
+                                                },
+                                                | None => vec![],
+                                            }
+                                        },
+                                        | _ => todo!(),
+                                    },
+                                    | wazzi_preview1::TypeRef::Numeric(_i) => todo!(),
+                                    | wazzi_preview1::TypeRef::Symbolic(_) => todo!(),
                                 })
                                 .collect(),
                             input_contract: function
@@ -358,10 +403,7 @@ impl Environment {
                     fields.push(u.arbitrary().unwrap())
                 }
 
-                wasi::Value::Flags(wasi::Flags {
-                    repr: flags.repr.into(),
-                    fields,
-                })
+                wasi::Value::Flags(wasi::Flags { fields })
             },
             | wasi::Type::Variant(variant) => {
                 let cases = variant.cases.iter().enumerate().collect::<Vec<_>>();
@@ -734,7 +776,7 @@ pub enum Error {
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Solution {
-    params: Vec<Param>,
+    pub params: Vec<Param>,
 }
 
 impl Solution {
@@ -745,14 +787,84 @@ impl Solution {
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Param {
-    name:  String,
-    inner: ParamInner,
+    pub name:  String,
+    pub inner: ParamInner,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum ParamInner {
     Resource(usize),
     Value(wasi::Value),
+}
+
+impl ParamInner {
+    pub fn into_pb(self, ctx: &ResourceContext, ty: &wasi::Type) -> wazzi_executor_pb_rust::Value {
+        let value = match self {
+            | ParamInner::Resource(idx) => ctx.get(&Idx::Numeric(idx)).unwrap().value.clone(),
+            | ParamInner::Value(value) => value,
+        };
+        let which = match (ty, value) {
+            | (_, wasi::Value::Unit) => unimplemented!(),
+            | (_, wasi::Value::Bool(_)) => unimplemented!(),
+            | (_, wasi::Value::S64(i)) => wazzi_executor_pb_rust::value::Which::Builtin(
+                wazzi_executor_pb_rust::value::Builtin {
+                    which:          Some(wazzi_executor_pb_rust::value::builtin::Which::S64(i)),
+                    special_fields: Default::default(),
+                },
+            ),
+            | (_, wasi::Value::U32(i)) => wazzi_executor_pb_rust::value::Which::Builtin(
+                wazzi_executor_pb_rust::value::Builtin {
+                    which:          Some(wazzi_executor_pb_rust::value::builtin::Which::U32(i)),
+                    special_fields: Default::default(),
+                },
+            ),
+            | (_, wasi::Value::U64(i)) => wazzi_executor_pb_rust::value::Which::Builtin(
+                wazzi_executor_pb_rust::value::Builtin {
+                    which:          Some(wazzi_executor_pb_rust::value::builtin::Which::U64(i)),
+                    special_fields: Default::default(),
+                },
+            ),
+            | (_, wasi::Value::Handle(handle)) => {
+                wazzi_executor_pb_rust::value::Which::Handle(handle)
+            },
+            | (wasi::Type::Flags(flags_type), wasi::Value::Flags(flags)) => {
+                wazzi_executor_pb_rust::value::Which::Bitflags(
+                    wazzi_executor_pb_rust::value::Bitflags {
+                        repr:           match flags_type.repr {
+                            | wasi::IntRepr::U8 => wazzi_executor_pb_rust::IntRepr::U8,
+                            | wasi::IntRepr::U16 => wazzi_executor_pb_rust::IntRepr::U16,
+                            | wasi::IntRepr::U32 => wazzi_executor_pb_rust::IntRepr::U32,
+                            | wasi::IntRepr::U64 => wazzi_executor_pb_rust::IntRepr::U64,
+                        }
+                        .into(),
+                        members:        flags
+                            .fields
+                            .iter()
+                            .zip(flags_type.fields.iter())
+                            .map(
+                                |(&f, name)| wazzi_executor_pb_rust::value::bitflags::Member {
+                                    name:           name.to_owned(),
+                                    value:          f,
+                                    special_fields: Default::default(),
+                                },
+                            )
+                            .collect(),
+                        special_fields: Default::default(),
+                    },
+                )
+            },
+            | (_, wasi::Value::Variant(_)) => todo!(),
+            | (_, wasi::Value::String(bytes)) => {
+                wazzi_executor_pb_rust::value::Which::String(bytes)
+            },
+            | (_, wasi::Value::Flags(_)) => unreachable!(),
+        };
+
+        wazzi_executor_pb_rust::Value {
+            which:          Some(which),
+            special_fields: Default::default(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -782,6 +894,7 @@ mod tests {
                     name:              "offset".to_owned(),
                     resource_type_idx: filedelta_idx,
                 }],
+                results:        vec![],
                 input_contract: Term::Value {
                     ty:    wasi::Type::Bool,
                     inner: wasi::Value::Bool(true),
@@ -843,6 +956,7 @@ mod tests {
                     name:              "offset".to_owned(),
                     resource_type_idx: filedelta_idx,
                 }],
+                results:        vec![],
                 input_contract: Term::Value {
                     ty:    wasi::Type::Bool,
                     inner: wasi::Value::Bool(true),
@@ -897,6 +1011,7 @@ mod tests {
                     name:              "fd".to_owned(),
                     resource_type_idx: fd_idx,
                 }],
+                results:        vec![],
                 input_contract: Term::Value {
                     ty:    wasi::Type::Bool,
                     inner: wasi::Value::Bool(true),
@@ -959,6 +1074,7 @@ mod tests {
                     name:              "fd".to_owned(),
                     resource_type_idx: fd_idx,
                 }],
+                results:        vec![],
                 input_contract: Term::Value {
                     ty:    wasi::Type::Bool,
                     inner: wasi::Value::Bool(true),
@@ -1035,6 +1151,7 @@ mod tests {
                     name:              "fd".to_owned(),
                     resource_type_idx: fd_idx,
                 }],
+                results:        vec![],
                 input_contract: Term::Value {
                     ty:    wasi::Type::Bool,
                     inner: wasi::Value::Bool(true),
@@ -1103,6 +1220,7 @@ mod tests {
                     name:              "fd".to_owned(),
                     resource_type_idx: fd_idx,
                 }],
+                results:        vec![],
                 input_contract: Term::Value {
                     ty:    wasi::Type::Bool,
                     inner: wasi::Value::Bool(true),
@@ -1209,6 +1327,7 @@ mod tests {
                         resource_type_idx: whence_idx,
                     },
                 ],
+                results:        vec![],
                 input_contract: Term::Value {
                     ty:    wasi::Type::Bool,
                     inner: wasi::Value::Bool(true),
@@ -1356,6 +1475,7 @@ mod tests {
                         resource_type_idx: whence_idx,
                     },
                 ],
+                results:        vec![],
                 input_contract: Term::Value {
                     ty:    wasi::Type::Bool,
                     inner: wasi::Value::Bool(true),
