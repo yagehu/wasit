@@ -8,6 +8,7 @@ pub struct Resource {
     pub attrs: HashMap<String, wasi::Value>,
 }
 
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct ResourceContext {
     resources: IndexSpace<Resource>,
     by_types:  HashMap<usize, BTreeSet<usize>>,

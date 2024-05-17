@@ -261,3 +261,46 @@ impl WasiRunner for Wamr<'_> {
         command
     }
 }
+
+#[derive(Clone, Debug)]
+pub struct Wazero<'p> {
+    path: &'p Path,
+}
+
+impl<'p> Wazero<'p> {
+    pub fn new(path: &'p Path) -> Self {
+        Self { path }
+    }
+
+    fn mount_base_dir(&self, dir: Option<PathBuf>) -> Vec<OsString> {
+        match dir {
+            | Some(dir) => vec![OsString::from("-mount"), dir.into()],
+            | None => Vec::new(),
+        }
+    }
+}
+
+impl WasiRunner for Wazero<'_> {
+    fn base_dir_fd(&self) -> u32 {
+        3
+    }
+
+    fn prepare_command(
+        &self,
+        wasm_path: PathBuf,
+        working_dir: &Path,
+        base_dir: Option<PathBuf>,
+    ) -> process::Command {
+        let mut command = process::Command::new(self.path);
+
+        command.arg("run");
+        command.args(self.mount_base_dir(base_dir));
+        command.arg(wasm_path);
+        command.stdin(process::Stdio::piped());
+        command.stdout(process::Stdio::piped());
+        command.stderr(process::Stdio::piped());
+        command.current_dir(working_dir);
+
+        command
+    }
+}

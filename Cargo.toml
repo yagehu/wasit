@@ -6,6 +6,7 @@ publish = false
 resolver = "2"
 members = [
     "compile-time",
+    "dyn-fuzzer",
     "dyn-spec",
     "executor",
     "executor/pb/c",
@@ -26,6 +27,7 @@ members = [
 [workspace.dependencies]
 wasi-sdk.path = "wasi-sdk/build"
 wazzi-compile-time.path = "compile-time"
+wazzi-dyn-spec.path = "dyn-spec"
 wazzi-executor.path = "executor"
 wazzi-executor-pb-c.path = "executor/pb/c"
 wazzi-executor-pb-rust.path = "executor/pb/rust"
