@@ -6,8 +6,15 @@ publish.workspace = true
 
 [dependencies]
 wazzi-dyn-spec.workspace = true
+wazzi-executor.workspace = true
 wazzi-runners.workspace = true
+wazzi-spec.workspace = true
 wazzi-store.workspace = true
 
+arbitrary.workspace = true
 color-eyre.workspace = true
 eyre.workspace = true
+rand.workspace = true
+tracing.workspace = true
+tracing-error.workspace = true
+tracing-subscriber.workspace = true

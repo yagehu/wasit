@@ -1667,10 +1667,17 @@ version = "0.1.0"
 name = "wazzi-dyn-fuzzer"
 version = "0.1.0"
 dependencies = [
+ "arbitrary",
  "color-eyre",
  "eyre",
+ "rand",
+ "tracing",
+ "tracing-error",
+ "tracing-subscriber",
  "wazzi-dyn-spec",
+ "wazzi-executor",
  "wazzi-runners",
+ "wazzi-spec",
  "wazzi-store",
 ]
 

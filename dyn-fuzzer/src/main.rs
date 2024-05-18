@@ -1,21 +1,48 @@
 use std::{
     collections::HashMap,
+    io,
     path::{Path, PathBuf},
 };
 
 use eyre::Context as _;
+use tracing_error::ErrorLayer;
+use tracing_subscriber::layer::SubscriberExt as _;
 use wazzi_dyn_fuzzer::Fuzzer;
 use wazzi_dyn_spec::Environment;
 use wazzi_runners::{Node, Wamr, WasiRunner, Wasmedge, Wasmer, Wasmtime, Wazero};
+use wazzi_spec::parsers::wazzi_preview1;
 use wazzi_store::FuzzStore;
 
 fn main() -> Result<(), eyre::Error> {
     color_eyre::install()?;
+    tracing::subscriber::set_global_default(
+        tracing_subscriber::Registry::default()
+            .with(ErrorLayer::default())
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_thread_names(true)
+                    .with_writer(io::stderr)
+                    .pretty(),
+            ),
+    )
+    .wrap_err("failed to configure tracing")?;
 
     let fuzz_store = FuzzStore::new(Path::new("abc")).wrap_err("failed to init fuzz store")?;
     let mut fuzzer = Fuzzer::new(
         || -> Environment {
-            let env = Environment::new();
+            const PREVIEW1: &str = include_str!("../../spec/preview1.dyn-constraint.witx");
+
+            let mut env = Environment::new();
+            let document = wazzi_preview1::Document::parse(PREVIEW1).unwrap();
+            let module = document
+                .modules
+                .into_iter()
+                .find(
+                    |module| matches!(&module.id, Some(id) if id.name() == "wasi_snapshot_preview1"),
+                )
+                .unwrap();
+
+            env.ingest_preview1_spec(module);
 
             env
         },
@@ -49,7 +76,7 @@ fn main() -> Result<(), eyre::Error> {
         fuzz_store,
     );
 
-    fuzzer.fuzz();
+    fuzzer.fuzz(None).wrap_err("failed to fuzz")?;
 
     Ok(())
 }

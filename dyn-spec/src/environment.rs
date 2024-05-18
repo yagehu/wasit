@@ -21,6 +21,7 @@ pub enum Variable {
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Function {
+    pub name:           String,
     pub params:         Vec<FunctionParam>,
     pub results:        Vec<FunctionResult>,
     pub input_contract: Term,
@@ -93,6 +94,7 @@ impl Environment {
                     self.functions.push(
                         Some(function.name.to_owned()),
                         Function {
+                            name:           function.name.to_owned(),
                             params:         function
                                 .params
                                 .iter()
@@ -226,8 +228,31 @@ impl Environment {
         &mut self.functions
     }
 
+    pub fn resource_types(&self) -> &IndexSpace<ResourceType> {
+        &self.resource_types
+    }
+
     pub fn resource_types_mut(&mut self) -> &mut IndexSpace<ResourceType> {
         &mut self.resource_types
+    }
+
+    pub fn function_pool(
+        &self,
+        u: &mut Unstructured,
+        resources: &ResourceContext,
+    ) -> Vec<&Function> {
+        let mut functions = self.functions.iter().collect::<Vec<_>>();
+
+        for (i, function) in self.functions.iter().enumerate() {
+            if self
+                .solve(u, &function.input_contract, resources, &Idx::Numeric(i))
+                .is_some()
+            {
+                functions.push(function);
+            }
+        }
+
+        functions
     }
 
     pub fn solve(
@@ -351,6 +376,8 @@ impl Environment {
                     inner: ParamInner::Value(value.clone()),
                 });
 
+                eprintln!("{:?}", value);
+
                 let guess =
                     self.guess_variable(u, &var, Variable::Value(value.clone()), t, function);
                 let solved = self.solve_helper(u, &guess, resources, function_idx, solution);
@@ -376,7 +403,33 @@ impl Environment {
                         }))
                     },
                     | (wasi::Value::S64(i), _) => wasi::Value::S64(i.wrapping_add(1)),
-                    | _ => panic!(),
+                    | (wasi::Value::Flags(flags), wasi::Type::Flags(flags_type)) => {
+                        let mut curr = flags_type.fields.len() - 1;
+                        let mut fields = flags.fields.clone();
+                        let mut carry = true;
+
+                        while carry {
+                            if fields[curr] {
+                                fields[curr] = false;
+                            } else {
+                                fields[curr] = true;
+                                carry = false;
+                            }
+
+                            if curr == 0 {
+                                if carry {
+                                    fields = vec![false; flags_type.fields.len()];
+                                }
+
+                                break;
+                            } else {
+                                curr -= 1;
+                            }
+                        }
+
+                        wasi::Value::Flags(wasi::Flags { fields })
+                    },
+                    | _ => panic!("value {:?}", value),
                 };
 
                 if value == search_start {
@@ -890,6 +943,7 @@ mod tests {
         env.functions_mut().push(
             Some("fd_seek".to_owned()),
             Function {
+                name:           "fd_seek".to_owned(),
                 params:         vec![FunctionParam {
                     name:              "offset".to_owned(),
                     resource_type_idx: filedelta_idx,
@@ -952,6 +1006,7 @@ mod tests {
         env.functions_mut().push(
             Some("fd_seek".to_owned()),
             Function {
+                name:           "fd_seek".to_owned(),
                 params:         vec![FunctionParam {
                     name:              "offset".to_owned(),
                     resource_type_idx: filedelta_idx,
@@ -1007,6 +1062,7 @@ mod tests {
         env.functions_mut().push(
             Some("fd_seek".to_owned()),
             Function {
+                name:           "fd_seek".to_owned(),
                 params:         vec![FunctionParam {
                     name:              "fd".to_owned(),
                     resource_type_idx: fd_idx,
@@ -1070,6 +1126,7 @@ mod tests {
         env.functions_mut().push(
             Some("fd_seek".to_owned()),
             Function {
+                name:           "fd_seek".to_owned(),
                 params:         vec![FunctionParam {
                     name:              "fd".to_owned(),
                     resource_type_idx: fd_idx,
@@ -1147,6 +1204,7 @@ mod tests {
         env.functions_mut().push(
             Some("fd_seek".to_owned()),
             Function {
+                name:           "fd_seek".to_owned(),
                 params:         vec![FunctionParam {
                     name:              "fd".to_owned(),
                     resource_type_idx: fd_idx,
@@ -1216,6 +1274,7 @@ mod tests {
         env.functions_mut().push(
             Some("fd_seek".to_owned()),
             Function {
+                name:           "fd_seek".to_owned(),
                 params:         vec![FunctionParam {
                     name:              "fd".to_owned(),
                     resource_type_idx: fd_idx,
@@ -1317,6 +1376,7 @@ mod tests {
         env.functions_mut().push(
             Some("fd_seek".to_owned()),
             Function {
+                name:           "fd_seek".to_owned(),
                 params:         vec![
                     FunctionParam {
                         name:              "fd".to_owned(),
@@ -1461,6 +1521,7 @@ mod tests {
         env.functions_mut().push(
             Some("fd_seek".to_owned()),
             Function {
+                name:           "fd_seek".to_owned(),
                 params:         vec![
                     FunctionParam {
                         name:              "fd".to_owned(),
@@ -1551,6 +1612,58 @@ mod tests {
                     }))),
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn z3() {
+        let mut env = Environment::new();
+        let fd = env.resource_types_mut().push(
+            Some("fd".to_owned()),
+            ResourceType {
+                wasi_type:  wasi::Type::Handle,
+                attributes: HashMap::from([("offset".to_owned(), wasi::Type::U64)]),
+                fungible:   false,
+            },
+        );
+        let filedelta = env.resource_types_mut().push(
+            Some("filedelta".to_owned()),
+            ResourceType {
+                wasi_type:  wasi::Type::S64,
+                attributes: Default::default(),
+                fungible:   true,
+            },
+        );
+
+        env.functions_mut().push(
+            Some("fd_seek".to_owned()),
+            Function {
+                name:           "fd_seek".to_owned(),
+                params:         vec![
+                    FunctionParam {
+                        name:              "fd".to_owned(),
+                        resource_type_idx: fd_idx,
+                    },
+                    FunctionParam {
+                        name:              "offset".to_owned(),
+                        resource_type_idx: filedelta_idx,
+                    },
+                ],
+                results:        vec![],
+                input_contract: Term::Value {
+                    ty:    wasi::Type::Bool,
+                    inner: wasi::Value::Bool(true),
+                },
+            },
+        );
+
+        let mut u = Unstructured::new(&[]);
+        let fd_resource = ctx.push(
+            fd_idx,
+            Resource {
+                value: wasi::Value::S64(3),
+                attrs: HashMap::from([("offset".to_owned(), wasi::Value::S64(10))]),
+            },
         );
     }
 }

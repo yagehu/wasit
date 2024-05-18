@@ -36,6 +36,10 @@ impl<T> IndexSpace<T> {
             | &Idx::Numeric(i) => Some(i),
         }
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = &T> {
+        self.stack.iter()
+    }
 }
 
 impl<T> Default for IndexSpace<T> {

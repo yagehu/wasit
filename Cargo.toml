@@ -69,6 +69,7 @@ tracing = "0.1"
 tracing-error = "0.2"
 tracing-subscriber = { version = "0.3", features = ["fmt"] }
 walkdir = "2"
+z3 = "0.12"
 
 [package]
 name = "wazzi"
