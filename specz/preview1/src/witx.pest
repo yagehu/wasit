@@ -1,0 +1,112 @@
+WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
+
+document = { SOI ~ (comment | decl | "\r" | "\n")* ~ EOI }
+
+decl = _{ typename | module }
+
+typename = { "(" ~ "typename" ~ id ~ type_ref ~ annotation_expr* ~ ")" }
+
+comment = @{ ";" ~ (!NEWLINE ~ ANY)* ~ NEWLINE }
+
+id = @{ "$" ~ (ASCII_ALPHANUMERIC | "." | "-" | "_")+ }
+
+type_ref = { id | type }
+
+int_repr = { "u8" | "u16" | "u32" | "u64" }
+
+type =
+  { "s64"
+  | "u8"
+  | "u16"
+  | "u32"
+  | "u64"
+  | handle
+  | enum
+  | union
+  | flags
+  | record
+  | list
+  | expected
+  }
+
+handle = { "(" ~ "handle" ~ ")" }
+
+enum =
+  { "(" ~ "enum"
+  ~ "(" ~ "@witx" ~ "tag" ~ int_repr ~ ")"
+  ~ (comment | id)+
+  ~ ")"
+  }
+
+union =
+  { "(" ~ "union"
+  ~ "(" ~ "@witx" ~ "tag" ~ id ~ ")"
+  ~ (comment | id)+
+  ~ ")"
+  }
+
+flags =
+  { "(" ~ "flags"
+  ~ "(" ~ "@witx" ~ "repr" ~ int_repr ~ ")"
+  ~ (comment | id)+
+  ~ ")"
+  }
+
+record =
+  { "(" ~ "record"
+  ~ (comment | record_field)+
+  ~ ")"
+  }
+
+expected =
+  { "(" ~ "expected" ~ id
+  ~ "(" ~ "error" ~ id ~ ")"
+  ~ ")"
+  }
+
+record_field = { "(" ~ "field" ~ id ~ type_ref ~ ")" }
+
+list = { "(" ~ "list" ~ type_ref ~ ")" }
+
+module = { "(" ~ "module" ~ id ~ function* ~ ")" }
+
+function_name = @{ (ASCII_ALPHANUMERIC | "-" | "_")+ }
+
+function =
+  { "(" ~ "@interface" ~ "func"
+  ~ "(" ~ "export" ~ "\"" ~ function_name ~ "\"" ~ ")"
+  ~ param*
+  ~ result*
+  ~ annotation_expr*
+  ~ ")"
+  }
+
+param = { "(" ~ "param" ~ id ~ type_ref ~ ")" }
+result = { "(" ~ "result" ~ id ~ type_ref ~ ")" }
+
+annotation_expr =
+  { "(" ~ &"@"
+  ~ expr*
+  ~ ")"
+  }
+
+expr =
+  { id
+  | annotation
+  | keyword
+  | number
+  | sexpr
+  }
+
+keyword =
+  {
+    "i64.const"
+  | "param"
+  | "result"
+  }
+
+number = @{ "-"? ~ ASCII_DIGIT+ }
+
+annotation = @{ "@" ~ (ASCII_ALPHANUMERIC | "." | "-" | "_")+ }
+
+sexpr = { "(" ~ expr* ~ ")" }
