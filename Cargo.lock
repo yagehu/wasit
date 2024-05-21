@@ -1895,7 +1895,6 @@ dependencies = [
 name = "wazzi-specz"
 version = "0.1.0"
 dependencies = [
- "nom",
  "z3",
 ]
 
@@ -1910,7 +1909,12 @@ dependencies = [
  "tracing",
  "tracing-error",
  "tracing-subscriber",
+ "wazzi-specz-wasi",
 ]
+
+[[package]]
+name = "wazzi-specz-wasi"
+version = "0.1.0"
 
 [[package]]
 name = "wazzi-store"

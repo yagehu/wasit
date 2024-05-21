@@ -2,7 +2,7 @@ use eyre::Context as _;
 use pest::iterators::Pair;
 use pest_derive::Parser;
 
-use crate::{term, Term};
+use wazzi_specz_wasi::{term, Term};
 
 #[derive(Parser)]
 #[grammar = "witx/slang.pest"]
@@ -13,15 +13,12 @@ pub fn to_term(pair: Pair<'_, Rule>) -> Result<Term, eyre::Error> {
         | Rule::not => Term::Not(Box::new(term::Not {
             term: to_term(pair.into_inner().next().unwrap())?,
         })),
-        | Rule::and => {
-            let mut clauses = Vec::new();
-
-            for pair in pair.into_inner() {
-                clauses.push(to_term(pair)?);
-            }
-
-            Term::And(term::And { clauses })
-        },
+        | Rule::and => Term::And(term::And {
+            clauses: pair
+                .into_inner()
+                .map(|p| to_term(p))
+                .collect::<Result<_, _>>()?,
+        }),
         | Rule::param => Term::Param(term::Param {
             name: pair
                 .into_inner()

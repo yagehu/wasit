@@ -7,7 +7,7 @@ use pest::{
 };
 use pest_derive::Parser;
 
-use crate::{
+use wazzi_specz_wasi::{
     FlagsType,
     Function,
     FunctionParam,
@@ -235,7 +235,7 @@ fn preview1_type(spec: &mut Spec, pair: Pair<'_, Rule>) -> Result<WazziType, eyr
             }
 
             WasiType::Flags(FlagsType {
-                repr: IntRepr::try_from(int_repr_pair)?,
+                repr: preview1_int_repr(int_repr_pair)?,
                 fields,
             })
         },
@@ -265,7 +265,7 @@ fn preview1_type(spec: &mut Spec, pair: Pair<'_, Rule>) -> Result<WazziType, eyr
             }
 
             WasiType::Variant(VariantType {
-                tag_repr: IntRepr::try_from(int_repr_pair)?,
+                tag_repr: preview1_int_repr(int_repr_pair)?,
                 cases,
             })
         },
@@ -404,16 +404,12 @@ fn preview1_tref(spec: &mut Spec, pair: Pair<'_, Rule>) -> Result<WazziType, eyr
     }
 }
 
-impl TryFrom<Pair<'_, Rule>> for IntRepr {
-    type Error = eyre::Error;
-
-    fn try_from(pair: Pair<'_, Rule>) -> Result<Self, Self::Error> {
-        Ok(match pair.as_rule() {
-            | Rule::r#u8 => Self::U8,
-            | Rule::r#u16 => Self::U16,
-            | Rule::r#u32 => Self::U32,
-            | Rule::r#u64 => Self::U64,
-            | _ => return Err(err!("unknown int repr {:?}", pair)),
-        })
-    }
+fn preview1_int_repr(pair: Pair<'_, Rule>) -> Result<IntRepr, eyre::Error> {
+    Ok(match pair.as_rule() {
+        | Rule::r#u8 => IntRepr::U8,
+        | Rule::r#u16 => IntRepr::U16,
+        | Rule::r#u32 => IntRepr::U32,
+        | Rule::r#u64 => IntRepr::U64,
+        | _ => return Err(err!("unknown int repr {:?}", pair)),
+    })
 }

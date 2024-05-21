@@ -1,8 +1,6 @@
 [package]
-name = "wazzi-specz"
+name = "wazzi-specz-wasi"
 version = "0.1.0"
 edition.workspace = true
-publish.workspace = true
 
 [dependencies]
-z3.workspace = true

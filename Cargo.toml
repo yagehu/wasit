@@ -18,6 +18,7 @@ members = [
     "spec/constraint",
     "specz",
     "specz/preview1",
+    "specz/wasi",
     "store",
     "tmin",
     "wasi",
@@ -39,6 +40,8 @@ wazzi-runners.path = "runners"
 wazzi-snapshot.path = "snapshot"
 wazzi-spec.path = "spec"
 wazzi-spec-constraint.path = "spec/constraint"
+wazzi-specz-preview1.path = "specz/preview1"
+wazzi-specz-wasi.path = "specz/wasi"
 wazzi-store.path = "store"
 wazzi-wasi.path = "wasi"
 wazzi-wasi-component-model.path = "wasi/component-model"
