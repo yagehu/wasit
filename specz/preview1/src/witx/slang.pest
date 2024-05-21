@@ -1,0 +1,23 @@
+WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
+
+term_final = _{ SOI ~ term ~ EOI }
+
+term =
+ _{ not
+  | and
+  | or
+
+  | flags_get
+
+  | param
+  }
+
+not = { "(" ~ "@not" ~ term ~ ")" }
+and = { "(" ~ "@and" ~ term+ ~ ")" }
+or = { "(" ~ "@or" ~ term+ ~ ")" }
+
+id = @{ "$" ~ (ASCII_ALPHANUMERIC | "." | "-" | "_")+ }
+
+flags_get = { "(" ~ "@flags.get" ~ term ~ id ~ ")" }
+
+param = { "(" ~ "param" ~ id ~ ")" }

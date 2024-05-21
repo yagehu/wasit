@@ -775,12 +775,12 @@
     (result $error (expected $fd (error $errno)))
     (@input
       (@and
-        (@flag.unset (param $fdflags) $dsync)
-        (@flag.unset (param $fdflags) $rsync)
-        (@flag.unset (param $fdflags) $sync)
+        (@not (@flags.get (param $fdflags) $dsync))
+        (@not (@flags.get (param $fdflags) $rsync))
+        (@not (@flags.get (param $fdflags) $sync))
       )
     )
-    (@effect
+    (@effects
       (@attr.set (result $fd) $offset (i64.const 0))
       (@attr.set (result $fd) $flags (param $fdflags))
       (@attr.set (result $fd) $rights-base (param $fs_rights_base))

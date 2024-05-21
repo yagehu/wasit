@@ -101,7 +101,7 @@ annotation_expr =
   }
 
 expr =
-  { id
+ _{ id
   | annotation
   | keyword
   | number
