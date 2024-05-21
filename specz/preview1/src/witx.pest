@@ -12,24 +12,34 @@ id = @{ "$" ~ (ASCII_ALPHANUMERIC | "." | "-" | "_")+ }
 
 type_ref = { id | type }
 
-int_repr = { "u8" | "u16" | "u32" | "u64" }
+int_repr = { u8 | u16 | u32 | u64 }
 
 type =
-  { "s64"
-  | "u8"
-  | "u16"
-  | "u32"
-  | "u64"
+  { s64
+  | u8
+  | u16
+  | u32
+  | u64
   | handle
   | enum
   | union
   | flags
   | record
   | list
+  | string
   | expected
   }
 
+s64 = @{ "s64" }
+u8  = @{ "u8" }
+u16 = @{ "u16" }
+u32 = @{ "u32" }
+u64 = @{ "u64" }
+
+
 handle = { "(" ~ "handle" ~ ")" }
+
+string = @{ "string" }
 
 enum =
   { "(" ~ "enum"
@@ -59,8 +69,8 @@ record =
   }
 
 expected =
-  { "(" ~ "expected" ~ id
-  ~ "(" ~ "error" ~ id ~ ")"
+  { "(" ~ "expected" ~ type_ref
+  ~ "(" ~ "error" ~ type_ref ~ ")"
   ~ ")"
   }
 
@@ -99,8 +109,7 @@ expr =
   }
 
 keyword =
-  {
-    "i64.const"
+  { "i64.const"
   | "param"
   | "result"
   }

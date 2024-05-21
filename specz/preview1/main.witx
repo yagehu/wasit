@@ -10,6 +10,9 @@
 ;;; Non-negative file size or length of a region within a file.
 (typename $filesize u64)
 
+;;; Timestamp in nanoseconds.
+(typename $timestamp u64)
+
 ;;; Identifiers for clocks.
 (typename $clockid
   (enum (@witx tag u32)
@@ -764,7 +767,7 @@
   (@interface func (export "path_open")
     (param $fd $fd)
     (param $dirflags $lookupflags)
-    (param $path $path)
+    (param $path string)
     (param $oflags $oflags)
     (param $fs_rights_base $rights)
     (param $fs_rights_inheriting $rights)

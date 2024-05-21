@@ -71,7 +71,7 @@ tera = "1"
 thiserror = "1"
 tracing = "0.1"
 tracing-error = "0.2"
-tracing-subscriber = { version = "0.3", features = ["fmt"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 walkdir = "2"
 z3 = "0.12"
 
