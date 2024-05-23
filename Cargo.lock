@@ -1895,6 +1895,17 @@ dependencies = [
 name = "wazzi-specz"
 version = "0.1.0"
 dependencies = [
+ "color-eyre",
+ "eyre",
+ "num-bigint",
+ "tempfile",
+ "tracing",
+ "tracing-error",
+ "tracing-subscriber",
+ "wazzi-executor",
+ "wazzi-runners",
+ "wazzi-specz-preview1",
+ "wazzi-specz-wasi",
  "z3",
 ]
 

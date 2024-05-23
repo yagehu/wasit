@@ -32,5 +32,6 @@ pub struct Param {
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct FlagsGet {
     pub target: Term,
+    pub r#type: String,
     pub field:  String,
 }

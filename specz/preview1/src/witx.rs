@@ -65,7 +65,7 @@ pub fn preview1(spec: &mut Spec) -> Result<(), eyre::Error> {
                                     return Err(err!("typename {name} already defined"));
                                 }
 
-                                let ty = preview1_type(spec, pair)
+                                let ty = preview1_type(spec, pair, Some(name.to_owned()))
                                     .wrap_err("failed to handle type pair")?;
 
                                 spec.types.insert(name.to_owned(), ty);
@@ -203,7 +203,11 @@ fn preview1_module(spec: &mut Spec, pairs: Pairs<'_, Rule>) -> Result<Interface,
     Ok(interface)
 }
 
-fn preview1_type(spec: &mut Spec, pair: Pair<'_, Rule>) -> Result<WazziType, eyre::Error> {
+fn preview1_type(
+    spec: &mut Spec,
+    pair: Pair<'_, Rule>,
+    name: Option<String>,
+) -> Result<WazziType, eyre::Error> {
     let pair = pair.into_inner().next().unwrap();
     let wasi = match pair.as_rule() {
         | Rule::s64 => WasiType::S64,
@@ -362,7 +366,7 @@ fn preview1_type(spec: &mut Spec, pair: Pair<'_, Rule>) -> Result<WazziType, eyr
                             | None => return Err(err!("unknown type ref {id}")),
                         }
                     },
-                    | Rule::r#type => preview1_type(spec, tref_pair)?,
+                    | Rule::r#type => preview1_type(spec, tref_pair, None)?,
                     | _ => unreachable!(),
                 };
 
@@ -381,7 +385,7 @@ fn preview1_type(spec: &mut Spec, pair: Pair<'_, Rule>) -> Result<WazziType, eyr
         | t => return Err(err!("unexpected type {:?}", t)),
     };
 
-    Ok(WazziType { wasi })
+    Ok(WazziType { name, wasi })
 }
 
 fn preview1_tref(spec: &mut Spec, pair: Pair<'_, Rule>) -> Result<WazziType, eyre::Error> {
@@ -399,8 +403,8 @@ fn preview1_tref(spec: &mut Spec, pair: Pair<'_, Rule>) -> Result<WazziType, eyr
                 | None => Err(err!("unknown type ref {id}")),
             }
         },
-        | Rule::r#type => preview1_type(spec, pair),
-        | _ => unreachable!(),
+        | Rule::r#type => preview1_type(spec, pair, None),
+        | _ => unreachable!("{:?}", pair),
     }
 }
 

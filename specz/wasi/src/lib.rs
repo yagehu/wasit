@@ -1,8 +1,11 @@
 pub mod term;
 
-pub use term::Term;
+mod value;
 
-use std::collections::{BTreeMap, HashMap};
+pub use term::Term;
+pub use value::*;
+
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Spec {
@@ -27,6 +30,7 @@ impl Default for Spec {
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct WazziType {
+    pub name: Option<String>,
     pub wasi: WasiType,
 }
 
@@ -45,10 +49,38 @@ pub enum WasiType {
     List(Box<ListType>),
 }
 
+impl WasiType {
+    pub fn flags(&self) -> Option<&FlagsType> {
+        match self {
+            | Self::Flags(flags) => Some(flags),
+            | _ => None,
+        }
+    }
+
+    pub fn variant(&self) -> Option<&VariantType> {
+        match self {
+            | Self::Variant(variant) => Some(variant),
+            | _ => None,
+        }
+    }
+}
+
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct FlagsType {
     pub repr:   IntRepr,
     pub fields: Vec<String>,
+}
+
+impl FlagsType {
+    pub fn value(&self, fields: HashSet<&str>) -> WasiValue {
+        WasiValue::Flags(FlagsValue {
+            fields: self
+                .fields
+                .iter()
+                .map(|field| fields.contains(field.as_str()))
+                .collect(),
+        })
+    }
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
@@ -63,6 +95,24 @@ pub enum IntRepr {
 pub struct VariantType {
     pub tag_repr: IntRepr,
     pub cases:    Vec<VariantCaseType>,
+}
+
+impl VariantType {
+    pub fn value_from_name(
+        &self,
+        case_name: &str,
+        payload: Option<WasiValue>,
+    ) -> Option<WasiValue> {
+        Some(WasiValue::Variant(Box::new(VariantValue {
+            case_idx: self
+                .cases
+                .iter()
+                .enumerate()
+                .find(|(_, case)| &case.name == case_name)
+                .map(|(i, _)| i)?,
+            payload,
+        })))
+    }
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]

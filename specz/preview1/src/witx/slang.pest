@@ -18,6 +18,6 @@ or = { "(" ~ "@or" ~ term+ ~ ")" }
 
 id = @{ "$" ~ (ASCII_ALPHANUMERIC | "." | "-" | "_")+ }
 
-flags_get = { "(" ~ "@flags.get" ~ term ~ id ~ ")" }
+flags_get = { "(" ~ "@flags.get" ~ term ~ id ~ id ~ ")" }
 
 param = { "(" ~ "param" ~ id ~ ")" }
