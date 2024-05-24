@@ -282,6 +282,46 @@
   )
 )
 
+;;; File descriptor flags.
+(typename $fdflags
+  (flags (@witx repr u16)
+    ;;; Append mode: Data written to the file is always appended to the file's end.
+    $append
+    ;;; Write according to synchronized I/O data integrity completion. Only the data stored in the file is synchronized.
+    $dsync
+    ;;; Non-blocking mode.
+    $nonblock
+    ;;; Synchronized read I/O operations.
+    $rsync
+    ;;; Write according to synchronized I/O file integrity completion. In
+    ;;; addition to synchronizing the data stored in the file, the implementation
+    ;;; may also synchronously update the file's metadata.
+    $sync
+  )
+)
+
+;;; The type of a file descriptor or file.
+(typename $filetype
+  (enum (@witx tag u8)
+    ;;; The type of the file descriptor or file is unknown or is different from any of the other types specified.
+    $unknown
+    ;;; The file descriptor or file refers to a block device inode.
+    $block_device
+    ;;; The file descriptor or file refers to a character device inode.
+    $character_device
+    ;;; The file descriptor or file refers to a directory inode.
+    $directory
+    ;;; The file descriptor or file refers to a regular file inode.
+    $regular_file
+    ;;; The file descriptor or file refers to a datagram socket.
+    $socket_dgram
+    ;;; The file descriptor or file refers to a byte-stream socket.
+    $socket_stream
+    ;;; The file refers to a symbolic link inode.
+    $symbolic_link
+  )
+)
+
 ;;; A file descriptor handle.
 (typename $fd (handle)
   (@attribute $offset $filesize)
@@ -338,28 +378,6 @@
 ;;; File serial number that is unique within its file system.
 (typename $inode u64)
 
-;;; The type of a file descriptor or file.
-(typename $filetype
-  (enum (@witx tag u8)
-    ;;; The type of the file descriptor or file is unknown or is different from any of the other types specified.
-    $unknown
-    ;;; The file descriptor or file refers to a block device inode.
-    $block_device
-    ;;; The file descriptor or file refers to a character device inode.
-    $character_device
-    ;;; The file descriptor or file refers to a directory inode.
-    $directory
-    ;;; The file descriptor or file refers to a regular file inode.
-    $regular_file
-    ;;; The file descriptor or file refers to a datagram socket.
-    $socket_dgram
-    ;;; The file descriptor or file refers to a byte-stream socket.
-    $socket_stream
-    ;;; The file refers to a symbolic link inode.
-    $symbolic_link
-  )
-)
-
 ;;; A directory entry.
 (typename $dirent
   (record
@@ -389,24 +407,6 @@
     $dontneed
     ;;; The application expects to access the specified data once and then not reuse it thereafter.
     $noreuse
-  )
-)
-
-;;; File descriptor flags.
-(typename $fdflags
-  (flags (@witx repr u16)
-    ;;; Append mode: Data written to the file is always appended to the file's end.
-    $append
-    ;;; Write according to synchronized I/O data integrity completion. Only the data stored in the file is synchronized.
-    $dsync
-    ;;; Non-blocking mode.
-    $nonblock
-    ;;; Synchronized read I/O operations.
-    $rsync
-    ;;; Write according to synchronized I/O file integrity completion. In
-    ;;; addition to synchronizing the data stored in the file, the implementation
-    ;;; may also synchronously update the file's metadata.
-    $sync
   )
 )
 
@@ -810,6 +810,36 @@
         (@flags.get (param $fs_rights_base) $rights $poll_fd_readwrite)
         (@flags.get (param $fs_rights_base) $rights $sock_shutdown)
         (@flags.get (param $fs_rights_base) $rights $sock_accept)
+        (@flags.get (param $fs_rights_inheriting) $rights $fd_datasync)
+        (@flags.get (param $fs_rights_inheriting) $rights $fd_read)
+        (@flags.get (param $fs_rights_inheriting) $rights $fd_seek)
+        (@flags.get (param $fs_rights_inheriting) $rights $fd_fdstat_set_flags)
+        (@flags.get (param $fs_rights_inheriting) $rights $fd_sync)
+        (@flags.get (param $fs_rights_inheriting) $rights $fd_tell)
+        (@flags.get (param $fs_rights_inheriting) $rights $fd_write)
+        (@flags.get (param $fs_rights_inheriting) $rights $fd_advise)
+        (@flags.get (param $fs_rights_inheriting) $rights $fd_allocate)
+        (@flags.get (param $fs_rights_inheriting) $rights $path_create_directory)
+        (@flags.get (param $fs_rights_inheriting) $rights $path_create_file)
+        (@flags.get (param $fs_rights_inheriting) $rights $path_link_source)
+        (@flags.get (param $fs_rights_inheriting) $rights $path_link_target)
+        (@flags.get (param $fs_rights_inheriting) $rights $path_open)
+        (@flags.get (param $fs_rights_inheriting) $rights $fd_readdir)
+        (@flags.get (param $fs_rights_inheriting) $rights $path_readlink)
+        (@flags.get (param $fs_rights_inheriting) $rights $path_rename_source)
+        (@flags.get (param $fs_rights_inheriting) $rights $path_rename_target)
+        (@flags.get (param $fs_rights_inheriting) $rights $path_filestat_get)
+        (@flags.get (param $fs_rights_inheriting) $rights $path_filestat_set_size)
+        (@flags.get (param $fs_rights_inheriting) $rights $path_filestat_set_times)
+        (@flags.get (param $fs_rights_inheriting) $rights $fd_filestat_get)
+        (@flags.get (param $fs_rights_inheriting) $rights $fd_filestat_set_size)
+        (@flags.get (param $fs_rights_inheriting) $rights $fd_filestat_set_times)
+        (@flags.get (param $fs_rights_inheriting) $rights $path_symlink)
+        (@flags.get (param $fs_rights_inheriting) $rights $path_remove_directory)
+        (@flags.get (param $fs_rights_inheriting) $rights $path_unlink_file)
+        (@flags.get (param $fs_rights_inheriting) $rights $poll_fd_readwrite)
+        (@flags.get (param $fs_rights_inheriting) $rights $sock_shutdown)
+        (@flags.get (param $fs_rights_inheriting) $rights $sock_accept)
       )
     )
     (@effects

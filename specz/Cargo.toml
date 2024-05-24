@@ -5,10 +5,12 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+wazzi-executor-pb-rust.workspace = true
 wazzi-executor.workspace = true
 wazzi-specz-preview1.workspace = true
 wazzi-specz-wasi.workspace = true
 
+arbitrary.workspace = true
 eyre.workspace = true
 num-bigint.workspace = true
 tracing.workspace = true

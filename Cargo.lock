@@ -1895,6 +1895,7 @@ dependencies = [
 name = "wazzi-specz"
 version = "0.1.0"
 dependencies = [
+ "arbitrary",
  "color-eyre",
  "eyre",
  "num-bigint",
@@ -1903,6 +1904,7 @@ dependencies = [
  "tracing-error",
  "tracing-subscriber",
  "wazzi-executor",
+ "wazzi-executor-pb-rust",
  "wazzi-runners",
  "wazzi-specz-preview1",
  "wazzi-specz-wasi",
@@ -1926,6 +1928,10 @@ dependencies = [
 [[package]]
 name = "wazzi-specz-wasi"
 version = "0.1.0"
+dependencies = [
+ "arbitrary",
+ "wazzi-executor-pb-rust",
+]
 
 [[package]]
 name = "wazzi-store"

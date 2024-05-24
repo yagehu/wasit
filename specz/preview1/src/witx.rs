@@ -1,5 +1,7 @@
 pub mod slang;
 
+use std::collections::HashMap;
+
 use eyre::{eyre as err, Context as _};
 use pest::{
     iterators::{Pair, Pairs},
@@ -49,6 +51,7 @@ pub fn preview1(spec: &mut Spec) -> Result<(), eyre::Error> {
                     | Rule::id => id.as_str().strip_prefix('$').unwrap(),
                     | _ => return Err(err!("expected typename id")),
                 };
+                let annotation_pairs = pairs.collect::<Vec<_>>();
 
                 match tref.as_rule() {
                     | Rule::type_ref => {
@@ -65,8 +68,13 @@ pub fn preview1(spec: &mut Spec) -> Result<(), eyre::Error> {
                                     return Err(err!("typename {name} already defined"));
                                 }
 
-                                let ty = preview1_type(spec, pair, Some(name.to_owned()))
-                                    .wrap_err("failed to handle type pair")?;
+                                let ty = preview1_type(
+                                    spec,
+                                    pair,
+                                    Some(name.to_owned()),
+                                    annotation_pairs,
+                                )
+                                .wrap_err("failed to handle type pair")?;
 
                                 spec.types.insert(name.to_owned(), ty);
                             },
@@ -207,6 +215,7 @@ fn preview1_type(
     spec: &mut Spec,
     pair: Pair<'_, Rule>,
     name: Option<String>,
+    annotations: Vec<Pair<'_, Rule>>,
 ) -> Result<WazziType, eyre::Error> {
     let pair = pair.into_inner().next().unwrap();
     let wasi = match pair.as_rule() {
@@ -366,7 +375,7 @@ fn preview1_type(
                             | None => return Err(err!("unknown type ref {id}")),
                         }
                     },
-                    | Rule::r#type => preview1_type(spec, tref_pair, None)?,
+                    | Rule::r#type => preview1_type(spec, tref_pair, None, vec![])?,
                     | _ => unreachable!(),
                 };
 
@@ -384,8 +393,41 @@ fn preview1_type(
         },
         | t => return Err(err!("unexpected type {:?}", t)),
     };
+    let mut attributes = HashMap::new();
 
-    Ok(WazziType { name, wasi })
+    for pair in annotations {
+        match pair.as_rule() {
+            | Rule::annotation_expr => {
+                let mut pairs = pair.into_inner();
+                let annot = pairs.next().unwrap();
+
+                if annot.as_str().strip_prefix('@').unwrap() == "attribute" {
+                    let name = pairs.next().unwrap().as_str().strip_prefix('$').unwrap();
+                    let type_name = pairs.next().unwrap().as_str().strip_prefix('$').unwrap();
+
+                    attributes.insert(
+                        name.to_owned(),
+                        spec.types
+                            .get(type_name)
+                            .expect(&format!("{type_name}"))
+                            .wasi
+                            .clone(),
+                    );
+
+                    continue;
+                }
+
+                panic!("not attribute annotation")
+            },
+            | _ => panic!("not annotation"),
+        }
+    }
+
+    Ok(WazziType {
+        name,
+        wasi,
+        attributes,
+    })
 }
 
 fn preview1_tref(spec: &mut Spec, pair: Pair<'_, Rule>) -> Result<WazziType, eyre::Error> {
@@ -403,7 +445,7 @@ fn preview1_tref(spec: &mut Spec, pair: Pair<'_, Rule>) -> Result<WazziType, eyr
                 | None => Err(err!("unknown type ref {id}")),
             }
         },
-        | Rule::r#type => preview1_type(spec, pair, None),
+        | Rule::r#type => preview1_type(spec, pair, None, vec![]),
         | _ => unreachable!("{:?}", pair),
     }
 }

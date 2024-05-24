@@ -1,19 +1,18 @@
 pub mod resource;
 
-use std::{
-    collections::{BTreeSet, HashMap},
-    ops::Not,
-};
+use std::collections::{BTreeSet, HashMap};
 
+use arbitrary::Unstructured;
 use eyre::{eyre as err, Context as _};
 use wazzi_executor::RunningExecutor;
-use wazzi_specz_wasi::{Function, Spec, Term, VariantValue, WasiType, WasiValue};
+use wazzi_executor_pb_rust::WasiFunc;
+use wazzi_specz_wasi::{FlagsValue, Function, Spec, Term, WasiType, WasiValue};
 use z3::ast::Ast;
 
 use self::resource::Context;
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-struct Resource {
+pub struct Resource {
     attributes: HashMap<String, WasiValue>,
 }
 
@@ -62,6 +61,7 @@ impl Environment {
 
     pub fn call(
         &self,
+        u: &mut Unstructured,
         ctx: &mut Context,
         executor: &RunningExecutor,
         function_name: &str,
@@ -246,19 +246,14 @@ impl Environment {
             ))),
         );
 
-        if solver.check() != z3::SatResult::Sat {
-            return Err(err!("no solution to function input contract"));
-        }
+        let mut solutions = Vec::new();
 
-        for _i in 0..10 {
+        loop {
             if solver.check() != z3::SatResult::Sat {
                 break;
             }
 
             let model = solver.get_model().unwrap();
-
-            eprintln!("model {:#?}", model);
-
             let mut clauses = Vec::new();
 
             for (name, var) in &vars {
@@ -271,13 +266,127 @@ impl Environment {
                 }
             }
 
+            solutions.push(model);
             solver.assert(&z3::ast::Bool::or(
                 &self.z3_ctx,
                 &clauses.iter().collect::<Vec<_>>(),
             ));
         }
 
-        panic!();
+        let model = u.choose(&solutions).wrap_err("failed to pick a solution")?;
+        let solution = model.iter().collect::<Vec<_>>();
+        let mut resources: HashMap<String, HashMap<z3::ast::Dynamic, usize>> = Default::default();
+        let mut solved_params = HashMap::new();
+
+        for decl in solution {
+            let name = decl.name();
+
+            if let Some(param_name) = name.strip_prefix("var--") {
+                let value = model.get_const_interp(&decl.apply(&[])).unwrap();
+
+                solved_params.insert(param_name.to_owned(), value);
+
+                continue;
+            }
+
+            if name.starts_with("resource--") {
+                let mut rsplits = name.rsplitn(3, "--");
+                let resource_id = rsplits.next().unwrap();
+                let resource_id = resource_id.parse::<usize>().unwrap();
+                let type_name = rsplits.next().unwrap();
+                let value = model.get_const_interp(&decl.apply(&[])).unwrap();
+
+                resources
+                    .entry(type_name.to_owned())
+                    .or_default()
+                    .insert(value, resource_id);
+
+                continue;
+            }
+
+            unreachable!("unknown solution decl {}", name);
+        }
+
+        let mut params = Vec::with_capacity(function.params.len());
+
+        for param in function.params.iter() {
+            match solved_params.get(&param.name) {
+                | Some(solved_param) => {
+                    if param.ty.attributes.len() > 0 {
+                        // Param is a resource.
+
+                        let resource_idx = *resources
+                            .get(param.ty.name.as_ref().unwrap())
+                            .unwrap()
+                            .get(solved_param)
+                            .unwrap();
+
+                        params.push(ctx.resources.get(&resource_idx).unwrap().clone());
+                    } else {
+                        let value = match &param.ty.wasi {
+                            | WasiType::Flags(flags) => {
+                                let mut fields = Vec::new();
+                                let datatype =
+                                    datatypes.get(param.ty.name.as_ref().unwrap()).unwrap();
+                                let variant = datatype.variants.first().unwrap();
+
+                                for accessor in &variant.accessors {
+                                    let field = accessor
+                                        .apply(&[solved_param])
+                                        .as_bool()
+                                        .unwrap()
+                                        .simplify()
+                                        .as_bool()
+                                        .unwrap();
+
+                                    fields.push(field);
+                                }
+
+                                WasiValue::Flags(FlagsValue { fields })
+                            },
+                            | _ => panic!(),
+                        };
+
+                        params.push(value);
+                    }
+                },
+                | None => {
+                    let value = param
+                        .ty
+                        .wasi
+                        .arbitrary_value(u)
+                        .wrap_err("failed to generate arbitrary value")?;
+
+                    params.push(value);
+                },
+            }
+        }
+
+        let results = function
+            .results
+            .iter()
+            .map(|result| result.ty.wasi.arbitrary_value(u))
+            .collect::<Result<Vec<_>, _>>()?;
+        let response = executor
+            .call(wazzi_executor_pb_rust::request::Call {
+                func:           WasiFunc::try_from(function_name)
+                    .map_err(|_| err!("unknown wasi function name"))?
+                    .into(),
+                params:         function
+                    .params
+                    .iter()
+                    .zip(params)
+                    .map(|(param, value)| value.into_pb(&param.ty.wasi))
+                    .collect(),
+                results:        function
+                    .results
+                    .iter()
+                    .zip(results)
+                    .map(|(result, value)| value.into_pb(&result.ty.wasi))
+                    .collect(),
+                special_fields: Default::default(),
+            })
+            .wrap_err("failed to call")?;
 
         Ok(())
     }
@@ -434,17 +543,37 @@ mod tests {
         let wasmtime = Wasmtime::new(Path::new("wasmtime"));
         let executor = ExecutorRunner::new(
             &wasmtime,
-            "target/debug/wazzi-executor-pb.wasm".into(),
+            "../target/debug/wazzi-executor-pb.wasm".into(),
             ".".into(),
             Some(dir.path().to_path_buf()),
         )
-        .run(stderr)
+        .run(stderr.clone())
         .unwrap();
+        let mut u = Unstructured::new(&[1, 97, 1, 97, 0, 1]);
 
         ctx.resources
             .insert(resource_id, WasiValue::Handle(wasmtime.base_dir_fd()));
 
-        env.call(&mut ctx, &executor, "path_open")?;
+        std::thread::spawn({
+            let stderr = stderr.clone();
+
+            move || {
+                let _ = std::io::copy(
+                    &mut stderr.lock().unwrap().as_slice(),
+                    &mut std::io::stderr(),
+                );
+            }
+        });
+
+        env.call(&mut u, &mut ctx, &executor, "path_open")?;
+
+        for entry in std::fs::read_dir(dir.path()).unwrap() {
+            let entry = entry?;
+
+            eprintln!("dir: {}", entry.path().display());
+        }
+
+        panic!();
 
         Ok(())
     }

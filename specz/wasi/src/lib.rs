@@ -2,6 +2,7 @@ pub mod term;
 
 mod value;
 
+use arbitrary::Unstructured;
 pub use term::Term;
 pub use value::*;
 
@@ -30,8 +31,9 @@ impl Default for Spec {
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct WazziType {
-    pub name: Option<String>,
-    pub wasi: WasiType,
+    pub name:       Option<String>,
+    pub wasi:       WasiType,
+    pub attributes: HashMap<String, WasiType>,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -63,6 +65,72 @@ impl WasiType {
             | _ => None,
         }
     }
+
+    pub fn arbitrary_value(&self, u: &mut Unstructured) -> Result<WasiValue, arbitrary::Error> {
+        Ok(match self {
+            | WasiType::S64 => WasiValue::S64(u.arbitrary()?),
+            | WasiType::U8 => todo!(),
+            | WasiType::U16 => todo!(),
+            | WasiType::U32 => todo!(),
+            | WasiType::U64 => WasiValue::U64(u.arbitrary()?),
+            | WasiType::Handle => WasiValue::Handle(u.arbitrary()?),
+            | WasiType::Flags(flags) => WasiValue::Flags(FlagsValue {
+                fields: flags
+                    .fields
+                    .iter()
+                    .map(|_f| u.arbitrary())
+                    .collect::<Result<Vec<bool>, _>>()?,
+            }),
+            | WasiType::Variant(variant) => {
+                let case_idx = u.choose_index(variant.cases.len())?;
+
+                WasiValue::Variant(Box::new(VariantValue {
+                    case_idx,
+                    payload: variant
+                        .cases
+                        .get(case_idx)
+                        .unwrap()
+                        .payload
+                        .as_ref()
+                        .map(|t| t.wasi.arbitrary_value(u))
+                        .transpose()?,
+                }))
+            },
+            | WasiType::Record(_) => todo!(),
+            | WasiType::String => WasiValue::String(u.arbitrary()?),
+            | WasiType::List(_) => todo!(),
+        })
+    }
+
+    pub fn mem_size(&self, interface: &Interface) -> u32 {
+        match self {
+            | Self::U8 => 1,
+            | Self::U16 => 2,
+            | Self::U32 => 4,
+            | Self::S64 | Self::U64 => 8,
+            | Self::List(_) => 8,
+            | Self::Record(record) => record.mem_size(interface),
+            | Self::Variant(variant) => variant.mem_size(interface),
+            | Self::Handle => 4,
+            | Self::Flags(flags) => flags.repr.mem_size(),
+            | Self::String => todo!(),
+        }
+    }
+
+    pub fn alignment(&self, interface: &Interface) -> u32 {
+        match self {
+            | Self::U8 => 1,
+            | Self::U16 => 2,
+            | Self::U32 => 4,
+            | Self::S64 | Self::U64 => 8,
+            | Self::List(_) => 4,
+            | Self::Record(record) => record.alignment(interface),
+            | Self::Variant(variant) => variant.alignment(interface),
+            | Self::Handle => 4,
+            | Self::Flags(flags) => flags.repr.alignment(),
+            | Self::String => todo!(),
+        }
+    }
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -91,6 +159,37 @@ pub enum IntRepr {
     U64,
 }
 
+impl IntRepr {
+    pub fn alignment(&self) -> u32 {
+        match self {
+            | IntRepr::U8 => 1,
+            | IntRepr::U16 => 2,
+            | IntRepr::U32 => 4,
+            | IntRepr::U64 => 8,
+        }
+    }
+
+    pub fn mem_size(&self) -> u32 {
+        match self {
+            | IntRepr::U8 => 1,
+            | IntRepr::U16 => 2,
+            | IntRepr::U32 => 4,
+            | IntRepr::U64 => 8,
+        }
+    }
+}
+
+impl From<IntRepr> for wazzi_executor_pb_rust::IntRepr {
+    fn from(value: IntRepr) -> Self {
+        match value {
+            | IntRepr::U8 => Self::U8,
+            | IntRepr::U16 => Self::U16,
+            | IntRepr::U32 => Self::U32,
+            | IntRepr::U64 => Self::U64,
+        }
+    }
+}
+
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct VariantType {
     pub tag_repr: IntRepr,
@@ -113,6 +212,42 @@ impl VariantType {
             payload,
         })))
     }
+
+    pub fn alignment(&self, interface: &Interface) -> u32 {
+        self.tag_repr
+            .alignment()
+            .max(self.max_case_alignment(interface))
+    }
+
+    pub fn mem_size(&self, interface: &Interface) -> u32 {
+        let mut size = self.tag_repr.mem_size();
+
+        size = align_to(size, self.max_case_alignment(interface));
+        size += self
+            .cases
+            .iter()
+            .filter_map(|case| case.payload.as_ref())
+            .map(|payload| payload.wasi.mem_size(interface))
+            .max()
+            .unwrap_or(0);
+
+        align_to(size, self.alignment(interface))
+    }
+
+    pub fn payload_offset(&self, interface: &Interface) -> u32 {
+        let size = self.tag_repr.mem_size();
+
+        align_to(size, self.max_case_alignment(interface))
+    }
+
+    fn max_case_alignment(&self, interface: &Interface) -> u32 {
+        self.cases
+            .iter()
+            .filter_map(|case| case.payload.as_ref())
+            .map(|payload| payload.wasi.alignment(interface))
+            .max()
+            .unwrap_or(1)
+    }
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -124,6 +259,30 @@ pub struct VariantCaseType {
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct RecordType {
     pub members: Vec<RecordMemberType>,
+}
+
+impl RecordType {
+    pub fn mem_size(&self, interface: &Interface) -> u32 {
+        let mut size: u32 = 0;
+        let alignment = self.alignment(interface);
+
+        for member in &self.members {
+            let alignment = member.ty.wasi.alignment(interface);
+
+            size = size.div_ceil(alignment) * alignment;
+            size += member.ty.wasi.mem_size(interface);
+        }
+
+        size.div_ceil(alignment) * alignment
+    }
+
+    pub fn alignment(&self, interface: &Interface) -> u32 {
+        self.members
+            .iter()
+            .map(|member| member.ty.wasi.alignment(interface))
+            .max()
+            .unwrap_or(1)
+    }
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -175,4 +334,8 @@ pub struct FunctionParam {
 pub struct FunctionResult {
     pub name: String,
     pub ty:   WazziType,
+}
+
+fn align_to(ptr: u32, alignment: u32) -> u32 {
+    ptr.div_ceil(alignment) * alignment
 }
