@@ -3,7 +3,7 @@ pub mod resource;
 use std::collections::{BTreeSet, HashMap};
 
 use arbitrary::Unstructured;
-use eyre::{eyre as err, Context as _};
+use eyre::{eyre as err, Context as _, ContextCompat};
 use wazzi_executor::RunningExecutor;
 use wazzi_executor_pb_rust::WasiFunc;
 use wazzi_specz_wasi::{FlagsValue, Function, Spec, Term, WasiType, WasiValue};
@@ -13,13 +13,12 @@ use self::resource::Context;
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Resource {
-    attributes: HashMap<String, WasiValue>,
+    pub attributes: HashMap<String, WasiValue>,
 }
 
 #[derive(Debug)]
 pub struct Environment {
     spec:               Spec,
-    z3_ctx:             z3::Context,
     resources:          Vec<Resource>,
     resources_by_types: HashMap<String, BTreeSet<usize>>,
 }
@@ -32,7 +31,6 @@ impl Environment {
 
         Ok(Environment {
             spec,
-            z3_ctx: z3::Context::new(&z3::Config::new()),
             resources: Default::default(),
             resources_by_types: Default::default(),
         })
@@ -59,6 +57,32 @@ impl Environment {
         self.resources.len() - 1
     }
 
+    pub fn call_arbitrary_function(
+        &self,
+        u: &mut Unstructured,
+        ctx: &mut Context,
+        executor: &RunningExecutor,
+    ) -> Result<(), eyre::Error> {
+        let interface = self.spec.interfaces.get("wasi_snapshot_preview1").unwrap();
+        let functions = interface.functions.values().collect::<Vec<_>>();
+        let z3_cfg = z3::Config::new();
+        let mut candidates = Vec::new();
+
+        for function in functions {
+            let z3_ctx = z3::Context::new(&z3_cfg);
+            let mut solver = z3::Solver::new(&z3_ctx);
+            let scope = FunctionScope::new(&z3_ctx, &mut solver, self, ctx, function);
+
+            if scope.solve_input_contract(&z3_ctx, u)?.is_some() {
+                candidates.push(function);
+            }
+        }
+
+        let function = *u.choose(&candidates)?;
+
+        self.call(u, ctx, executor, &function.name)
+    }
+
     pub fn call(
         &self,
         u: &mut Unstructured,
@@ -68,23 +92,73 @@ impl Environment {
     ) -> Result<(), eyre::Error> {
         let interface = self.spec.interfaces.get("wasi_snapshot_preview1").unwrap();
         let function = interface.functions.get(function_name).unwrap();
-        let solver = z3::Solver::new(&self.z3_ctx);
-        let types = self.spec.types.keys().collect::<Vec<_>>();
-        let resource_sort = z3::Sort::uninterpreted(&self.z3_ctx, "resource".into());
-        let mut datatypes = HashMap::new();
+        let z3_cfg = z3::Config::new();
+        let z3_ctx = z3::Context::new(&z3_cfg);
+        let mut solver = z3::Solver::new(&z3_ctx);
+        let function_scope = FunctionScope::new(&z3_ctx, &mut solver, self, ctx, function);
+        let params = function_scope
+            .solve_input_contract(&z3_ctx, u)?
+            .wrap_err("no solution found")?;
+        let results = function
+            .results
+            .iter()
+            .map(|result| result.ty.wasi.arbitrary_value(u))
+            .collect::<Result<Vec<_>, _>>()?;
+        let _response = executor
+            .call(wazzi_executor_pb_rust::request::Call {
+                func:           WasiFunc::try_from(function_name)
+                    .map_err(|_| err!("unknown wasi function name"))?
+                    .into(),
+                params:         function
+                    .params
+                    .iter()
+                    .zip(params)
+                    .map(|(param, value)| value.into_pb(&param.ty.wasi))
+                    .collect(),
+                results:        function
+                    .results
+                    .iter()
+                    .zip(results)
+                    .map(|(result, value)| value.into_pb(&result.ty.wasi))
+                    .collect(),
+                special_fields: Default::default(),
+            })
+            .wrap_err("failed to call")?;
 
-        for (name, ty) in self.spec.types.iter() {
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct FunctionScope<'ctx, 'e, 'r, 's> {
+    solver:    &'s mut z3::Solver<'ctx>,
+    env:       &'e Environment,
+    ctx:       &'r Context,
+    function:  &'e Function,
+    datatypes: HashMap<String, z3::DatatypeSort<'ctx>>,
+    variables: HashMap<String, z3::ast::Datatype<'ctx>>,
+}
+
+impl<'ctx, 'e, 'r, 's> FunctionScope<'ctx, 'e, 'r, 's> {
+    pub fn new(
+        ctx: &'ctx z3::Context,
+        solver: &'s mut z3::Solver<'ctx>,
+        env: &'e Environment,
+        resource_ctx: &'r Context,
+        function: &'e Function,
+    ) -> Self {
+        let mut datatypes = HashMap::new();
+        let mut variables = HashMap::new();
+
+        for (name, ty) in env.spec.types.iter() {
             match &ty.wasi {
                 | WasiType::Handle => {
                     datatypes.insert(
                         name.clone(),
-                        z3::DatatypeBuilder::new(&self.z3_ctx, name.as_str())
+                        z3::DatatypeBuilder::new(ctx, name.as_str())
                             .variant(
                                 name,
-                                vec![(
-                                    "value",
-                                    z3::DatatypeAccessor::Sort(z3::Sort::int(&self.z3_ctx)),
-                                )],
+                                vec![("value", z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))],
                             )
                             .finish(),
                     );
@@ -92,7 +166,7 @@ impl Environment {
                 | WasiType::Flags(flags) => {
                     datatypes.insert(
                         name.clone(),
-                        z3::DatatypeBuilder::new(&self.z3_ctx, name.as_str())
+                        z3::DatatypeBuilder::new(ctx, name.as_str())
                             .variant(
                                 name,
                                 flags
@@ -101,9 +175,7 @@ impl Environment {
                                     .map(|f| {
                                         (
                                             f.as_str(),
-                                            z3::DatatypeAccessor::Sort(z3::Sort::bool(
-                                                &self.z3_ctx,
-                                            )),
+                                            z3::DatatypeAccessor::Sort(z3::Sort::bool(ctx)),
                                         )
                                     })
                                     .collect::<Vec<_>>(),
@@ -114,13 +186,10 @@ impl Environment {
                 | WasiType::String => {
                     datatypes.insert(
                         name.clone(),
-                        z3::DatatypeBuilder::new(&self.z3_ctx, name.as_str())
+                        z3::DatatypeBuilder::new(ctx, name.as_str())
                             .variant(
                                 name,
-                                vec![(
-                                    "value",
-                                    z3::DatatypeAccessor::Sort(z3::Sort::string(&self.z3_ctx)),
-                                )],
+                                vec![("value", z3::DatatypeAccessor::Sort(z3::Sort::string(ctx)))],
                             )
                             .finish(),
                     );
@@ -131,132 +200,86 @@ impl Environment {
             }
         }
 
-        for (name, pool) in self.iter_resource_ids_by_type() {
-            let ty = self.spec.types.get(name).unwrap();
-            let datatype = datatypes.get(name).unwrap();
-            let pool = pool.collect::<Vec<_>>();
-
-            for resource_id in pool {
-                let resource_const = z3::FuncDecl::new(
-                    &self.z3_ctx,
-                    format!("resource--{name}--{}", resource_id),
-                    &[],
-                    &datatype.sort,
-                )
-                .apply(&[]);
-                let resource_value = ctx.resources.get(&resource_id).unwrap();
-
-                match (&ty.wasi, resource_value) {
-                    | (WasiType::Handle, &WasiValue::Handle(handle)) => {
-                        let datatype_variant = datatype.variants.first().unwrap();
-                        let accessor = datatype_variant.accessors.first().unwrap();
-
-                        solver.assert(&accessor.apply(&[&resource_const])._eq(
-                            &z3::ast::Dynamic::from_ast(&z3::ast::Int::from_u64(
-                                &self.z3_ctx,
-                                handle.into(),
-                            )),
-                        ));
-                    },
-                    | (WasiType::Flags(ty), WasiValue::Flags(flags)) => {
-                        let datatype_variant = datatype.variants.first().unwrap();
-
-                        for (accessor, &field) in
-                            datatype_variant.accessors.iter().zip(flags.fields.iter())
-                        {
-                            solver.assert(&accessor.apply(&[&resource_const])._eq(
-                                &z3::ast::Dynamic::from_ast(&z3::ast::Bool::from_bool(
-                                    &self.z3_ctx,
-                                    field,
-                                )),
-                            ));
-                        }
-                    },
-                    | (WasiType::Flags(_), _) => unreachable!(),
-                    | _ => tracing::warn!("abc"),
-                }
-            }
-        }
-
-        let mut vars = HashMap::new();
-
         for param in function.params.iter() {
             let type_name = param.ty.name.as_ref().unwrap();
             let datatype = datatypes.get(type_name).unwrap();
-            let datatype_variant = datatype.variants.first().unwrap();
 
-            match &param.ty.wasi {
-                | WasiType::S64 => todo!(),
-                | WasiType::U8 => todo!(),
-                | WasiType::U16 => todo!(),
-                | WasiType::U32 => todo!(),
-                | WasiType::U64 => todo!(),
-                | WasiType::Handle => {
-                    let x = z3::ast::Datatype::new_const(
-                        &self.z3_ctx,
-                        format!("var--{}", param.name),
-                        // TODO: resources should use attributes, not raw value
-                        &datatype.sort,
-                    );
-                    let resource_ids = self.resources_by_types.get(type_name).unwrap();
-                    let clauses = resource_ids
-                        .iter()
-                        .map(|&id| {
-                            let resource_const = z3::FuncDecl::new(
-                                &self.z3_ctx,
-                                format!("resource--{}--{}", param.ty.name.as_ref().unwrap(), id),
-                                &[],
-                                &datatype.sort,
-                            )
-                            .apply(&[]);
+            if !param.ty.attributes.is_empty() {
+                let x = z3::ast::Datatype::new_const(
+                    ctx,
+                    format!("var--{}", param.name),
+                    &datatype.sort,
+                );
+                let resource_ids = env.resources_by_types.get(type_name).unwrap();
+                let clauses = resource_ids
+                    .iter()
+                    .map(|&id| {
+                        let resource_const = z3::FuncDecl::new(
+                            ctx,
+                            format!("resource--{}--{}", param.ty.name.as_ref().unwrap(), id),
+                            &[],
+                            &datatype.sort,
+                        )
+                        .apply(&[]);
 
-                            z3::ast::Dynamic::from_ast(&x)._eq(&resource_const)
-                        })
-                        .collect::<Vec<_>>();
+                        z3::ast::Dynamic::from_ast(&x)._eq(&resource_const)
+                    })
+                    .collect::<Vec<_>>();
 
-                    solver.assert(&z3::ast::Bool::or(
-                        &self.z3_ctx,
-                        clauses.iter().collect::<Vec<_>>().as_slice(),
-                    ));
-                    vars.insert(param.name.clone(), x);
-                },
-                | WasiType::Flags(flags) => {
-                    let x = z3::ast::Datatype::new_const(
-                        &self.z3_ctx,
-                        format!("var--{}", param.name),
-                        &datatype.sort,
-                    );
+                solver.assert(&z3::ast::Bool::or(
+                    ctx,
+                    clauses.iter().collect::<Vec<_>>().as_slice(),
+                ));
+                variables.insert(param.name.clone(), x);
+            } else {
+                let x = z3::ast::Datatype::new_const(
+                    ctx,
+                    format!("var--{}", param.name),
+                    &datatype.sort,
+                );
 
-                    vars.insert(param.name.clone(), x);
-                },
-                | WasiType::Variant(_) => todo!(),
-                | WasiType::Record(_) => todo!(),
-                | WasiType::String => (),
-                | WasiType::List(_) => todo!(),
+                variables.insert(param.name.clone(), x);
             }
         }
 
-        let input_contract = function.input_contract.as_ref().unwrap();
-        let ast_node = self.term_to_constraint(function, &datatypes, &vars, input_contract)?;
+        Self {
+            solver,
+            env,
+            ctx: resource_ctx,
+            function,
+            datatypes,
+            variables,
+        }
+    }
 
-        solver.assert(
-            &ast_node._eq(&z3::ast::Dynamic::from_ast(&z3::ast::Bool::from_bool(
-                &self.z3_ctx,
-                true,
-            ))),
-        );
+    pub fn solve_input_contract(
+        &self,
+        ctx: &'ctx z3::Context,
+        u: &mut Unstructured,
+    ) -> Result<Option<Vec<WasiValue>>, eyre::Error> {
+        let input_contract = match &self.function.input_contract {
+            | Some(term) => self.term_to_constraint(ctx, term),
+            | None => panic!(),
+        }?;
+
+        self.solver
+            .assert(
+                &input_contract._eq(&z3::ast::Dynamic::from_ast(&z3::ast::Bool::from_bool(
+                    ctx, true,
+                ))),
+            );
 
         let mut solutions = Vec::new();
 
         loop {
-            if solver.check() != z3::SatResult::Sat {
+            if self.solver.check() != z3::SatResult::Sat {
                 break;
             }
 
-            let model = solver.get_model().unwrap();
+            let model = self.solver.get_model().unwrap();
             let mut clauses = Vec::new();
 
-            for (name, var) in &vars {
+            for (name, var) in &self.variables {
                 if let Some(v) = model.get_const_interp(var) {
                     if name == "fd" {
                         continue;
@@ -267,10 +290,12 @@ impl Environment {
             }
 
             solutions.push(model);
-            solver.assert(&z3::ast::Bool::or(
-                &self.z3_ctx,
-                &clauses.iter().collect::<Vec<_>>(),
-            ));
+            self.solver
+                .assert(&z3::ast::Bool::or(ctx, &clauses.iter().collect::<Vec<_>>()));
+        }
+
+        if solutions.is_empty() {
+            return Ok(None);
         }
 
         let model = u.choose(&solutions).wrap_err("failed to pick a solution")?;
@@ -307,12 +332,12 @@ impl Environment {
             unreachable!("unknown solution decl {}", name);
         }
 
-        let mut params = Vec::with_capacity(function.params.len());
+        let mut params = Vec::with_capacity(self.function.params.len());
 
-        for param in function.params.iter() {
+        for param in self.function.params.iter() {
             match solved_params.get(&param.name) {
                 | Some(solved_param) => {
-                    if param.ty.attributes.len() > 0 {
+                    if !param.ty.attributes.is_empty() {
                         // Param is a resource.
 
                         let resource_idx = *resources
@@ -321,13 +346,13 @@ impl Environment {
                             .get(solved_param)
                             .unwrap();
 
-                        params.push(ctx.resources.get(&resource_idx).unwrap().clone());
+                        params.push(self.ctx.resources.get(&resource_idx).unwrap().clone());
                     } else {
                         let value = match &param.ty.wasi {
-                            | WasiType::Flags(flags) => {
+                            | WasiType::Flags(_flags) => {
                                 let mut fields = Vec::new();
                                 let datatype =
-                                    datatypes.get(param.ty.name.as_ref().unwrap()).unwrap();
+                                    self.datatypes.get(param.ty.name.as_ref().unwrap()).unwrap();
                                 let variant = datatype.variants.first().unwrap();
 
                                 for accessor in &variant.accessors {
@@ -362,46 +387,18 @@ impl Environment {
             }
         }
 
-        let results = function
-            .results
-            .iter()
-            .map(|result| result.ty.wasi.arbitrary_value(u))
-            .collect::<Result<Vec<_>, _>>()?;
-        let response = executor
-            .call(wazzi_executor_pb_rust::request::Call {
-                func:           WasiFunc::try_from(function_name)
-                    .map_err(|_| err!("unknown wasi function name"))?
-                    .into(),
-                params:         function
-                    .params
-                    .iter()
-                    .zip(params)
-                    .map(|(param, value)| value.into_pb(&param.ty.wasi))
-                    .collect(),
-                results:        function
-                    .results
-                    .iter()
-                    .zip(results)
-                    .map(|(result, value)| value.into_pb(&result.ty.wasi))
-                    .collect(),
-                special_fields: Default::default(),
-            })
-            .wrap_err("failed to call")?;
-
-        Ok(())
+        Ok(Some(params))
     }
 
-    fn term_to_constraint<'a>(
-        &'a self,
-        function: &Function,
-        datatypes: &HashMap<String, z3::DatatypeSort<'a>>,
-        vars: &HashMap<String, z3::ast::Datatype<'a>>,
+    fn term_to_constraint(
+        &self,
+        ctx: &'ctx z3::Context,
         term: &Term,
     ) -> Result<z3::ast::Dynamic, eyre::Error> {
         Ok(match term {
             | Term::Not(t) => z3::ast::Dynamic::from_ast(
                 &self
-                    .term_to_constraint(function, datatypes, vars, &t.term)?
+                    .term_to_constraint(ctx, &t.term)?
                     .as_bool()
                     .unwrap()
                     .not(),
@@ -410,14 +407,14 @@ impl Environment {
                 let clauses = t
                     .clauses
                     .iter()
-                    .map(|clause| self.term_to_constraint(function, datatypes, vars, clause))
+                    .map(|clause| self.term_to_constraint(ctx, clause))
                     .collect::<Result<Vec<_>, _>>()?
                     .into_iter()
                     .map(|clause| clause.as_bool().unwrap())
                     .collect::<Vec<_>>();
 
                 z3::ast::Dynamic::from_ast(&z3::ast::Bool::and(
-                    &self.z3_ctx,
+                    ctx,
                     clauses.iter().collect::<Vec<_>>().as_slice(),
                 ))
             },
@@ -425,30 +422,30 @@ impl Environment {
                 let clauses = t
                     .clauses
                     .iter()
-                    .map(|clause| self.term_to_constraint(function, datatypes, vars, clause))
+                    .map(|clause| self.term_to_constraint(ctx, clause))
                     .collect::<Result<Vec<_>, _>>()?
                     .into_iter()
                     .map(|clause| clause.as_bool().unwrap())
                     .collect::<Vec<_>>();
 
                 z3::ast::Dynamic::from_ast(&z3::ast::Bool::or(
-                    &self.z3_ctx,
+                    ctx,
                     clauses.iter().collect::<Vec<_>>().as_slice(),
                 ))
             },
             | Term::Param(t) => {
-                let var = vars.get(&t.name).expect(&t.name);
+                let var = self.variables.get(&t.name).expect(&t.name);
 
                 z3::ast::Dynamic::from_ast(var)
             },
             | Term::FlagsGet(t) => {
                 let target = self
-                    .term_to_constraint(function, datatypes, vars, &t.target)
+                    .term_to_constraint(ctx, &t.target)
                     .wrap_err("failed to translate flags get target to z3")?;
                 let var = target.as_datatype().unwrap();
-                let datatype = datatypes.get(&t.r#type).unwrap();
+                let datatype = self.datatypes.get(&t.r#type).unwrap();
                 let variant = datatype.variants.first().unwrap();
-                let field_idx = match &self.spec.types.get(&t.r#type).unwrap().wasi {
+                let field_idx = match &self.env.spec.types.get(&t.r#type).unwrap().wasi {
                     | WasiType::Flags(flags) => {
                         flags
                             .fields
@@ -464,117 +461,5 @@ impl Environment {
                 variant.accessors.get(field_idx).unwrap().apply(&[&var])
             },
         })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::{
-        collections::HashSet,
-        io,
-        path::Path,
-        sync::{Arc, Mutex},
-    };
-
-    use eyre::Context as _;
-    use tempfile::tempdir;
-    use tracing::level_filters::LevelFilter;
-    use tracing_error::ErrorLayer;
-    use tracing_subscriber::{layer::SubscriberExt as _, EnvFilter};
-    use wazzi_executor::ExecutorRunner;
-    use wazzi_runners::{WasiRunner, Wasmtime};
-
-    use super::*;
-
-    #[test]
-    fn ok() -> Result<(), eyre::Error> {
-        color_eyre::install()?;
-        tracing::subscriber::set_global_default(
-            tracing_subscriber::Registry::default()
-                .with(
-                    EnvFilter::builder()
-                        .with_env_var("WAZZI_LOG_LEVEL")
-                        .with_default_directive(LevelFilter::INFO.into())
-                        .from_env_lossy(),
-                )
-                .with(ErrorLayer::default())
-                .with(
-                    tracing_subscriber::fmt::layer()
-                        .with_thread_names(true)
-                        .with_writer(io::stderr)
-                        .pretty(),
-                ),
-        )
-        .wrap_err("failed to configure tracing")?;
-
-        let dir = tempdir().unwrap();
-        let mut env = Environment::preview1()?;
-        let mut ctx = Context::new();
-        let fdflags = env
-            .spec()
-            .types
-            .get("fdflags")
-            .unwrap()
-            .wasi
-            .flags()
-            .unwrap();
-        let filetype = env
-            .spec()
-            .types
-            .get("filetype")
-            .unwrap()
-            .wasi
-            .variant()
-            .unwrap();
-        let resource_id = env.new_resource(
-            "fd".to_owned(),
-            Resource {
-                attributes: HashMap::from([
-                    ("offset".to_owned(), WasiValue::U64(0)),
-                    ("flags".to_owned(), fdflags.value(HashSet::new())),
-                    (
-                        "file-type".to_owned(),
-                        filetype.value_from_name("directory", None).unwrap(),
-                    ),
-                ]),
-            },
-        );
-        let stderr = Arc::new(Mutex::new(Vec::new()));
-        let wasmtime = Wasmtime::new(Path::new("wasmtime"));
-        let executor = ExecutorRunner::new(
-            &wasmtime,
-            "../target/debug/wazzi-executor-pb.wasm".into(),
-            ".".into(),
-            Some(dir.path().to_path_buf()),
-        )
-        .run(stderr.clone())
-        .unwrap();
-        let mut u = Unstructured::new(&[1, 97, 1, 97, 0, 1]);
-
-        ctx.resources
-            .insert(resource_id, WasiValue::Handle(wasmtime.base_dir_fd()));
-
-        std::thread::spawn({
-            let stderr = stderr.clone();
-
-            move || {
-                let _ = std::io::copy(
-                    &mut stderr.lock().unwrap().as_slice(),
-                    &mut std::io::stderr(),
-                );
-            }
-        });
-
-        env.call(&mut u, &mut ctx, &executor, "path_open")?;
-
-        for entry in std::fs::read_dir(dir.path()).unwrap() {
-            let entry = entry?;
-
-            eprintln!("dir: {}", entry.path().display());
-        }
-
-        panic!();
-
-        Ok(())
     }
 }

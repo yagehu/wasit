@@ -102,30 +102,30 @@ impl WasiType {
         })
     }
 
-    pub fn mem_size(&self, interface: &Interface) -> u32 {
+    pub fn mem_size(&self) -> u32 {
         match self {
             | Self::U8 => 1,
             | Self::U16 => 2,
             | Self::U32 => 4,
             | Self::S64 | Self::U64 => 8,
             | Self::List(_) => 8,
-            | Self::Record(record) => record.mem_size(interface),
-            | Self::Variant(variant) => variant.mem_size(interface),
+            | Self::Record(record) => record.mem_size(),
+            | Self::Variant(variant) => variant.mem_size(),
             | Self::Handle => 4,
             | Self::Flags(flags) => flags.repr.mem_size(),
             | Self::String => todo!(),
         }
     }
 
-    pub fn alignment(&self, interface: &Interface) -> u32 {
+    pub fn alignment(&self) -> u32 {
         match self {
             | Self::U8 => 1,
             | Self::U16 => 2,
             | Self::U32 => 4,
             | Self::S64 | Self::U64 => 8,
             | Self::List(_) => 4,
-            | Self::Record(record) => record.alignment(interface),
-            | Self::Variant(variant) => variant.alignment(interface),
+            | Self::Record(record) => record.alignment(),
+            | Self::Variant(variant) => variant.alignment(),
             | Self::Handle => 4,
             | Self::Flags(flags) => flags.repr.alignment(),
             | Self::String => todo!(),
@@ -213,38 +213,36 @@ impl VariantType {
         })))
     }
 
-    pub fn alignment(&self, interface: &Interface) -> u32 {
-        self.tag_repr
-            .alignment()
-            .max(self.max_case_alignment(interface))
+    pub fn alignment(&self) -> u32 {
+        self.tag_repr.alignment().max(self.max_case_alignment())
     }
 
-    pub fn mem_size(&self, interface: &Interface) -> u32 {
+    pub fn mem_size(&self) -> u32 {
         let mut size = self.tag_repr.mem_size();
 
-        size = align_to(size, self.max_case_alignment(interface));
+        size = align_to(size, self.max_case_alignment());
         size += self
             .cases
             .iter()
             .filter_map(|case| case.payload.as_ref())
-            .map(|payload| payload.wasi.mem_size(interface))
+            .map(|payload| payload.wasi.mem_size())
             .max()
             .unwrap_or(0);
 
-        align_to(size, self.alignment(interface))
+        align_to(size, self.alignment())
     }
 
-    pub fn payload_offset(&self, interface: &Interface) -> u32 {
+    pub fn payload_offset(&self) -> u32 {
         let size = self.tag_repr.mem_size();
 
-        align_to(size, self.max_case_alignment(interface))
+        align_to(size, self.max_case_alignment())
     }
 
-    fn max_case_alignment(&self, interface: &Interface) -> u32 {
+    fn max_case_alignment(&self) -> u32 {
         self.cases
             .iter()
             .filter_map(|case| case.payload.as_ref())
-            .map(|payload| payload.wasi.alignment(interface))
+            .map(|payload| payload.wasi.alignment())
             .max()
             .unwrap_or(1)
     }
@@ -262,24 +260,24 @@ pub struct RecordType {
 }
 
 impl RecordType {
-    pub fn mem_size(&self, interface: &Interface) -> u32 {
+    pub fn mem_size(&self) -> u32 {
         let mut size: u32 = 0;
-        let alignment = self.alignment(interface);
+        let alignment = self.alignment();
 
         for member in &self.members {
-            let alignment = member.ty.wasi.alignment(interface);
+            let alignment = member.ty.wasi.alignment();
 
             size = size.div_ceil(alignment) * alignment;
-            size += member.ty.wasi.mem_size(interface);
+            size += member.ty.wasi.mem_size();
         }
 
         size.div_ceil(alignment) * alignment
     }
 
-    pub fn alignment(&self, interface: &Interface) -> u32 {
+    pub fn alignment(&self) -> u32 {
         self.members
             .iter()
-            .map(|member| member.ty.wasi.alignment(interface))
+            .map(|member| member.ty.wasi.alignment())
             .max()
             .unwrap_or(1)
     }

@@ -4,7 +4,7 @@ use wazzi_specz_wasi::WasiValue;
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Context {
-    pub(crate) resources: HashMap<usize, WasiValue>,
+    pub resources: HashMap<usize, WasiValue>,
 }
 
 impl Context {

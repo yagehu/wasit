@@ -52,13 +52,20 @@ impl WasiValue {
                 wazzi_executor_pb_rust::value::Which::Variant(Box::new(
                     wazzi_executor_pb_rust::value::Variant {
                         case_idx:       variant.case_idx as u64,
-                        size:           todo!(),
+                        size:           variant_type.mem_size(),
                         tag_repr:       wazzi_executor_pb_rust::IntRepr::from(
                             variant_type.tag_repr,
                         )
                         .into(),
-                        payload_offset: todo!(),
-                        payload_option: todo!(),
+                        payload_offset: variant_type.payload_offset(),
+                        payload_option: Some(
+                            match &variant_type.cases.get(variant.case_idx).unwrap().payload {
+                                | Some(payload) => wazzi_executor_pb_rust::value::variant::Payload_option::PayloadSome(
+                                    Box::new(variant.payload.unwrap().into_pb(&payload.wasi))
+                                ),
+                                | None => wazzi_executor_pb_rust::value::variant::Payload_option::PayloadNone(Default::default()),
+                            },
+                        ),
                         special_fields: Default::default(),
                     },
                 ))
