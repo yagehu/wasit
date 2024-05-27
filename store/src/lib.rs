@@ -2,11 +2,12 @@ use std::{
     collections::HashSet,
     fs,
     io::{self, BufReader, BufWriter},
+    marker::PhantomData,
     path::{Path, PathBuf},
 };
 
 use eyre::{Context, ContextCompat as _};
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use wazzi_wasi_component_model::value::ValueMeta;
 
 #[derive(Clone, Debug)]
@@ -76,7 +77,11 @@ impl RunStore {
         })
     }
 
-    pub fn new_runtime(&mut self, name: String, version: &str) -> Result<RuntimeStore, io::Error> {
+    pub fn new_runtime<T: Serialize + DeserializeOwned>(
+        &mut self,
+        name: String,
+        version: &str,
+    ) -> Result<RuntimeStore<T>, io::Error> {
         let store = RuntimeStore::new(&self.runtimes_dir.join(&name), version)?;
 
         self.runtimes.insert(name);
@@ -92,7 +97,9 @@ impl RunStore {
         fs::read(&self.data)
     }
 
-    pub fn runtimes(&self) -> Result<impl Iterator<Item = RuntimeStore> + '_, io::Error> {
+    pub fn runtimes<'a, T: Serialize + DeserializeOwned + 'a>(
+        &'a self,
+    ) -> Result<impl Iterator<Item = RuntimeStore<T>> + '_, io::Error> {
         Ok(self
             .runtimes
             .iter()
@@ -103,15 +110,18 @@ impl RunStore {
 }
 
 #[derive(Debug)]
-pub struct RuntimeStore {
+pub struct RuntimeStore<T> {
     pub path: PathBuf,
     pub base: PathBuf,
 
     name:  String,
-    trace: TraceStore,
+    trace: TraceStore<T>,
 }
 
-impl RuntimeStore {
+impl<T> RuntimeStore<T>
+where
+    T: Serialize + DeserializeOwned,
+{
     pub fn resume(path: &Path) -> Result<Self, io::Error> {
         fs::create_dir_all(path)?;
 
@@ -164,23 +174,27 @@ impl RuntimeStore {
         &self.name
     }
 
-    pub fn trace(&self) -> &TraceStore {
+    pub fn trace(&self) -> &TraceStore<T> {
         &self.trace
     }
 
-    pub fn trace_mut(&mut self) -> &mut TraceStore {
+    pub fn trace_mut(&mut self) -> &mut TraceStore<T> {
         &mut self.trace
     }
 }
 
 #[derive(Debug)]
-pub struct TraceStore {
+pub struct TraceStore<T> {
     path:      PathBuf,
     next:      usize,
     recording: Option<usize>,
+    call:      PhantomData<T>,
 }
 
-impl TraceStore {
+impl<T> TraceStore<T>
+where
+    T: Serialize + DeserializeOwned,
+{
     pub fn resume(path: &Path) -> Result<Self, io::Error> {
         let path = path.canonicalize()?;
         let mut next = 0;
@@ -204,6 +218,7 @@ impl TraceStore {
             path,
             next,
             recording: None,
+            call: PhantomData,
         })
     }
 
@@ -216,6 +231,7 @@ impl TraceStore {
             path,
             next: 0,
             recording: None,
+            call: PhantomData,
         })
     }
 
@@ -223,9 +239,8 @@ impl TraceStore {
         self.next
     }
 
-    pub fn last_call(&self) -> Result<Option<ActionStore>, io::Error> {
+    pub fn last_call(&self) -> Result<Option<ActionStore<T>>, io::Error> {
         if self.next == 0 {
-            eprintln!("whoa: None");
             return Ok(None);
         }
 
@@ -241,7 +256,7 @@ impl TraceStore {
         Ok(None)
     }
 
-    pub fn last_action(&self) -> Result<Option<ActionStore>, io::Error> {
+    pub fn last_action(&self) -> Result<Option<ActionStore<Call>>, io::Error> {
         if self.next == 0 {
             return Ok(None);
         }
@@ -251,7 +266,7 @@ impl TraceStore {
         Ok(Some(ActionStore::from_path(&self.action_path(idx))?))
     }
 
-    pub fn begin_call(&mut self, before: Call) -> Result<(), io::Error> {
+    pub fn begin_call(&mut self, before: &T) -> Result<(), io::Error> {
         let idx = self.next;
         let dir = self.action_path(idx);
 
@@ -261,7 +276,7 @@ impl TraceStore {
                 fs::OpenOptions::new()
                     .write(true)
                     .create_new(true)
-                    .open(dir.join(ActionStore::BEFORE_JSON_PATH))?,
+                    .open(dir.join(ActionStore::<Call>::BEFORE_JSON_PATH))?,
             ),
             &before,
         )?;
@@ -271,7 +286,7 @@ impl TraceStore {
         Ok(())
     }
 
-    pub fn end_call(&mut self, result: Call) -> Result<(), eyre::Error> {
+    pub fn end_call(&mut self, result: &T) -> Result<(), eyre::Error> {
         let idx = self.recording.take().wrap_err("not recording action")?;
         let dir = self.action_path(idx);
 
@@ -280,7 +295,7 @@ impl TraceStore {
                 fs::OpenOptions::new()
                     .write(true)
                     .create_new(true)
-                    .open(dir.join(ActionStore::CALL_JSON_PATH))?,
+                    .open(dir.join(ActionStore::<Call>::CALL_JSON_PATH))?,
             ),
             &result,
         )?;
@@ -294,7 +309,7 @@ impl TraceStore {
         self.path.join(format!("{:04}", idx))
     }
 
-    pub fn actions(&self) -> Result<Vec<ActionStore>, io::Error> {
+    pub fn actions(&self) -> Result<Vec<ActionStore<Call>>, io::Error> {
         (0..self.next)
             .map(|idx| self.action_path(idx))
             .map(|path| ActionStore::from_path(&path))
@@ -303,11 +318,15 @@ impl TraceStore {
 }
 
 #[derive(Clone, Debug)]
-pub struct ActionStore {
+pub struct ActionStore<T> {
     path: PathBuf,
+    call: PhantomData<T>,
 }
 
-impl ActionStore {
+impl<T> ActionStore<T>
+where
+    T: DeserializeOwned,
+{
     const BEFORE_JSON_PATH: &'static str = "before.json";
     const CALL_JSON_PATH: &'static str = "call.json";
     const DECL_JSON_PATH: &'static str = "decl.json";
@@ -315,40 +334,34 @@ impl ActionStore {
     pub fn from_path(path: &Path) -> Result<Self, io::Error> {
         Ok(Self {
             path: path.canonicalize()?,
+            call: PhantomData,
         })
     }
 
-    pub fn read(&self) -> Result<Action, eyre::Error> {
+    pub fn read(&self) -> Result<T, eyre::Error> {
         let call_json = self.path.join(Self::CALL_JSON_PATH);
 
         if call_json.exists() {
-            return Ok(Action::Call(
-                serde_json::from_reader(BufReader::new(
-                    fs::OpenOptions::new()
-                        .read(true)
-                        .open(&call_json)
-                        .wrap_err("failed to open call.json")?,
-                ))
-                .wrap_err("failed to deserialize call")?,
-            ));
-        }
-
-        Ok(Action::Decl(
-            serde_json::from_reader(BufReader::new(
+            return serde_json::from_reader(BufReader::new(
                 fs::OpenOptions::new()
                     .read(true)
-                    .open(self.path.join(Self::DECL_JSON_PATH))
-                    .wrap_err("failed to open decl.json")?,
+                    .open(&call_json)
+                    .wrap_err("failed to open call.json")?,
             ))
-            .wrap_err("failed to deserialize decl")?,
+            .wrap_err("failed to deserialize call");
+        }
+
+        serde_json::from_reader(BufReader::new(
+            fs::OpenOptions::new()
+                .read(true)
+                .open(self.path.join(Self::DECL_JSON_PATH))
+                .wrap_err("failed to open decl.json")?,
         ))
+        .wrap_err("failed to deserialize decl")
     }
 
-    pub fn read_call(&self) -> Result<Option<Call>, eyre::Error> {
-        match self.read()? {
-            | Action::Call(call) => Ok(Some(call)),
-            | Action::Decl(_) => Ok(None),
-        }
+    pub fn read_call(&self) -> Result<Option<T>, eyre::Error> {
+        Ok(Some(self.read()?))
     }
 
     pub fn is_call(&self) -> bool {
@@ -366,7 +379,7 @@ pub enum Action {
 impl Action {
     pub fn call(&self) -> Option<&Call> {
         match self {
-            | Action::Call(call) => Some(&call),
+            | Action::Call(call) => Some(call),
             | Action::Decl(_decl) => None,
         }
     }

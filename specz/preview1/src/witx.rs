@@ -1,3 +1,4 @@
+pub mod elang;
 pub mod slang;
 
 use std::collections::HashMap;
@@ -10,6 +11,7 @@ use pest::{
 use pest_derive::Parser;
 
 use wazzi_specz_wasi::{
+    effects,
     FlagsType,
     Function,
     FunctionParam,
@@ -125,6 +127,7 @@ fn preview1_module(spec: &mut Spec, pairs: Pairs<'_, Rule>) -> Result<Interface,
         let mut results = Vec::new();
         let mut r#return = None;
         let mut input_contract = None;
+        let mut effects = effects::Program { stmts: Vec::new() };
 
         for pair in pairs {
             match pair.as_rule() {
@@ -187,7 +190,14 @@ fn preview1_module(spec: &mut Spec, pairs: Pairs<'_, Rule>) -> Result<Interface,
                             input_contract = Some(term);
                         },
                         | Rule::annotation if annot_pair.as_str() == "@effects" => {
-                            tracing::warn!("Ignoring @effects.");
+                            let pair = pairs.next().unwrap();
+                            eprintln!("pair {}", pair.as_str());
+                            let pair = elang::Parser::parse(elang::Rule::stmt, pair.as_str())
+                                .wrap_err("failed to parse elang")?
+                                .next()
+                                .unwrap();
+
+                            effects.stmts.push(elang::to_stmt(pair)?);
                         },
                         | _ => panic!("{:?}", annot_pair),
                     }
@@ -204,6 +214,7 @@ fn preview1_module(spec: &mut Spec, pairs: Pairs<'_, Rule>) -> Result<Interface,
                 results,
                 r#return,
                 input_contract,
+                effects,
             },
         );
     }

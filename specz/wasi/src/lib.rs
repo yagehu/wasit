@@ -1,3 +1,4 @@
+pub mod effects;
 pub mod term;
 
 mod value;
@@ -320,6 +321,7 @@ pub struct Function {
     pub results:        Vec<FunctionResult>,
     pub r#return:       Option<()>,
     pub input_contract: Option<Term>,
+    pub effects:        effects::Program,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]

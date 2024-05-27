@@ -1,6 +1,8 @@
+use serde::{Deserialize, Serialize};
+
 use crate::WasiType;
 
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 pub enum WasiValue {
     Handle(u32),
     S64(i64),
@@ -78,14 +80,66 @@ impl WasiValue {
             special_fields: Default::default(),
         }
     }
+
+    pub fn from_pb(ty: &WasiType, value: wazzi_executor_pb_rust::Value) -> Self {
+        match (ty, value.which.unwrap()) {
+            | (_, wazzi_executor_pb_rust::value::Which::Handle(handle)) => Self::Handle(handle),
+            | (_, wazzi_executor_pb_rust::value::Which::Builtin(builtin)) => {
+                match builtin.which.unwrap() {
+                    | wazzi_executor_pb_rust::value::builtin::Which::Char(_) => todo!(),
+                    | wazzi_executor_pb_rust::value::builtin::Which::U8(_) => todo!(),
+                    | wazzi_executor_pb_rust::value::builtin::Which::U32(_) => todo!(),
+                    | wazzi_executor_pb_rust::value::builtin::Which::U64(i) => Self::U64(i),
+                    | wazzi_executor_pb_rust::value::builtin::Which::S64(i) => Self::S64(i),
+                    | _ => todo!(),
+                }
+            },
+            | (_, wazzi_executor_pb_rust::value::Which::Bitflags(flags)) => {
+                Self::Flags(FlagsValue {
+                    fields: flags
+                        .members
+                        .into_iter()
+                        .map(|member| member.value)
+                        .collect(),
+                })
+            },
+            | (_, wazzi_executor_pb_rust::value::Which::String(string)) => Self::String(string),
+            | (
+                WasiType::Variant(variant_type),
+                wazzi_executor_pb_rust::value::Which::Variant(variant),
+            ) => Self::Variant(Box::new(VariantValue {
+                case_idx: variant.case_idx as usize,
+                payload:  match variant.payload_option.unwrap() {
+                    | wazzi_executor_pb_rust::value::variant::Payload_option::PayloadSome(p) => {
+                        Some(Self::from_pb(
+                            &variant_type
+                                .cases
+                                .get(variant.case_idx as usize)
+                                .unwrap()
+                                .payload
+                                .as_ref()
+                                .unwrap()
+                                .wasi,
+                            *p,
+                        ))
+                    },
+                    | wazzi_executor_pb_rust::value::variant::Payload_option::PayloadNone(_) => {
+                        None
+                    },
+                    | _ => todo!(),
+                },
+            })),
+            | _ => unreachable!(),
+        }
+    }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 pub struct FlagsValue {
     pub fields: Vec<bool>,
 }
 
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 pub struct VariantValue {
     pub case_idx: usize,
     pub payload:  Option<WasiValue>,

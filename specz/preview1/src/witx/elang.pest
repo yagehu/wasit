@@ -1,0 +1,22 @@
+WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
+
+prog_final = _{ SOI ~ stmt* ~ EOI }
+
+stmt =
+ _{ attr_set
+  }
+
+expr =
+ _{ s64_const
+  }
+
+id = @{ "$" ~ (ASCII_ALPHANUMERIC | "." | "-" | "_")+ }
+number = @{ "-"? ~ ASCII_DIGIT+ }
+
+attr_set =
+  { "(" ~ "@attr.set"
+  ~ "(" ~ "result" ~ id ~ ")"
+  ~ id ~ expr ~ ")"
+  }
+
+s64_const = { "(" ~ "@s64.const" ~ number ~ ")" }

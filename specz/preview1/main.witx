@@ -326,8 +326,6 @@
 (typename $fd (handle)
   (@attribute $offset $filesize)
   (@attribute $flags $fdflags)
-  (@attribute $rights-base $rights)
-  (@attribute $rights-inheriting $rights)
   (@attribute $file-type $filetype)
 )
 
@@ -843,22 +841,7 @@
       )
     )
     (@effects
-      (@attr.set (result $fd) $offset (i64.const 0))
-      (@attr.set (result $fd) $flags (param $fdflags))
-      (@attr.set (result $fd) $rights-base (param $fs_rights_base))
-      (@attr.set (result $fd) $rights-inheriting (@value (param $fs_rights_inheriting)))
-      (@attr.set (result $fd) $path
-        (@path.join
-          (@attr.get (param $fd) $path)
-          (param $path)
-        )
-      )
-      (@attr.set (result $fd) $file-type
-        (@fs.resolve-type
-          (@attr.get (param $fd) $path)
-          (param $path)
-        )
-      )
+      (@attr.set (result $expected) $offset (@s64.const 0))
     )
   )
 )

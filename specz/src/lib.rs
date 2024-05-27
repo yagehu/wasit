@@ -4,12 +4,28 @@ use std::collections::{BTreeSet, HashMap};
 
 use arbitrary::Unstructured;
 use eyre::{eyre as err, Context as _, ContextCompat};
+use serde::{Deserialize, Serialize};
 use wazzi_executor::RunningExecutor;
 use wazzi_executor_pb_rust::WasiFunc;
-use wazzi_specz_wasi::{FlagsValue, Function, Spec, Term, WasiType, WasiValue};
+use wazzi_specz_wasi::{effects, FlagsValue, Function, Spec, Term, WasiType, WasiValue};
+use wazzi_store::TraceStore;
 use z3::ast::Ast;
 
 use self::resource::Context;
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
+pub struct Call {
+    pub function: String,
+    pub errno:    Option<i32>,
+    pub params:   Vec<Value>,
+    pub results:  Vec<Value>,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
+pub struct Value {
+    pub wasi:     WasiValue,
+    pub resource: Option<usize>,
+}
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Resource {
@@ -40,14 +56,6 @@ impl Environment {
         &self.spec
     }
 
-    fn iter_resource_ids_by_type(
-        &self,
-    ) -> impl Iterator<Item = (&str, impl Iterator<Item = usize> + '_)> + '_ {
-        self.resources_by_types
-            .iter()
-            .map(|(name, pool)| (name.as_str(), pool.iter().cloned()))
-    }
-
     pub fn new_resource(&mut self, type_name: String, resource: Resource) -> usize {
         self.resources.push(resource);
         self.resources_by_types
@@ -57,12 +65,44 @@ impl Environment {
         self.resources.len() - 1
     }
 
+    pub fn execute_function_effects(
+        &mut self,
+        function: &Function,
+        result_resources: HashMap<String, usize>,
+    ) -> Result<(), eyre::Error> {
+        for stmt in function.effects.stmts.iter() {
+            match stmt {
+                | wazzi_specz_wasi::effects::Stmt::AttrSet(attr_set) => {
+                    let new_attr_value = self.eval_effects_expr(&attr_set.value);
+                    let resource_id = *result_resources
+                        .get(&attr_set.resource)
+                        .expect(&attr_set.resource);
+                    let resource = self.resources.get_mut(resource_id).unwrap();
+                    let attribute = resource.attributes.get_mut(&attr_set.attr).unwrap();
+
+                    *attribute = new_attr_value;
+                },
+            }
+        }
+
+        eprintln!("{:#?}", self.resources);
+
+        Ok(())
+    }
+
+    fn eval_effects_expr(&self, expr: &effects::Expr) -> WasiValue {
+        match expr {
+            | effects::Expr::WasiValue(value) => value.clone(),
+        }
+    }
+
     pub fn call_arbitrary_function(
         &self,
         u: &mut Unstructured,
         ctx: &mut Context,
         executor: &RunningExecutor,
-    ) -> Result<(), eyre::Error> {
+        store: &mut TraceStore<Call>,
+    ) -> Result<(Function, bool, Vec<Value>), eyre::Error> {
         let interface = self.spec.interfaces.get("wasi_snapshot_preview1").unwrap();
         let functions = interface.functions.values().collect::<Vec<_>>();
         let z3_cfg = z3::Config::new();
@@ -80,7 +120,7 @@ impl Environment {
 
         let function = *u.choose(&candidates)?;
 
-        self.call(u, ctx, executor, &function.name)
+        self.call(u, ctx, executor, store, &function.name)
     }
 
     pub fn call(
@@ -88,8 +128,9 @@ impl Environment {
         u: &mut Unstructured,
         ctx: &mut Context,
         executor: &RunningExecutor,
+        store: &mut TraceStore<Call>,
         function_name: &str,
-    ) -> Result<(), eyre::Error> {
+    ) -> Result<(Function, bool, Vec<Value>), eyre::Error> {
         let interface = self.spec.interfaces.get("wasi_snapshot_preview1").unwrap();
         let function = interface.functions.get(function_name).unwrap();
         let z3_cfg = z3::Config::new();
@@ -99,12 +140,32 @@ impl Environment {
         let params = function_scope
             .solve_input_contract(&z3_ctx, u)?
             .wrap_err("no solution found")?;
+        let mut next_resource_id = self.resources.len();
         let results = function
             .results
             .iter()
-            .map(|result| result.ty.wasi.arbitrary_value(u))
-            .collect::<Result<Vec<_>, _>>()?;
-        let _response = executor
+            .map(|result| Value {
+                wasi:     result.ty.wasi.arbitrary_value(u).unwrap(),
+                resource: if result.ty.attributes.is_empty() {
+                    None
+                } else {
+                    let id = next_resource_id;
+
+                    next_resource_id += 1;
+
+                    Some(id)
+                },
+            })
+            .collect::<Vec<_>>();
+
+        store.begin_call(&Call {
+            function: function_name.to_string(),
+            errno:    None,
+            params:   params.clone(),
+            results:  results.clone(),
+        })?;
+
+        let response = executor
             .call(wazzi_executor_pb_rust::request::Call {
                 func:           WasiFunc::try_from(function_name)
                     .map_err(|_| err!("unknown wasi function name"))?
@@ -112,20 +173,56 @@ impl Environment {
                 params:         function
                     .params
                     .iter()
-                    .zip(params)
-                    .map(|(param, value)| value.into_pb(&param.ty.wasi))
+                    .zip(params.clone())
+                    .map(|(param, value)| value.wasi.into_pb(&param.ty.wasi))
                     .collect(),
                 results:        function
                     .results
                     .iter()
-                    .zip(results)
-                    .map(|(result, value)| value.into_pb(&result.ty.wasi))
+                    .zip(results.clone())
+                    .map(|(result, value)| value.wasi.into_pb(&result.ty.wasi))
                     .collect(),
                 special_fields: Default::default(),
             })
             .wrap_err("failed to call")?;
+        let results = response
+            .results
+            .clone()
+            .into_iter()
+            .zip(results)
+            .zip(function.results.iter())
+            .map(|((result, before), ty)| Value {
+                wasi:     WasiValue::from_pb(&ty.ty.wasi, result),
+                resource: before.resource,
+            })
+            .collect::<Vec<_>>();
+        let ok = match response.errno_option.as_ref().unwrap() {
+            | &wazzi_executor_pb_rust::response::call::Errno_option::ErrnoSome(i) => i == 0,
+            | wazzi_executor_pb_rust::response::call::Errno_option::ErrnoNone(_) => true,
+            | _ => todo!(),
+        };
 
-        Ok(())
+        if ok {
+            for result in results.iter() {
+                if let Some(id) = result.resource {
+                    ctx.resources.insert(id, result.wasi.clone());
+                }
+            }
+        }
+
+        store.end_call(&Call {
+            function: function_name.to_string(),
+            // TODO(huyage)
+            errno: match response.errno_option.as_ref().unwrap() {
+                | &wazzi_executor_pb_rust::response::call::Errno_option::ErrnoSome(i) => Some(i),
+                | wazzi_executor_pb_rust::response::call::Errno_option::ErrnoNone(_) => None,
+                | _ => todo!(),
+            },
+            params,
+            results: results.clone(),
+        })?;
+
+        Ok((function.to_owned(), ok, results))
     }
 }
 
@@ -141,10 +238,10 @@ pub struct FunctionScope<'ctx, 'e, 'r, 's> {
 
 impl<'ctx, 'e, 'r, 's> FunctionScope<'ctx, 'e, 'r, 's> {
     pub fn new(
-        ctx: &'ctx z3::Context,
+        z3_ctx: &'ctx z3::Context,
         solver: &'s mut z3::Solver<'ctx>,
         env: &'e Environment,
-        resource_ctx: &'r Context,
+        ctx: &'r Context,
         function: &'e Function,
     ) -> Self {
         let mut datatypes = HashMap::new();
@@ -155,10 +252,10 @@ impl<'ctx, 'e, 'r, 's> FunctionScope<'ctx, 'e, 'r, 's> {
                 | WasiType::Handle => {
                     datatypes.insert(
                         name.clone(),
-                        z3::DatatypeBuilder::new(ctx, name.as_str())
+                        z3::DatatypeBuilder::new(z3_ctx, name.as_str())
                             .variant(
                                 name,
-                                vec![("value", z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))],
+                                vec![("value", z3::DatatypeAccessor::Sort(z3::Sort::int(z3_ctx)))],
                             )
                             .finish(),
                     );
@@ -166,7 +263,7 @@ impl<'ctx, 'e, 'r, 's> FunctionScope<'ctx, 'e, 'r, 's> {
                 | WasiType::Flags(flags) => {
                     datatypes.insert(
                         name.clone(),
-                        z3::DatatypeBuilder::new(ctx, name.as_str())
+                        z3::DatatypeBuilder::new(z3_ctx, name.as_str())
                             .variant(
                                 name,
                                 flags
@@ -175,7 +272,7 @@ impl<'ctx, 'e, 'r, 's> FunctionScope<'ctx, 'e, 'r, 's> {
                                     .map(|f| {
                                         (
                                             f.as_str(),
-                                            z3::DatatypeAccessor::Sort(z3::Sort::bool(ctx)),
+                                            z3::DatatypeAccessor::Sort(z3::Sort::bool(z3_ctx)),
                                         )
                                     })
                                     .collect::<Vec<_>>(),
@@ -186,10 +283,13 @@ impl<'ctx, 'e, 'r, 's> FunctionScope<'ctx, 'e, 'r, 's> {
                 | WasiType::String => {
                     datatypes.insert(
                         name.clone(),
-                        z3::DatatypeBuilder::new(ctx, name.as_str())
+                        z3::DatatypeBuilder::new(z3_ctx, name.as_str())
                             .variant(
                                 name,
-                                vec![("value", z3::DatatypeAccessor::Sort(z3::Sort::string(ctx)))],
+                                vec![(
+                                    "value",
+                                    z3::DatatypeAccessor::Sort(z3::Sort::string(z3_ctx)),
+                                )],
                             )
                             .finish(),
                     );
@@ -206,7 +306,7 @@ impl<'ctx, 'e, 'r, 's> FunctionScope<'ctx, 'e, 'r, 's> {
 
             if !param.ty.attributes.is_empty() {
                 let x = z3::ast::Datatype::new_const(
-                    ctx,
+                    z3_ctx,
                     format!("var--{}", param.name),
                     &datatype.sort,
                 );
@@ -215,7 +315,7 @@ impl<'ctx, 'e, 'r, 's> FunctionScope<'ctx, 'e, 'r, 's> {
                     .iter()
                     .map(|&id| {
                         let resource_const = z3::FuncDecl::new(
-                            ctx,
+                            z3_ctx,
                             format!("resource--{}--{}", param.ty.name.as_ref().unwrap(), id),
                             &[],
                             &datatype.sort,
@@ -227,13 +327,13 @@ impl<'ctx, 'e, 'r, 's> FunctionScope<'ctx, 'e, 'r, 's> {
                     .collect::<Vec<_>>();
 
                 solver.assert(&z3::ast::Bool::or(
-                    ctx,
+                    z3_ctx,
                     clauses.iter().collect::<Vec<_>>().as_slice(),
                 ));
                 variables.insert(param.name.clone(), x);
             } else {
                 let x = z3::ast::Datatype::new_const(
-                    ctx,
+                    z3_ctx,
                     format!("var--{}", param.name),
                     &datatype.sort,
                 );
@@ -245,7 +345,7 @@ impl<'ctx, 'e, 'r, 's> FunctionScope<'ctx, 'e, 'r, 's> {
         Self {
             solver,
             env,
-            ctx: resource_ctx,
+            ctx,
             function,
             datatypes,
             variables,
@@ -256,7 +356,7 @@ impl<'ctx, 'e, 'r, 's> FunctionScope<'ctx, 'e, 'r, 's> {
         &self,
         ctx: &'ctx z3::Context,
         u: &mut Unstructured,
-    ) -> Result<Option<Vec<WasiValue>>, eyre::Error> {
+    ) -> Result<Option<Vec<Value>>, eyre::Error> {
         let input_contract = match &self.function.input_contract {
             | Some(term) => self.term_to_constraint(ctx, term),
             | None => panic!(),
@@ -346,7 +446,16 @@ impl<'ctx, 'e, 'r, 's> FunctionScope<'ctx, 'e, 'r, 's> {
                             .get(solved_param)
                             .unwrap();
 
-                        params.push(self.ctx.resources.get(&resource_idx).unwrap().clone());
+                        eprintln!("{:#?}", self.env.resources);
+                        params.push(Value {
+                            wasi:     self
+                                .ctx
+                                .resources
+                                .get(&resource_idx)
+                                .expect(&resource_idx.to_string())
+                                .clone(),
+                            resource: Some(resource_idx),
+                        });
                     } else {
                         let value = match &param.ty.wasi {
                             | WasiType::Flags(_flags) => {
@@ -372,7 +481,10 @@ impl<'ctx, 'e, 'r, 's> FunctionScope<'ctx, 'e, 'r, 's> {
                             | _ => panic!(),
                         };
 
-                        params.push(value);
+                        params.push(Value {
+                            wasi:     value,
+                            resource: None,
+                        });
                     }
                 },
                 | None => {
@@ -382,7 +494,10 @@ impl<'ctx, 'e, 'r, 's> FunctionScope<'ctx, 'e, 'r, 's> {
                         .arbitrary_value(u)
                         .wrap_err("failed to generate arbitrary value")?;
 
-                    params.push(value);
+                    params.push(Value {
+                        wasi:     value,
+                        resource: None,
+                    });
                 },
             }
         }

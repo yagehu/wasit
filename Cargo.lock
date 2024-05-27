@@ -1898,12 +1898,15 @@ dependencies = [
  "arbitrary",
  "color-eyre",
  "eyre",
+ "itertools",
  "num-bigint",
  "rand",
+ "serde",
  "tempfile",
  "tracing",
  "tracing-error",
  "tracing-subscriber",
+ "walkdir",
  "wazzi-executor",
  "wazzi-executor-pb-rust",
  "wazzi-runners",
@@ -1932,6 +1935,7 @@ name = "wazzi-specz-wasi"
 version = "0.1.0"
 dependencies = [
  "arbitrary",
+ "serde",
  "wazzi-executor-pb-rust",
 ]
 
