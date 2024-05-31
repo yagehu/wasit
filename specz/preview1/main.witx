@@ -326,14 +326,17 @@
 (typename $fd (handle)
   (@attribute $offset $filesize)
   (@attribute $flags $fdflags)
-  (@attribute $file-type $filetype)
+  (@attribute $type $filetype)
 )
+
+(typename $byte u8)
+(typename $buf (list $byte))
 
 ;;; A region of memory for scatter/gather reads.
 (typename $iovec
   (record
     ;;; The buffer to be filled.
-    (field $buf (list u8))
+    (field $buf $buf)
   )
 )
 
@@ -341,9 +344,7 @@
 (typename $ciovec
   (record
     ;;; The buffer to be written.
-    (field $buf (list u8))
-    ;;; The length of the buffer to be written.
-    (field $buf_len $size)
+    (field $buf $buf)
   )
 )
 
@@ -775,6 +776,13 @@
     (result $error (expected $fd (error $errno)))
     (@input
       (@and
+        ; In general, the behavior of O_EXCL is undefined
+        ; if it is used without O_CREAT.
+        (@not (@and
+          (@not (@flags.get (param $oflags) $oflags $creat))
+          (@flags.get (param $oflags) $oflags $excl)
+        ))
+
         (@not (@flags.get (param $fdflags) $fdflags $dsync))
         (@not (@flags.get (param $fdflags) $fdflags $rsync))
         (@not (@flags.get (param $fdflags) $fdflags $sync))
@@ -806,8 +814,8 @@
         (@flags.get (param $fs_rights_base) $rights $path_remove_directory)
         (@flags.get (param $fs_rights_base) $rights $path_unlink_file)
         (@flags.get (param $fs_rights_base) $rights $poll_fd_readwrite)
-        (@flags.get (param $fs_rights_base) $rights $sock_shutdown)
-        (@flags.get (param $fs_rights_base) $rights $sock_accept)
+        (@not (@flags.get (param $fs_rights_base) $rights $sock_shutdown))
+        (@not (@flags.get (param $fs_rights_base) $rights $sock_accept))
         (@flags.get (param $fs_rights_inheriting) $rights $fd_datasync)
         (@flags.get (param $fs_rights_inheriting) $rights $fd_read)
         (@flags.get (param $fs_rights_inheriting) $rights $fd_seek)
@@ -836,12 +844,61 @@
         (@flags.get (param $fs_rights_inheriting) $rights $path_remove_directory)
         (@flags.get (param $fs_rights_inheriting) $rights $path_unlink_file)
         (@flags.get (param $fs_rights_inheriting) $rights $poll_fd_readwrite)
-        (@flags.get (param $fs_rights_inheriting) $rights $sock_shutdown)
-        (@flags.get (param $fs_rights_inheriting) $rights $sock_accept)
+        (@not (@flags.get (param $fs_rights_inheriting) $rights $sock_shutdown))
+        (@not (@flags.get (param $fs_rights_inheriting) $rights $sock_accept))
       )
     )
     (@effects
       (@attr.set (result $expected) $offset (@s64.const 0))
+      (@attr.set (result $expected) $type (@variant.const $filetype $regular_file))
+    )
+  )
+
+  ;;; Move the offset of a file descriptor.
+  ;;; Note: This is similar to `lseek` in POSIX.
+  (@interface func (export "fd_seek")
+    (param $fd $fd)
+    ;;; The number of bytes to move.
+    (param $offset $filedelta)
+    ;;; The base from which the offset is relative.
+    (param $whence $whence)
+    ;;; The new offset of the file descriptor, relative to the start of the file.
+    (result $error (expected $filesize (error $errno)))
+    (@input
+      (@and
+        (@value.eq
+          (@attr.get (param $fd) $type)
+          (@variant.const $filetype $regular_file)
+        )
+        (@or
+          (@and
+            (@value.eq
+              (param $whence)
+              (@variant.const $whence $set)
+            )
+            (@int.le (param $offset) 17592186040320)
+          )
+          (@and
+            (@value.eq
+              (param $whence)
+              (@variant.const $whence $cur)
+            )
+            (@int.le
+              (@int.add
+                (param $offset)
+                (@attr.get (param $fd) $offset)
+              )
+              17592186040320
+            )
+          )
+          (@and
+            (@value.eq
+              (param $whence)
+              (@variant.const $whence $end)
+            )
+          )
+        )
+      )
     )
   )
 )

@@ -1,15 +1,26 @@
 pub mod resource;
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use arbitrary::Unstructured;
 use eyre::{eyre as err, Context as _, ContextCompat};
 use serde::{Deserialize, Serialize};
 use wazzi_executor::RunningExecutor;
 use wazzi_executor_pb_rust::WasiFunc;
-use wazzi_specz_wasi::{effects, FlagsValue, Function, Spec, Term, WasiType, WasiValue};
+use wazzi_specz_wasi::{
+    effects,
+    FlagsValue,
+    Function,
+    Spec,
+    Term,
+    VariantValue,
+    WasiType,
+    WasiValue,
+    WazziType,
+};
 use wazzi_store::TraceStore;
 use z3::ast::Ast;
+use z3_sys::{Z3_mk_atleast, Z3_mk_pbeq};
 
 use self::resource::Context;
 
@@ -85,8 +96,6 @@ impl Environment {
             }
         }
 
-        eprintln!("{:#?}", self.resources);
-
         Ok(())
     }
 
@@ -103,15 +112,32 @@ impl Environment {
         executor: &RunningExecutor,
         store: &mut TraceStore<Call>,
     ) -> Result<(Function, bool, Vec<Value>), eyre::Error> {
-        let interface = self.spec.interfaces.get("wasi_snapshot_preview1").unwrap();
+        let interface = self
+            .spec
+            .interfaces
+            .get(
+                *self
+                    .spec
+                    .interfaces_map
+                    .get("wasi_snapshot_preview1")
+                    .unwrap(),
+            )
+            .unwrap();
         let functions = interface.functions.values().collect::<Vec<_>>();
-        let z3_cfg = z3::Config::new();
         let mut candidates = Vec::new();
 
         for function in functions {
+            let z3_cfg = z3::Config::new();
             let z3_ctx = z3::Context::new(&z3_cfg);
-            let mut solver = z3::Solver::new(&z3_ctx);
-            let scope = FunctionScope::new(&z3_ctx, &mut solver, self, ctx, function);
+            let solver = z3::Solver::new(&z3_ctx);
+            let mut solver_params = z3::Params::new(&z3_ctx);
+            let random_seed: u32 = u.arbitrary()?;
+
+            solver_params.set_bool("randomize", false);
+            solver_params.set_u32("smt.random_seed", random_seed);
+            solver.set_params(&solver_params);
+
+            let scope = FunctionScope::new(&z3_ctx, solver, self, ctx, function);
 
             if scope.solve_input_contract(&z3_ctx, u)?.is_some() {
                 candidates.push(function);
@@ -131,12 +157,29 @@ impl Environment {
         store: &mut TraceStore<Call>,
         function_name: &str,
     ) -> Result<(Function, bool, Vec<Value>), eyre::Error> {
-        let interface = self.spec.interfaces.get("wasi_snapshot_preview1").unwrap();
+        let interface = self
+            .spec
+            .interfaces
+            .get(
+                *self
+                    .spec
+                    .interfaces_map
+                    .get("wasi_snapshot_preview1")
+                    .unwrap(),
+            )
+            .unwrap();
         let function = interface.functions.get(function_name).unwrap();
         let z3_cfg = z3::Config::new();
+        let random_seed: u32 = u.arbitrary()?;
         let z3_ctx = z3::Context::new(&z3_cfg);
-        let mut solver = z3::Solver::new(&z3_ctx);
-        let function_scope = FunctionScope::new(&z3_ctx, &mut solver, self, ctx, function);
+        let solver = z3::Solver::new(&z3_ctx);
+        let mut solver_params = z3::Params::new(&z3_ctx);
+
+        solver_params.set_bool("randomize", false);
+        solver_params.set_u32("smt.random_seed", random_seed);
+        solver.set_params(&solver_params);
+
+        let function_scope = FunctionScope::new(&z3_ctx, solver, self, ctx, function);
         let params = function_scope
             .solve_input_contract(&z3_ctx, u)?
             .wrap_err("no solution found")?;
@@ -227,111 +270,289 @@ impl Environment {
 }
 
 #[derive(Debug)]
-pub struct FunctionScope<'ctx, 'e, 'r, 's> {
-    solver:    &'s mut z3::Solver<'ctx>,
-    env:       &'e Environment,
-    ctx:       &'r Context,
-    function:  &'e Function,
-    datatypes: HashMap<String, z3::DatatypeSort<'ctx>>,
-    variables: HashMap<String, z3::ast::Datatype<'ctx>>,
+pub struct FunctionScope<'ctx, 'e, 'r> {
+    solver:                z3::Solver<'ctx>,
+    env:                   &'e Environment,
+    ctx:                   &'r Context,
+    function:              &'e Function,
+    datatypes:             HashMap<String, z3::DatatypeSort<'ctx>>,
+    variables:             BTreeMap<String, z3::ast::Datatype<'ctx>>,
+    value_resource_id_map: HashMap<z3::ast::Dynamic<'ctx>, usize>,
 }
 
-impl<'ctx, 'e, 'r, 's> FunctionScope<'ctx, 'e, 'r, 's> {
+impl<'ctx, 'e, 'r> FunctionScope<'ctx, 'e, 'r> {
+    fn wasi_type_to_z3_sort(
+        ctx: &'ctx z3::Context,
+        ty: &WazziType,
+        datatypes: &mut HashMap<String, z3::DatatypeSort<'ctx>>,
+    ) {
+        let name = ty.name.as_ref().unwrap().to_string();
+        let attributes_datatype_name = format!("{name}--attrs");
+
+        if !ty.attributes.is_empty() {
+            datatypes.insert(
+                attributes_datatype_name.clone(),
+                z3::DatatypeBuilder::new(ctx, attributes_datatype_name.as_str())
+                    .variant(
+                        &attributes_datatype_name,
+                        ty.attributes
+                            .iter()
+                            .map(|(attr, ty)| {
+                                (
+                                    attr.as_str(),
+                                    z3::DatatypeAccessor::Sort(
+                                        datatypes
+                                            .get(ty.name.as_ref().unwrap())
+                                            .unwrap()
+                                            .sort
+                                            .clone(),
+                                    ),
+                                )
+                            })
+                            .collect(),
+                    )
+                    .finish(),
+            );
+        }
+
+        match &ty.wasi {
+            | WasiType::Handle => {
+                datatypes.insert(
+                    name.clone(),
+                    z3::DatatypeBuilder::new(ctx, name.as_str())
+                        .variant(
+                            &name,
+                            vec![("value", z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))],
+                        )
+                        .finish(),
+                );
+            },
+            | WasiType::S64 | WasiType::U8 | WasiType::U32 | WasiType::U64 => {
+                datatypes.insert(
+                    name.clone(),
+                    z3::DatatypeBuilder::new(ctx, name.as_str())
+                        .variant(
+                            &name,
+                            vec![("value", z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))],
+                        )
+                        .finish(),
+                );
+            },
+            | WasiType::Flags(flags) => {
+                datatypes.insert(
+                    name.clone(),
+                    z3::DatatypeBuilder::new(ctx, name.as_str())
+                        .variant(
+                            &name,
+                            flags
+                                .fields
+                                .iter()
+                                .map(|f| {
+                                    (f.as_str(), z3::DatatypeAccessor::Sort(z3::Sort::bool(ctx)))
+                                })
+                                .collect::<Vec<_>>(),
+                        )
+                        .finish(),
+                );
+            },
+            | WasiType::List(list) => {
+                let item_sort = datatypes.get(list.item.name.as_ref().unwrap()).unwrap();
+
+                datatypes.insert(
+                    name.clone(),
+                    z3::DatatypeBuilder::new(ctx, name.as_str())
+                        .variant(
+                            &name,
+                            vec![(
+                                "value",
+                                z3::DatatypeAccessor::Sort(z3::Sort::array(
+                                    ctx,
+                                    &z3::Sort::int(ctx),
+                                    &item_sort.sort,
+                                )),
+                            )],
+                        )
+                        .finish(),
+                );
+            },
+            | WasiType::String => {
+                datatypes.insert(
+                    name.clone(),
+                    z3::DatatypeBuilder::new(ctx, name.as_str())
+                        .variant(
+                            &name,
+                            vec![("value", z3::DatatypeAccessor::Sort(z3::Sort::string(ctx)))],
+                        )
+                        .finish(),
+                );
+            },
+            | WasiType::Record(record) => {
+                let mut datatype = z3::DatatypeBuilder::new(ctx, name.as_str());
+
+                for member in record.members.iter() {
+                    datatype = datatype.variant(
+                        &member.name,
+                        record
+                            .members
+                            .iter()
+                            .map(|member| {
+                                (
+                                    member.name.as_str(),
+                                    z3::DatatypeAccessor::Sort(
+                                        datatypes
+                                            .get(member.ty.name.as_ref().unwrap())
+                                            .expect(member.ty.name.as_ref().unwrap())
+                                            .sort
+                                            .clone(),
+                                    ),
+                                )
+                            })
+                            .collect(),
+                    )
+                }
+
+                datatypes.insert(name.clone(), datatype.finish());
+            },
+            | WasiType::Variant(variant) => {
+                let mut datatype = z3::DatatypeBuilder::new(ctx, name.as_str());
+
+                for case in variant.cases.iter() {
+                    let fields = match &case.payload {
+                        | Some(payload) => {
+                            let payload_datatype = datatypes.get(payload.name.as_ref().unwrap());
+
+                            vec![(
+                                "value",
+                                z3::DatatypeAccessor::Sort(
+                                    payload_datatype
+                                        .expect(payload.name.as_ref().unwrap())
+                                        .sort
+                                        .clone(),
+                                ),
+                            )]
+                        },
+                        | None => vec![],
+                    };
+
+                    datatype = datatype.variant(&case.name, fields);
+                }
+
+                datatypes.insert(name.clone(), datatype.finish());
+            },
+            | _ => {
+                tracing::warn!("Ignoring type {}", name);
+            },
+        }
+    }
+
     pub fn new(
         z3_ctx: &'ctx z3::Context,
-        solver: &'s mut z3::Solver<'ctx>,
+        solver: z3::Solver<'ctx>,
         env: &'e Environment,
         ctx: &'r Context,
         function: &'e Function,
     ) -> Self {
         let mut datatypes = HashMap::new();
-        let mut variables = HashMap::new();
+        let mut variables = BTreeMap::new();
+        let mut value_resource_id_map = HashMap::new();
 
-        for (name, ty) in env.spec.types.iter() {
-            match &ty.wasi {
-                | WasiType::Handle => {
-                    datatypes.insert(
-                        name.clone(),
-                        z3::DatatypeBuilder::new(z3_ctx, name.as_str())
-                            .variant(
-                                name,
-                                vec![("value", z3::DatatypeAccessor::Sort(z3::Sort::int(z3_ctx)))],
-                            )
-                            .finish(),
-                    );
-                },
-                | WasiType::Flags(flags) => {
-                    datatypes.insert(
-                        name.clone(),
-                        z3::DatatypeBuilder::new(z3_ctx, name.as_str())
-                            .variant(
-                                name,
-                                flags
-                                    .fields
-                                    .iter()
-                                    .map(|f| {
-                                        (
-                                            f.as_str(),
-                                            z3::DatatypeAccessor::Sort(z3::Sort::bool(z3_ctx)),
-                                        )
-                                    })
-                                    .collect::<Vec<_>>(),
-                            )
-                            .finish(),
-                    );
-                },
-                | WasiType::String => {
-                    datatypes.insert(
-                        name.clone(),
-                        z3::DatatypeBuilder::new(z3_ctx, name.as_str())
-                            .variant(
-                                name,
-                                vec![(
-                                    "value",
-                                    z3::DatatypeAccessor::Sort(z3::Sort::string(z3_ctx)),
-                                )],
-                            )
-                            .finish(),
-                    );
-                },
-                | _ => {
-                    tracing::warn!("Ignoring type {}", name);
-                },
-            }
+        for ty in env.spec.types.iter() {
+            Self::wasi_type_to_z3_sort(z3_ctx, ty, &mut datatypes);
         }
 
-        for param in function.params.iter() {
-            let type_name = param.ty.name.as_ref().unwrap();
-            let datatype = datatypes.get(type_name).unwrap();
+        solver.push();
 
+        for param in function.params.iter() {
             if !param.ty.attributes.is_empty() {
+                let type_name = format!("{}--attrs", param.ty.name.as_ref().unwrap());
+                let datatype = datatypes.get(&type_name).expect(&type_name);
+                let datatype_variant = datatype.variants.first().unwrap();
                 let x = z3::ast::Datatype::new_const(
                     z3_ctx,
                     format!("var--{}", param.name),
                     &datatype.sort,
                 );
-                let resource_ids = env.resources_by_types.get(type_name).unwrap();
+                let resource_ids = env
+                    .resources_by_types
+                    .get(param.ty.name.as_ref().unwrap())
+                    .unwrap();
                 let clauses = resource_ids
                     .iter()
                     .map(|&id| {
-                        let resource_const = z3::FuncDecl::new(
-                            z3_ctx,
-                            format!("resource--{}--{}", param.ty.name.as_ref().unwrap(), id),
-                            &[],
-                            &datatype.sort,
-                        )
-                        .apply(&[]);
+                        let resource = env.resources.get(id).unwrap();
+                        let mut subclauses = Vec::new();
+                        let mut members = Vec::new();
 
-                        z3::ast::Dynamic::from_ast(&x)._eq(&resource_const)
+                        for (i, (attr_name, attr_type)) in param.ty.attributes.iter().enumerate() {
+                            let accessor = datatype_variant.accessors.get(i).unwrap();
+                            let attr_datatype =
+                                datatypes.get(attr_type.name.as_ref().unwrap()).unwrap();
+                            let ctor = &attr_datatype.variants.first().unwrap().constructor;
+                            let attr_value = resource.attributes.get(attr_name).expect(attr_name);
+                            let value = match attr_value {
+                                | &WasiValue::Handle(handle) => {
+                                    ctor.apply(&[&z3::ast::Int::from_u64(z3_ctx, handle.into())])
+                                },
+                                | &WasiValue::S64(i) => {
+                                    ctor.apply(&[&z3::ast::Int::from_i64(z3_ctx, i)])
+                                },
+                                | &WasiValue::U64(i) => {
+                                    ctor.apply(&[&z3::ast::Int::from_u64(z3_ctx, i)])
+                                },
+                                | WasiValue::Flags(flags) => {
+                                    let fields = flags
+                                        .fields
+                                        .iter()
+                                        .map(|&b| z3::ast::Bool::from_bool(z3_ctx, b))
+                                        .collect::<Vec<_>>();
+                                    let fields = fields
+                                        .iter()
+                                        .map(|ast| ast as &dyn z3::ast::Ast)
+                                        .collect::<Vec<_>>();
+
+                                    ctor.apply(fields.as_slice())
+                                },
+                                | WasiValue::String(_) => todo!(),
+                                | WasiValue::Variant(variant) => {
+                                    let ctor = &attr_datatype
+                                        .variants
+                                        .get(variant.case_idx)
+                                        .unwrap()
+                                        .constructor;
+
+                                    match variant.payload {
+                                        | Some(_) => todo!(),
+                                        | None => ctor.apply(&[]),
+                                    }
+                                },
+                            };
+
+                            subclauses.push(accessor.apply(&[&x])._eq(&value));
+                            members.push(value);
+                            //subclauses.push(accessor.apply(&[&resource_const])._eq(&value));
+                        }
+
+                        let value = datatype_variant.constructor.apply(
+                            members
+                                .iter()
+                                .map(|m| m as &dyn z3::ast::Ast)
+                                .collect::<Vec<_>>()
+                                .as_slice(),
+                        );
+
+                        value_resource_id_map.insert(value, id);
+
+                        //subclauses.push(z3::ast::Dynamic::from_ast(&x)._eq(&resource_const));
+
+                        z3::ast::Bool::and(z3_ctx, subclauses.iter().collect::<Vec<_>>().as_slice())
                     })
                     .collect::<Vec<_>>();
 
-                solver.assert(&z3::ast::Bool::or(
-                    z3_ctx,
-                    clauses.iter().collect::<Vec<_>>().as_slice(),
-                ));
-                variables.insert(param.name.clone(), x);
+                solver.assert(&z3::ast::Bool::or(z3_ctx, &clauses));
+                variables.insert(type_name, x);
             } else {
+                let type_name = param.ty.name.as_ref().unwrap();
+                let datatype = datatypes.get(type_name).expect(type_name);
                 let x = z3::ast::Datatype::new_const(
                     z3_ctx,
                     format!("var--{}", param.name),
@@ -349,6 +570,7 @@ impl<'ctx, 'e, 'r, 's> FunctionScope<'ctx, 'e, 'r, 's> {
             function,
             datatypes,
             variables,
+            value_resource_id_map,
         }
     }
 
@@ -358,9 +580,9 @@ impl<'ctx, 'e, 'r, 's> FunctionScope<'ctx, 'e, 'r, 's> {
         u: &mut Unstructured,
     ) -> Result<Option<Vec<Value>>, eyre::Error> {
         let input_contract = match &self.function.input_contract {
-            | Some(term) => self.term_to_constraint(ctx, term),
-            | None => panic!(),
-        }?;
+            | Some(term) => self.term_to_constraint(ctx, term)?.0,
+            | None => z3::ast::Dynamic::from_ast(&z3::ast::Bool::from_bool(ctx, true)),
+        };
 
         self.solver
             .assert(
@@ -370,9 +592,10 @@ impl<'ctx, 'e, 'r, 's> FunctionScope<'ctx, 'e, 'r, 's> {
             );
 
         let mut solutions = Vec::new();
+        let mut nsolutions = 0;
 
         loop {
-            if self.solver.check() != z3::SatResult::Sat {
+            if self.solver.check() != z3::SatResult::Sat || nsolutions == 100 {
                 break;
             }
 
@@ -380,15 +603,14 @@ impl<'ctx, 'e, 'r, 's> FunctionScope<'ctx, 'e, 'r, 's> {
             let mut clauses = Vec::new();
 
             for (name, var) in &self.variables {
-                if let Some(v) = model.get_const_interp(var) {
-                    if name == "fd" {
-                        continue;
-                    }
-
+                if let Some(v) = model.get_const_interp(&var.simplify()) {
+                    //if name != "fd" {
                     clauses.push(var._eq(&v).not());
+                    //}
                 }
             }
 
+            nsolutions += 1;
             solutions.push(model);
             self.solver
                 .assert(&z3::ast::Bool::or(ctx, &clauses.iter().collect::<Vec<_>>()));
@@ -407,24 +629,38 @@ impl<'ctx, 'e, 'r, 's> FunctionScope<'ctx, 'e, 'r, 's> {
             let name = decl.name();
 
             if let Some(param_name) = name.strip_prefix("var--") {
+                let param = self
+                    .function
+                    .params
+                    .iter()
+                    .find(|p| p.name == param_name)
+                    .unwrap();
+                let ty = self
+                    .env
+                    .spec()
+                    .types
+                    .get(
+                        *self
+                            .env
+                            .spec()
+                            .types_map
+                            .get(param.ty.name.as_ref().unwrap())
+                            .unwrap(),
+                    )
+                    .unwrap();
                 let value = model.get_const_interp(&decl.apply(&[])).unwrap();
 
-                solved_params.insert(param_name.to_owned(), value);
+                if ty.attributes.is_empty() {
+                    solved_params.insert(param_name.to_owned(), value);
+                } else {
+                    let resource_id = *self.value_resource_id_map.get(&value).unwrap();
 
-                continue;
-            }
-
-            if name.starts_with("resource--") {
-                let mut rsplits = name.rsplitn(3, "--");
-                let resource_id = rsplits.next().unwrap();
-                let resource_id = resource_id.parse::<usize>().unwrap();
-                let type_name = rsplits.next().unwrap();
-                let value = model.get_const_interp(&decl.apply(&[])).unwrap();
-
-                resources
-                    .entry(type_name.to_owned())
-                    .or_default()
-                    .insert(value, resource_id);
+                    resources
+                        .entry(ty.name.as_ref().unwrap().to_owned())
+                        .or_default()
+                        .insert(value.clone(), resource_id);
+                    solved_params.insert(param_name.to_owned(), value);
+                }
 
                 continue;
             }
@@ -446,18 +682,28 @@ impl<'ctx, 'e, 'r, 's> FunctionScope<'ctx, 'e, 'r, 's> {
                             .get(solved_param)
                             .unwrap();
 
-                        eprintln!("{:#?}", self.env.resources);
                         params.push(Value {
-                            wasi:     self
-                                .ctx
-                                .resources
-                                .get(&resource_idx)
-                                .expect(&resource_idx.to_string())
-                                .clone(),
+                            wasi:     self.ctx.resources.get(&resource_idx).unwrap().clone(),
                             resource: Some(resource_idx),
                         });
                     } else {
                         let value = match &param.ty.wasi {
+                            | WasiType::S64 => {
+                                let datatype =
+                                    self.datatypes.get(param.ty.name.as_ref().unwrap()).unwrap();
+                                let int = datatype
+                                    .variants
+                                    .first()
+                                    .unwrap()
+                                    .accessors
+                                    .first()
+                                    .unwrap()
+                                    .apply(&[solved_param])
+                                    .as_int()
+                                    .unwrap();
+
+                                WasiValue::S64(int.simplify().as_i64().unwrap())
+                            },
                             | WasiType::Flags(_flags) => {
                                 let mut fields = Vec::new();
                                 let datatype =
@@ -478,7 +724,36 @@ impl<'ctx, 'e, 'r, 's> FunctionScope<'ctx, 'e, 'r, 's> {
 
                                 WasiValue::Flags(FlagsValue { fields })
                             },
-                            | _ => panic!(),
+                            | WasiType::Variant(_variant) => {
+                                let datatype =
+                                    self.datatypes.get(param.ty.name.as_ref().unwrap()).unwrap();
+                                let mut case_idx = 0;
+                                let payload = None;
+
+                                for (i, datatype_variant) in datatype.variants.iter().enumerate() {
+                                    if datatype_variant
+                                        .tester
+                                        .apply(&[solved_param])
+                                        .simplify()
+                                        .as_bool()
+                                        .unwrap()
+                                        .as_bool()
+                                        .unwrap()
+                                    {
+                                        case_idx = i;
+
+                                        if let Some(_accessor) = datatype_variant.accessors.first()
+                                        {
+                                            todo!();
+                                        }
+
+                                        break;
+                                    }
+                                }
+
+                                WasiValue::Variant(Box::new(VariantValue { case_idx, payload }))
+                            },
+                            | _ => panic!("{:?}", solved_param),
                         };
 
                         params.push(Value {
@@ -509,14 +784,18 @@ impl<'ctx, 'e, 'r, 's> FunctionScope<'ctx, 'e, 'r, 's> {
         &self,
         ctx: &'ctx z3::Context,
         term: &Term,
-    ) -> Result<z3::ast::Dynamic, eyre::Error> {
+    ) -> Result<(z3::ast::Dynamic, Option<String>), eyre::Error> {
         Ok(match term {
-            | Term::Not(t) => z3::ast::Dynamic::from_ast(
-                &self
-                    .term_to_constraint(ctx, &t.term)?
-                    .as_bool()
-                    .unwrap()
-                    .not(),
+            | Term::Not(t) => (
+                z3::ast::Dynamic::from_ast(
+                    &self
+                        .term_to_constraint(ctx, &t.term)?
+                        .0
+                        .as_bool()
+                        .unwrap()
+                        .not(),
+                ),
+                None,
             ),
             | Term::And(t) => {
                 let clauses = t
@@ -525,13 +804,16 @@ impl<'ctx, 'e, 'r, 's> FunctionScope<'ctx, 'e, 'r, 's> {
                     .map(|clause| self.term_to_constraint(ctx, clause))
                     .collect::<Result<Vec<_>, _>>()?
                     .into_iter()
-                    .map(|clause| clause.as_bool().unwrap())
+                    .map(|clause| clause.0.as_bool().unwrap())
                     .collect::<Vec<_>>();
 
-                z3::ast::Dynamic::from_ast(&z3::ast::Bool::and(
-                    ctx,
-                    clauses.iter().collect::<Vec<_>>().as_slice(),
-                ))
+                (
+                    z3::ast::Dynamic::from_ast(&z3::ast::Bool::and(
+                        ctx,
+                        clauses.iter().collect::<Vec<_>>().as_slice(),
+                    )),
+                    None,
+                )
             },
             | Term::Or(t) => {
                 let clauses = t
@@ -540,27 +822,86 @@ impl<'ctx, 'e, 'r, 's> FunctionScope<'ctx, 'e, 'r, 's> {
                     .map(|clause| self.term_to_constraint(ctx, clause))
                     .collect::<Result<Vec<_>, _>>()?
                     .into_iter()
-                    .map(|clause| clause.as_bool().unwrap())
+                    .map(|clause| clause.0.as_bool().unwrap())
                     .collect::<Vec<_>>();
 
-                z3::ast::Dynamic::from_ast(&z3::ast::Bool::or(
-                    ctx,
-                    clauses.iter().collect::<Vec<_>>().as_slice(),
-                ))
+                (
+                    z3::ast::Dynamic::from_ast(&z3::ast::Bool::or(
+                        ctx,
+                        clauses.iter().collect::<Vec<_>>().as_slice(),
+                    )),
+                    None,
+                )
+            },
+            | Term::AttrGet(t) => {
+                let (target, target_type) = self.term_to_constraint(ctx, &t.target)?;
+                let (i, (_, attr_type)) = &self
+                    .env
+                    .spec()
+                    .types
+                    .get(
+                        *self
+                            .env
+                            .spec()
+                            .types_map
+                            .get(target_type.as_ref().unwrap())
+                            .unwrap(),
+                    )
+                    .unwrap()
+                    .attributes
+                    .iter()
+                    .enumerate()
+                    .find(|(_, (attr, _))| attr == &t.attr)
+                    .unwrap();
+                let datatype = self
+                    .datatypes
+                    .get(&format!("{}--attrs", target_type.as_ref().unwrap()))
+                    .unwrap();
+                let datatype_variant = datatype.variants.first().unwrap();
+
+                (
+                    datatype_variant
+                        .accessors
+                        .get(*i)
+                        .unwrap()
+                        .apply(&[&target]),
+                    attr_type.name.clone(),
+                )
             },
             | Term::Param(t) => {
-                let var = self.variables.get(&t.name).expect(&t.name);
+                let param = self
+                    .function
+                    .params
+                    .iter()
+                    .find(|p| p.name == t.name)
+                    .unwrap();
 
-                z3::ast::Dynamic::from_ast(var)
+                if !param.ty.attributes.is_empty() {
+                    let name = format!("{}--attrs", param.ty.name.as_ref().unwrap());
+                    let var = self.variables.get(&name).expect(&name);
+
+                    (z3::ast::Dynamic::from_ast(var), param.ty.name.clone())
+                } else {
+                    let var = self.variables.get(&t.name).expect(&t.name);
+
+                    (z3::ast::Dynamic::from_ast(var), param.ty.name.clone())
+                }
             },
             | Term::FlagsGet(t) => {
-                let target = self
+                let (target, target_type_name) = self
                     .term_to_constraint(ctx, &t.target)
                     .wrap_err("failed to translate flags get target to z3")?;
                 let var = target.as_datatype().unwrap();
                 let datatype = self.datatypes.get(&t.r#type).unwrap();
                 let variant = datatype.variants.first().unwrap();
-                let field_idx = match &self.env.spec.types.get(&t.r#type).unwrap().wasi {
+                let field_idx = match &self
+                    .env
+                    .spec
+                    .types
+                    .get(*self.env.spec.types_map.get(&t.r#type).unwrap())
+                    .unwrap()
+                    .wasi
+                {
                     | WasiType::Flags(flags) => {
                         flags
                             .fields
@@ -573,7 +914,126 @@ impl<'ctx, 'e, 'r, 's> FunctionScope<'ctx, 'e, 'r, 's> {
                     | _ => unreachable!(),
                 };
 
-                variant.accessors.get(field_idx).unwrap().apply(&[&var])
+                (
+                    variant.accessors.get(field_idx).unwrap().apply(&[&var]),
+                    None,
+                )
+            },
+            | Term::IntConst(t) => (
+                z3::ast::Dynamic::from_ast(
+                    &z3::ast::Int::from_str(ctx, t.to_string().as_str()).unwrap(),
+                ),
+                None,
+            ),
+            | Term::IntAdd(t) => {
+                let (lhs, lhs_type_name) = self.term_to_constraint(ctx, &t.lhs)?;
+                let (rhs, rhs_type_name) = self.term_to_constraint(ctx, &t.rhs)?;
+                let lhs = match lhs_type_name {
+                    | Some(name) => {
+                        let datatype = self.datatypes.get(&name).unwrap();
+                        let accessor = datatype
+                            .variants
+                            .first()
+                            .unwrap()
+                            .accessors
+                            .first()
+                            .unwrap();
+
+                        accessor.apply(&[&lhs]).as_int().unwrap()
+                    },
+                    | None => lhs.as_int().unwrap(),
+                };
+                let rhs = match rhs_type_name {
+                    | Some(name) => {
+                        let datatype = self.datatypes.get(&name).unwrap();
+                        let accessor = datatype
+                            .variants
+                            .first()
+                            .unwrap()
+                            .accessors
+                            .first()
+                            .unwrap();
+                        accessor.apply(&[&rhs]).as_int().unwrap()
+                    },
+                    | None => rhs.as_int().unwrap(),
+                };
+
+                (
+                    z3::ast::Dynamic::from_ast(&z3::ast::Int::add(ctx, &[&lhs, &rhs])),
+                    None,
+                )
+            },
+            | Term::IntLe(t) => {
+                let (lhs, lhs_type_name) = self.term_to_constraint(ctx, &t.lhs)?;
+                let (rhs, rhs_type_name) = self.term_to_constraint(ctx, &t.rhs)?;
+                let lhs = match lhs_type_name {
+                    | Some(name) => {
+                        let datatype = self.datatypes.get(&name).expect(&name);
+                        let accessor = datatype
+                            .variants
+                            .first()
+                            .unwrap()
+                            .accessors
+                            .first()
+                            .unwrap();
+
+                        accessor.apply(&[&lhs]).as_int().unwrap()
+                    },
+                    | None => lhs.as_int().unwrap(),
+                };
+                let rhs = match rhs_type_name {
+                    | Some(name) => {
+                        let datatype = self.datatypes.get(&name).unwrap();
+                        let accessor = datatype
+                            .variants
+                            .first()
+                            .unwrap()
+                            .accessors
+                            .first()
+                            .unwrap();
+
+                        accessor.apply(&[&rhs]).as_int().unwrap()
+                    },
+                    | None => rhs.as_int().unwrap(),
+                };
+
+                (z3::ast::Dynamic::from_ast(&lhs.le(&rhs)), None)
+            },
+            | Term::ValueEq(t) => {
+                let (lhs, _) = self.term_to_constraint(ctx, &t.lhs)?;
+                let (rhs, _) = self.term_to_constraint(ctx, &t.rhs)?;
+
+                (z3::ast::Dynamic::from_ast(&lhs._eq(&rhs)), None)
+            },
+            | Term::VariantConst(t) => {
+                let datatype = self.datatypes.get(&t.ty).unwrap();
+                let ty = self
+                    .env
+                    .spec()
+                    .types
+                    .get(*self.env.spec().types_map.get(&t.ty).unwrap())
+                    .unwrap();
+                let variant = ty.wasi.variant().unwrap();
+                let (case_idx, _) = variant
+                    .cases
+                    .iter()
+                    .enumerate()
+                    .find(|(_, case)| case.name == t.case)
+                    .unwrap();
+                let datatype_variant = datatype.variants.get(case_idx).unwrap();
+                let payload = match &t.payload {
+                    | Some(payload) => vec![self.term_to_constraint(ctx, payload)?],
+                    | None => vec![],
+                };
+                let payload = payload
+                    .iter()
+                    .map(|x| &x.0 as &dyn z3::ast::Ast)
+                    .collect::<Vec<_>>();
+
+                (
+                    datatype_variant.constructor.apply(payload.as_slice()),
+                    Some(t.ty.clone()),
+                )
             },
         })
     }

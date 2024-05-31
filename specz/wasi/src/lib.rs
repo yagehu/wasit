@@ -11,15 +11,19 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Spec {
-    pub types:      HashMap<String, WazziType>,
-    pub interfaces: HashMap<String, Interface>,
+    pub types:          Vec<WazziType>,
+    pub interfaces:     Vec<Interface>,
+    pub types_map:      HashMap<String, usize>,
+    pub interfaces_map: HashMap<String, usize>,
 }
 
 impl Spec {
     pub fn new() -> Self {
         Self {
-            types:      Default::default(),
-            interfaces: Default::default(),
+            types:          Default::default(),
+            interfaces:     Default::default(),
+            types_map:      Default::default(),
+            interfaces_map: Default::default(),
         }
     }
 }
@@ -34,7 +38,7 @@ impl Default for Spec {
 pub struct WazziType {
     pub name:       Option<String>,
     pub wasi:       WasiType,
-    pub attributes: HashMap<String, WasiType>,
+    pub attributes: Vec<(String, WazziType)>,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -64,6 +68,33 @@ impl WasiType {
         match self {
             | Self::Variant(variant) => Some(variant),
             | _ => None,
+        }
+    }
+
+    pub fn zero_value(&self) -> WasiValue {
+        match self {
+            | WasiType::S64 => WasiValue::S64(0),
+            | WasiType::U8 => todo!(),
+            | WasiType::U16 => todo!(),
+            | WasiType::U32 => todo!(),
+            | WasiType::U64 => WasiValue::U64(0),
+            | WasiType::Handle => WasiValue::Handle(0),
+            | WasiType::Flags(flags) => WasiValue::Flags(FlagsValue {
+                fields: flags.fields.iter().map(|_| false).collect(),
+            }),
+            | WasiType::Variant(variant) => WasiValue::Variant(Box::new(VariantValue {
+                case_idx: 0,
+                payload:  variant
+                    .cases
+                    .first()
+                    .unwrap()
+                    .payload
+                    .as_ref()
+                    .map(|payload| payload.wasi.zero_value()),
+            })),
+            | WasiType::Record(_) => todo!(),
+            | WasiType::String => WasiValue::String(Vec::new()),
+            | WasiType::List(_) => todo!(),
         }
     }
 
@@ -208,7 +239,7 @@ impl VariantType {
                 .cases
                 .iter()
                 .enumerate()
-                .find(|(_, case)| &case.name == case_name)
+                .find(|(_, case)| case.name == case_name)
                 .map(|(i, _)| i)?,
             payload,
         })))

@@ -130,16 +130,16 @@ dependencies = [
 
 [[package]]
 name = "bindgen"
-version = "0.66.1"
+version = "0.69.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2b84e06fc203107bfbad243f4aba2af864eb7db3b1cf46ea0a023b0b433d2a7"
+checksum = "a00dc851838a2120612785d195287475a3ac45514741da670b735818822129a0"
 dependencies = [
  "bitflags 2.4.1",
  "cexpr",
  "clang-sys",
+ "itertools",
  "lazy_static",
  "lazycell",
- "peeking_take_while",
  "proc-macro2",
  "quote",
  "regex",
@@ -880,6 +880,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "num"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3135b08af27d103b0a51f2ae0f8632117b7b185ccf931445affa8df530576a41"
+dependencies = [
+ "num-bigint",
+ "num-complex",
+ "num-integer",
+ "num-iter",
+ "num-rational",
+ "num-traits",
+]
+
+[[package]]
 name = "num-bigint"
 version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -891,11 +905,42 @@ dependencies = [
 ]
 
 [[package]]
+name = "num-complex"
+version = "0.4.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "73f88a1307638156682bada9d7604135552957b7818057dcef22705b4d509495"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "num-integer"
 version = "0.1.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7969661fd2958a5cb096e56c8e1ad0444ac2bbcd0061bd28660485a44879858f"
 dependencies = [
+ "num-traits",
+]
+
+[[package]]
+name = "num-iter"
+version = "0.1.45"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1429034a0490724d0075ebb2bc9e875d6503c3cf69e235a8941aa757d83ef5bf"
+dependencies = [
+ "autocfg",
+ "num-integer",
+ "num-traits",
+]
+
+[[package]]
+name = "num-rational"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f83d14da390562dca69fc84082e73e548e1ad308d24accdedd2720017cb37824"
+dependencies = [
+ "num-bigint",
+ "num-integer",
  "num-traits",
 ]
 
@@ -961,12 +1006,6 @@ checksum = "c705f256449c60da65e11ff6626e0c16a0a0b96aaa348de61376b249bc340f41"
 dependencies = [
  "regex",
 ]
-
-[[package]]
-name = "peeking_take_while"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19b17cddbe7ec3f8bc800887bab5e717348c95ea2ca0b1bf0837fb964dc67099"
 
 [[package]]
 name = "percent-encoding"
@@ -1914,6 +1953,7 @@ dependencies = [
  "wazzi-specz-wasi",
  "wazzi-store",
  "z3",
+ "z3-sys",
 ]
 
 [[package]]
@@ -1922,6 +1962,7 @@ version = "0.1.0"
 dependencies = [
  "color-eyre",
  "eyre",
+ "num-bigint",
  "pest",
  "pest_derive",
  "tracing",
@@ -1935,6 +1976,7 @@ name = "wazzi-specz-wasi"
 version = "0.1.0"
 dependencies = [
  "arbitrary",
+ "num-bigint",
  "serde",
  "wazzi-executor-pb-rust",
 ]
@@ -2129,18 +2171,18 @@ checksum = "dff9641d1cd4be8d1a070daf9e3773c5f67e78b4d9d42263020c057706765c04"
 [[package]]
 name = "z3"
 version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a7ff5718c079e7b813378d67a5bed32ccc2086f151d6185074a7e24f4a565e8"
+source = "git+https://github.com/prove-rs/z3.rs.git#1252af7d6f4710214c45cd08e95f9cf9a7d06637"
 dependencies = [
  "log",
+ "num",
  "z3-sys",
 ]
 
 [[package]]
 name = "z3-sys"
 version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7cf70fdbc0de3f42b404f49b0d4686a82562254ea29ff0a155eef2f5430f4b0"
+source = "git+https://github.com/prove-rs/z3.rs.git#1252af7d6f4710214c45cd08e95f9cf9a7d06637"
 dependencies = [
  "bindgen",
+ "pkg-config",
 ]

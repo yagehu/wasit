@@ -8,6 +8,7 @@ publish.workspace = true
 wazzi-specz-wasi.workspace = true
 
 eyre.workspace = true
+num-bigint.workspace = true
 pest.workspace = true
 pest_derive.workspace = true
 tracing.workspace = true

@@ -3,14 +3,21 @@ WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
 term_final = _{ SOI ~ term ~ EOI }
 
 term =
- _{ not
+ _{ comment
+  | not
   | and
   | or
-
+  | attr_get
   | flags_get
-
+  | int_add
+  | int_le
+  | num_lit
   | param
+  | value_eq
+  | variant_const
   }
+
+comment = @{ ";" ~ (!NEWLINE ~ ANY)* ~ NEWLINE }
 
 not = { "(" ~ "@not" ~ term ~ ")" }
 and = { "(" ~ "@and" ~ term+ ~ ")" }
@@ -18,6 +25,17 @@ or = { "(" ~ "@or" ~ term+ ~ ")" }
 
 id = @{ "$" ~ (ASCII_ALPHANUMERIC | "." | "-" | "_")+ }
 
+num_lit = @{ ASCII_DIGIT+ }
+
+attr_get = { "(" ~ "@attr.get" ~ term ~ id ~ ")" }
+
 flags_get = { "(" ~ "@flags.get" ~ term ~ id ~ id ~ ")" }
 
+int_add = { "(" ~ "@int.add" ~ term ~ term ~ ")" }
+int_le = { "(" ~ "@int.le" ~ term ~ term ~ ")" }
+
 param = { "(" ~ "param" ~ id ~ ")" }
+
+value_eq = { "(" ~ "@value.eq" ~ term ~ term ~ ")" }
+
+variant_const = { "(" ~ "@variant.const" ~ id ~ id ~ term? ~ ")" }

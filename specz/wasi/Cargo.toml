@@ -7,4 +7,5 @@ edition.workspace = true
 wazzi-executor-pb-rust.workspace = true
 
 arbitrary.workspace = true
+num-bigint.workspace = true
 serde.workspace = true

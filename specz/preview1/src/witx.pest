@@ -1,6 +1,6 @@
 WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
 
-document = { SOI ~ (comment | decl | "\r" | "\n")* ~ EOI }
+document = { SOI ~ (comment | decl)* ~ EOI }
 
 decl = _{ typename | module }
 
@@ -78,15 +78,15 @@ record_field = { "(" ~ "field" ~ id ~ type_ref ~ ")" }
 
 list = { "(" ~ "list" ~ type_ref ~ ")" }
 
-module = { "(" ~ "module" ~ id ~ function* ~ ")" }
+module = { "(" ~ "module" ~ id ~ (function | comment)* ~ ")" }
 
 function_name = @{ (ASCII_ALPHANUMERIC | "-" | "_")+ }
 
 function =
   { "(" ~ "@interface" ~ "func"
   ~ "(" ~ "export" ~ "\"" ~ function_name ~ "\"" ~ ")"
-  ~ param*
-  ~ result*
+  ~ (comment | param)*
+  ~ (comment | result)*
   ~ annotation_expr*
   ~ ")"
   }
@@ -106,6 +106,7 @@ expr =
   | keyword
   | number
   | sexpr
+  | comment
   }
 
 keyword =

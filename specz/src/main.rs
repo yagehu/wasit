@@ -64,7 +64,9 @@ fn main() -> Result<(), eyre::Error> {
         ],
     );
 
-    fuzzer.fuzz()?;
+    let data = fs::read("data")?;
+
+    fuzzer.fuzz(Some(data))?;
 
     Ok(())
 }
@@ -86,13 +88,13 @@ impl<'s> Fuzzer<'s> {
         }
     }
 
-    pub fn fuzz(&mut self) -> Result<(), eyre::Error> {
+    pub fn fuzz(&mut self, data: Option<Vec<u8>>) -> Result<(), eyre::Error> {
         let mut run_store = self.store.new_run()?;
         let mut env = Environment::preview1()?;
         let fdflags = env
             .spec()
             .types
-            .get("fdflags")
+            .get(*env.spec().types_map.get("fdflags").unwrap())
             .unwrap()
             .wasi
             .flags()
@@ -100,7 +102,7 @@ impl<'s> Fuzzer<'s> {
         let filetype = env
             .spec()
             .types
-            .get("filetype")
+            .get(*env.spec().types_map.get("filetype").unwrap())
             .unwrap()
             .wasi
             .variant()
@@ -112,16 +114,25 @@ impl<'s> Fuzzer<'s> {
                     ("offset".to_owned(), WasiValue::U64(0)),
                     ("flags".to_owned(), fdflags.value(HashSet::new())),
                     (
-                        "file-type".to_owned(),
+                        "type".to_owned(),
                         filetype.value_from_name("directory", None).unwrap(),
                     ),
                 ]),
             },
         );
-        let mut data = vec![0u8; 8192];
         let env = Arc::new(RwLock::new(env));
+        let data = match data {
+            | Some(d) => d,
+            | None => {
+                let mut data = vec![0u8; 65536];
 
-        thread_rng().fill_bytes(&mut data);
+                thread_rng().fill_bytes(&mut data);
+
+                data
+            },
+        };
+
+        run_store.write_data(&data)?;
 
         thread::scope(|scope| -> Result<_, eyre::Error> {
             let (tx, rx) = mpsc::channel();
@@ -129,122 +140,138 @@ impl<'s> Fuzzer<'s> {
             let pause_pair = Arc::new((Mutex::new((0, 0usize)), Condvar::new()));
             let resume_pair = Arc::new((Mutex::new((true, 0usize)), Condvar::new()));
             let n_live_threads = Arc::new(AtomicUsize::new(self.runtimes.len()));
+            let mut runtime_threads = Vec::with_capacity(self.runtimes.len());
 
             for (runtime_name, runtime) in &self.runtimes {
-                thread::Builder::new()
-                    .name(runtime_name.to_string())
-                    .spawn_scoped(scope, {
-                        let mut u = Unstructured::new(&data);
-                        let env = env.clone();
-                        let mut store = run_store.new_runtime(runtime_name.to_string(), "-")?;
-                        let tx = tx.clone();
-                        let cancel = cancel.clone();
-                        let pause_pair = pause_pair.clone();
-                        let resume_pair = resume_pair.clone();
-                        let n_live_threads = n_live_threads.clone();
+                runtime_threads.push(
+                    thread::Builder::new()
+                        .name(runtime_name.to_string())
+                        .spawn_scoped(scope, {
+                            let mut u = Unstructured::new(&data);
+                            let env = env.clone();
+                            let mut store = run_store.new_runtime(runtime_name.to_string(), "-")?;
+                            let tx = tx.clone();
+                            let cancel = cancel.clone();
+                            let pause_pair = pause_pair.clone();
+                            let resume_pair = resume_pair.clone();
+                            let n_live_threads = n_live_threads.clone();
 
-                        move || -> Result<(), eyre::Error> {
-                            let mut ctx = Context::new();
+                            move || -> Result<(), eyre::Error> {
+                                let mut ctx = Context::new();
 
-                            ctx.resources
-                                .insert(resource_id, WasiValue::Handle(runtime.base_dir_fd()));
+                                ctx.resources
+                                    .insert(resource_id, WasiValue::Handle(runtime.base_dir_fd()));
 
-                            let stderr = fs::OpenOptions::new()
-                                .write(true)
-                                .create_new(true)
-                                .open(store.path.join("stderr"))?;
-                            let executor = ExecutorRunner::new(
-                                runtime.as_ref(),
-                                PathBuf::from("target/debug/wazzi-executor-pb.wasm")
-                                    .canonicalize()
-                                    .unwrap(),
-                                store.path.clone(),
-                                Some(store.base.clone()),
-                            )
-                            .run(Arc::new(Mutex::new(stderr)))
-                            .unwrap();
-
-                            loop {
-                                let (resume_mu, resume_cond) = &*resume_pair;
-                                let resume_state = resume_mu.lock().unwrap();
-                                let resume_gen = resume_state.1;
-
-                                drop(
-                                    resume_cond
-                                        .wait_while(resume_state, |(resume, gen)| {
-                                            !*resume && *gen == resume_gen
-                                        })
+                                let stderr = fs::OpenOptions::new()
+                                    .write(true)
+                                    .create_new(true)
+                                    .open(store.path.join("stderr"))?;
+                                let executor = ExecutorRunner::new(
+                                    runtime.as_ref(),
+                                    PathBuf::from("target/debug/wazzi-executor-pb.wasm")
+                                        .canonicalize()
                                         .unwrap(),
-                                );
+                                    store.path.clone(),
+                                    Some(store.base.clone()),
+                                )
+                                .run(Arc::new(Mutex::new(stderr)))
+                                .unwrap();
 
-                                if cancel.load(atomic::Ordering::SeqCst) {
-                                    panic!("cancelled");
+                                loop {
+                                    let (resume_mu, resume_cond) = &*resume_pair;
+                                    let resume_state = resume_mu.lock().unwrap();
+                                    let resume_gen = resume_state.1;
+
+                                    drop(
+                                        resume_cond
+                                            .wait_while(resume_state, |(resume, gen)| {
+                                                !*resume && *gen == resume_gen
+                                            })
+                                            .unwrap(),
+                                    );
+
+                                    if cancel.load(atomic::Ordering::SeqCst) {
+                                        panic!("cancelled");
+                                    }
+
+                                    let (function, ok, _results) = env
+                                        .read()
+                                        .unwrap()
+                                        .call_arbitrary_function(
+                                            &mut u,
+                                            &mut ctx,
+                                            &executor,
+                                            store.trace_mut(),
+                                        )
+                                        .unwrap();
+                                    let function = function.clone();
+
+                                    let (pause_mu, pause_cond) = &*pause_pair;
+                                    let mut pause_state = pause_mu.lock().unwrap();
+                                    let pause_gen = pause_state.1;
+
+                                    pause_state.0 += 1;
+
+                                    if pause_state.0
+                                        == n_live_threads.load(atomic::Ordering::SeqCst)
+                                    {
+                                        resume_mu.lock().unwrap().0 = false;
+                                        pause_state.0 = 0;
+                                        pause_state.1 = pause_state.1.wrapping_add(1);
+                                        pause_cond.notify_all();
+
+                                        let result_resources = if ok {
+                                            function
+                                                .results
+                                                .iter()
+                                                .filter(|result| !result.ty.attributes.is_empty())
+                                                .map(|result| {
+                                                    (
+                                                        result.name.clone(),
+                                                        env.write().unwrap().new_resource(
+                                                            result
+                                                                .ty
+                                                                .name
+                                                                .as_ref()
+                                                                .unwrap()
+                                                                .to_string(),
+                                                            Resource {
+                                                                attributes: result
+                                                                    .ty
+                                                                    .attributes
+                                                                    .iter()
+                                                                    .map(|(name, ty)| {
+                                                                        (
+                                                                            name.clone(),
+                                                                            ty.wasi.zero_value(),
+                                                                        )
+                                                                    })
+                                                                    .collect(),
+                                                            },
+                                                        ),
+                                                    )
+                                                })
+                                                .collect::<HashMap<_, _>>()
+                                        } else {
+                                            HashMap::new()
+                                        };
+
+                                        tx.send((function, ok, result_resources)).unwrap();
+                                    }
+
+                                    drop(
+                                        pause_cond
+                                            .wait_while(pause_state, |(n, gen)| {
+                                                *n != n_live_threads.load(atomic::Ordering::SeqCst)
+                                                    && pause_gen == *gen
+                                            })
+                                            .unwrap(),
+                                    );
                                 }
-
-                                let (function, ok, results) = env.read().unwrap().call(
-                                    &mut u,
-                                    &mut ctx,
-                                    &executor,
-                                    store.trace_mut(),
-                                    "path_open",
-                                )?;
-                                let function = function.clone();
-
-                                let (pause_mu, pause_cond) = &*pause_pair;
-                                let mut pause_state = pause_mu.lock().unwrap();
-                                let pause_gen = pause_state.1;
-
-                                pause_state.0 += 1;
-
-                                if pause_state.0 == n_live_threads.load(atomic::Ordering::SeqCst) {
-                                    resume_mu.lock().unwrap().0 = false;
-                                    pause_state.0 = 0;
-                                    pause_state.1 = pause_state.1.wrapping_add(1);
-                                    pause_cond.notify_all();
-
-                                    let result_resources = function
-                                        .results
-                                        .iter()
-                                        .filter(|result| !result.ty.attributes.is_empty())
-                                        .map(|result| {
-                                            (
-                                                result.name.clone(),
-                                                env.write().unwrap().new_resource(
-                                                    result.ty.name.as_ref().unwrap().to_string(),
-                                                    Resource {
-                                                        attributes: result
-                                                            .ty
-                                                            .attributes
-                                                            .iter()
-                                                            .map(|(name, ty)| {
-                                                                (
-                                                                    name.clone(),
-                                                                    ty.arbitrary_value(&mut u)
-                                                                        .unwrap(),
-                                                                )
-                                                            })
-                                                            .collect(),
-                                                    },
-                                                ),
-                                            )
-                                        })
-                                        .collect::<HashMap<_, _>>();
-
-                                    tx.send((function, ok, result_resources)).unwrap();
-                                }
-
-                                drop(
-                                    pause_cond
-                                        .wait_while(pause_state, |(n, gen)| {
-                                            *n != n_live_threads.load(atomic::Ordering::SeqCst)
-                                                && pause_gen == *gen
-                                        })
-                                        .unwrap(),
-                                );
                             }
-                        }
-                    })
-                    .wrap_err(format!("failed to spawn {runtime_name}"))?;
+                        })
+                        .wrap_err(format!("failed to spawn {runtime_name}"))?,
+                );
             }
 
             thread::Builder::new()
@@ -355,7 +382,7 @@ impl<'s> Fuzzer<'s> {
                             resume_cond.notify_all();
                         }
 
-                        unreachable!();
+                        Ok(())
                     }
                 })
                 .wrap_err("failed to spawn differ thread")?;
