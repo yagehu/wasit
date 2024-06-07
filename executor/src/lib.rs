@@ -35,11 +35,14 @@ impl<'r> ExecutorRunner<'r> {
         }
     }
 
-    pub fn run<W>(&self, stderr_logger: Arc<Mutex<W>>) -> Result<RunningExecutor, eyre::Error>
+    pub fn run<W>(
+        &self,
+        stderr_logger: Arc<Mutex<W>>,
+    ) -> Result<(RunningExecutor, Option<Vec<u8>>), eyre::Error>
     where
         W: io::Write + Send + 'static,
     {
-        let mut child = self
+        let (mut child, prefix) = self
             .wasi_runner
             .run(
                 self.executor.clone(),
@@ -55,10 +58,9 @@ impl<'r> ExecutorRunner<'r> {
             io::copy(&mut stderr, stderr_logger.lock().unwrap().deref_mut()).unwrap()
         });
 
-        Ok(RunningExecutor::new(
-            child,
-            self.wasi_runner.base_dir_fd(),
-            stderr_copy_handle,
+        Ok((
+            RunningExecutor::new(child, self.wasi_runner.base_dir_fd(), stderr_copy_handle),
+            prefix,
         ))
     }
 }

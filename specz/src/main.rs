@@ -63,7 +63,6 @@ fn main() -> Result<(), eyre::Error> {
             ("wazero", Box::new(Wazero::new(Path::new("wazero")))),
         ],
     );
-
     let data = fs::read("data")?;
 
     fuzzer.fuzz(Some(data))?;
@@ -157,16 +156,11 @@ impl<'s> Fuzzer<'s> {
                             let n_live_threads = n_live_threads.clone();
 
                             move || -> Result<(), eyre::Error> {
-                                let mut ctx = Context::new();
-
-                                ctx.resources
-                                    .insert(resource_id, WasiValue::Handle(runtime.base_dir_fd()));
-
                                 let stderr = fs::OpenOptions::new()
                                     .write(true)
                                     .create_new(true)
                                     .open(store.path.join("stderr"))?;
-                                let executor = ExecutorRunner::new(
+                                let (executor, prefix) = ExecutorRunner::new(
                                     runtime.as_ref(),
                                     PathBuf::from("target/debug/wazzi-executor-pb.wasm")
                                         .canonicalize()
@@ -176,6 +170,12 @@ impl<'s> Fuzzer<'s> {
                                 )
                                 .run(Arc::new(Mutex::new(stderr)))
                                 .unwrap();
+                                let mut ctx = Context::new();
+
+                                ctx.resources.insert(
+                                    resource_id,
+                                    (WasiValue::Handle(runtime.base_dir_fd()), prefix),
+                                );
 
                                 loop {
                                     let (resume_mu, resume_cond) = &*resume_pair;
@@ -192,6 +192,10 @@ impl<'s> Fuzzer<'s> {
 
                                     if cancel.load(atomic::Ordering::SeqCst) {
                                         panic!("cancelled");
+                                    }
+
+                                    if u.is_empty() {
+                                        panic!("data exhausted");
                                     }
 
                                     let (function, ok, _results) = env

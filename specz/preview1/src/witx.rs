@@ -194,14 +194,14 @@ fn preview1_module(spec: &mut Spec, pairs: Pairs<'_, Rule>) -> Result<Interface,
                             input_contract = Some(term);
                         },
                         | Rule::annotation if annot_pair.as_str() == "@effects" => {
-                            let pair = pairs.next().unwrap();
-                            eprintln!("pair {}", pair.as_str());
-                            let pair = elang::Parser::parse(elang::Rule::stmt, pair.as_str())
-                                .wrap_err("failed to parse elang")?
-                                .next()
-                                .unwrap();
+                            for pair in pairs {
+                                let pair = elang::Parser::parse(elang::Rule::stmt, pair.as_str())
+                                    .wrap_err("failed to parse elang")?
+                                    .next()
+                                    .unwrap();
 
-                            effects.stmts.push(elang::to_stmt(pair)?);
+                                effects.stmts.push(elang::to_stmt(spec, pair)?);
+                            }
                         },
                         | _ => panic!("{:?}", annot_pair),
                     }

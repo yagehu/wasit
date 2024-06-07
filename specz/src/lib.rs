@@ -20,7 +20,6 @@ use wazzi_specz_wasi::{
 };
 use wazzi_store::TraceStore;
 use z3::ast::Ast;
-use z3_sys::{Z3_mk_atleast, Z3_mk_pbeq};
 
 use self::resource::Context;
 
@@ -144,6 +143,13 @@ impl Environment {
             }
         }
 
+        eprintln!(
+            "candidates {:?}",
+            candidates
+                .iter()
+                .map(|f| f.name.clone())
+                .collect::<Vec<_>>()
+        );
         let function = *u.choose(&candidates)?;
 
         self.call(u, ctx, executor, store, &function.name)
@@ -188,7 +194,7 @@ impl Environment {
             .results
             .iter()
             .map(|result| Value {
-                wasi:     result.ty.wasi.arbitrary_value(u).unwrap(),
+                wasi:     result.ty.wasi.arbitrary_value(u, None).unwrap(),
                 resource: if result.ty.attributes.is_empty() {
                     None
                 } else {
@@ -248,7 +254,7 @@ impl Environment {
         if ok {
             for result in results.iter() {
                 if let Some(id) = result.resource {
-                    ctx.resources.insert(id, result.wasi.clone());
+                    ctx.resources.insert(id, (result.wasi.clone(), None));
                 }
             }
         }
@@ -669,21 +675,31 @@ impl<'ctx, 'e, 'r> FunctionScope<'ctx, 'e, 'r> {
         }
 
         let mut params = Vec::with_capacity(self.function.params.len());
+        // This is necessary because some runtimes (notably Wasmer) map preopened direcotries to a
+        // virtual root and pass the fd of the root to the Wasm module.
+        let mut path_prefix = None;
 
         for param in self.function.params.iter() {
             match solved_params.get(&param.name) {
                 | Some(solved_param) => {
                     if !param.ty.attributes.is_empty() {
                         // Param is a resource.
-
                         let resource_idx = *resources
                             .get(param.ty.name.as_ref().unwrap())
                             .unwrap()
                             .get(solved_param)
                             .unwrap();
+                        let (resource_value, preopened) =
+                            self.ctx.resources.get(&resource_idx).unwrap();
+
+                        if let Some(preopened_name) = &preopened {
+                            if path_prefix.is_none() {
+                                path_prefix = Some(preopened_name.clone());
+                            }
+                        }
 
                         params.push(Value {
-                            wasi:     self.ctx.resources.get(&resource_idx).unwrap().clone(),
+                            wasi:     resource_value.clone(),
                             resource: Some(resource_idx),
                         });
                     } else {
@@ -763,10 +779,16 @@ impl<'ctx, 'e, 'r> FunctionScope<'ctx, 'e, 'r> {
                     }
                 },
                 | None => {
+                    let path_prefix = path_prefix.clone();
+                    let path_prefix = match &path_prefix {
+                        | Some(s) => Some(s.as_slice()),
+                        | None => None,
+                    };
+
                     let value = param
                         .ty
                         .wasi
-                        .arbitrary_value(u)
+                        .arbitrary_value(u, path_prefix)
                         .wrap_err("failed to generate arbitrary value")?;
 
                     params.push(Value {

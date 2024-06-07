@@ -8,6 +8,7 @@ stmt =
 
 expr =
  _{ s64_const
+  | variant_const
   }
 
 id = @{ "$" ~ (ASCII_ALPHANUMERIC | "." | "-" | "_")+ }
@@ -20,3 +21,10 @@ attr_set =
   }
 
 s64_const = { "(" ~ "@s64.const" ~ number ~ ")" }
+
+variant_const =
+  { "(" ~ "@variant.const"
+  ~ id
+  ~ id
+  ~ ")"
+  }

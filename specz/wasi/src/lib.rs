@@ -98,7 +98,11 @@ impl WasiType {
         }
     }
 
-    pub fn arbitrary_value(&self, u: &mut Unstructured) -> Result<WasiValue, arbitrary::Error> {
+    pub fn arbitrary_value(
+        &self,
+        u: &mut Unstructured,
+        string_prefix: Option<&[u8]>,
+    ) -> Result<WasiValue, arbitrary::Error> {
         Ok(match self {
             | WasiType::S64 => WasiValue::S64(u.arbitrary()?),
             | WasiType::U8 => todo!(),
@@ -124,12 +128,27 @@ impl WasiType {
                         .unwrap()
                         .payload
                         .as_ref()
-                        .map(|t| t.wasi.arbitrary_value(u))
+                        .map(|t| t.wasi.arbitrary_value(u, string_prefix))
                         .transpose()?,
                 }))
             },
             | WasiType::Record(_) => todo!(),
-            | WasiType::String => WasiValue::String(u.arbitrary()?),
+            | WasiType::String => {
+                let s: Vec<u8> = u.arbitrary()?;
+                let mut string_prefix = string_prefix.unwrap_or_default().to_vec();
+
+                if s.starts_with(&[47u8]) {
+                    WasiValue::String(s)
+                } else {
+                    if !string_prefix.is_empty() {
+                        string_prefix.push(b'/');
+                    }
+
+                    string_prefix.extend_from_slice(&s);
+
+                    WasiValue::String(string_prefix)
+                }
+            },
             | WasiType::List(_) => todo!(),
         })
     }

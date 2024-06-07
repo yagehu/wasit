@@ -16,20 +16,20 @@ pub trait WasiRunner: fmt::Debug + Send + Sync {
         wasm_path: PathBuf,
         working_dir: &Path,
         base_dir: Option<PathBuf>,
-    ) -> process::Command;
+    ) -> (process::Command, Option<Vec<u8>>);
 
     fn run(
         &self,
         wasm_path: PathBuf,
         working_dir: &Path,
         base_dir: Option<PathBuf>,
-    ) -> Result<process::Child, eyre::Error> {
-        let mut command = self.prepare_command(wasm_path, working_dir, base_dir);
+    ) -> Result<(process::Child, Option<Vec<u8>>), eyre::Error> {
+        let (mut command, prefix) = self.prepare_command(wasm_path, working_dir, base_dir);
         let child = command
             .spawn()
             .wrap_err(format!("failed to spawn command {:?}", command))?;
 
-        Ok(child)
+        Ok((child, prefix))
     }
 }
 
@@ -54,7 +54,7 @@ impl WasiRunner for Node<'_> {
         wasm_path: PathBuf,
         working_dir: &Path,
         base_dir: Option<PathBuf>,
-    ) -> process::Command {
+    ) -> (process::Command, Option<Vec<u8>>) {
         static GLUE_TMPL: &str = include_str!("run.js.tera.tmpl");
 
         let mut tmpl_ctx = tera::Context::new();
@@ -78,7 +78,7 @@ impl WasiRunner for Node<'_> {
         command.stderr(process::Stdio::piped());
         command.current_dir(working_dir);
 
-        command
+        (command, None)
     }
 }
 
@@ -110,7 +110,7 @@ impl WasiRunner for Wasmedge<'_> {
         wasm_path: PathBuf,
         working_dir: &Path,
         base_dir: Option<PathBuf>,
-    ) -> process::Command {
+    ) -> (process::Command, Option<Vec<u8>>) {
         let mut command = process::Command::new(self.path);
         let mut args = vec![OsString::from("run")];
 
@@ -123,7 +123,7 @@ impl WasiRunner for Wasmedge<'_> {
         command.stderr(process::Stdio::piped());
         command.current_dir(working_dir);
 
-        command
+        (command, None)
     }
 }
 
@@ -139,7 +139,7 @@ impl<'p> Wasmer<'p> {
 
     fn mount_base_dir(&self, dir: Option<PathBuf>) -> Vec<OsString> {
         match dir {
-            | Some(dir) => vec!["--mapdir".into(), format!(".:{}", dir.display()).into()],
+            | Some(dir) => vec!["--mapdir".into(), format!("/base:{}", dir.display()).into()],
             | None => Vec::new(),
         }
     }
@@ -155,11 +155,11 @@ impl WasiRunner for Wasmer<'_> {
         wasm_path: PathBuf,
         working_dir: &Path,
         base_dir: Option<PathBuf>,
-    ) -> process::Command {
+    ) -> (process::Command, Option<Vec<u8>>) {
         let mut command = process::Command::new(self.path);
         let mut args = vec![OsString::from("run")];
 
-        args.extend(self.mount_base_dir(base_dir));
+        args.extend(self.mount_base_dir(base_dir.clone()));
         args.push(wasm_path.into());
 
         command.args(args);
@@ -168,7 +168,9 @@ impl WasiRunner for Wasmer<'_> {
         command.stderr(process::Stdio::piped());
         command.current_dir(working_dir);
 
-        command
+        use std::os::unix::ffi::OsStrExt;
+
+        (command, base_dir.map(|_p| "base".as_bytes().to_vec()))
     }
 }
 
@@ -200,7 +202,7 @@ impl WasiRunner for Wasmtime<'_> {
         wasm_path: PathBuf,
         working_dir: &Path,
         base_dir: Option<PathBuf>,
-    ) -> process::Command {
+    ) -> (process::Command, Option<Vec<u8>>) {
         let mut command = process::Command::new(self.path);
         let mut args = vec![OsString::from("run")];
 
@@ -213,7 +215,7 @@ impl WasiRunner for Wasmtime<'_> {
         command.stderr(process::Stdio::piped());
         command.current_dir(working_dir);
 
-        command
+        (command, None)
     }
 }
 
@@ -245,7 +247,7 @@ impl WasiRunner for Wamr<'_> {
         wasm_path: PathBuf,
         working_dir: &Path,
         base_dir: Option<PathBuf>,
-    ) -> process::Command {
+    ) -> (process::Command, Option<Vec<u8>>) {
         let mut command = process::Command::new(self.path);
         let mut args = vec![];
 
@@ -258,7 +260,7 @@ impl WasiRunner for Wamr<'_> {
         command.stderr(process::Stdio::piped());
         command.current_dir(working_dir);
 
-        command
+        (command, None)
     }
 }
 
@@ -290,7 +292,7 @@ impl WasiRunner for Wazero<'_> {
         wasm_path: PathBuf,
         working_dir: &Path,
         base_dir: Option<PathBuf>,
-    ) -> process::Command {
+    ) -> (process::Command, Option<Vec<u8>>) {
         let mut command = process::Command::new(self.path);
 
         command.arg("run");
@@ -301,6 +303,6 @@ impl WasiRunner for Wazero<'_> {
         command.stderr(process::Stdio::piped());
         command.current_dir(working_dir);
 
-        command
+        (command, None)
     }
 }

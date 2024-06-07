@@ -876,12 +876,20 @@
               (param $whence)
               (@variant.const $whence $set)
             )
+            (@int.le 0 (param $offset))
             (@int.le (param $offset) 17592186040320)
           )
           (@and
             (@value.eq
               (param $whence)
               (@variant.const $whence $cur)
+            )
+            (@int.le
+              0
+              (@int.add
+                (param $offset)
+                (@attr.get (param $fd) $offset)
+              )
             )
             (@int.le
               (@int.add
