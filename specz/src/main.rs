@@ -15,6 +15,7 @@ use std::{
 };
 
 use arbitrary::Unstructured;
+use clap::Parser;
 use eyre::{eyre as err, Context as _};
 use itertools::{EitherOrBoth, Itertools as _};
 use rand::{thread_rng, RngCore};
@@ -27,6 +28,12 @@ use wazzi_runners::{Node, Wamr, WasiRunner, Wasmedge, Wasmer, Wasmtime, Wazero};
 use wazzi_specz::{resource::Context, Call, Environment, Resource};
 use wazzi_specz_wasi::WasiValue;
 use wazzi_store::FuzzStore;
+
+#[derive(Parser, Debug)]
+struct Cmd {
+    #[arg(long)]
+    data: Option<PathBuf>,
+}
 
 fn main() -> Result<(), eyre::Error> {
     color_eyre::install()?;
@@ -48,6 +55,8 @@ fn main() -> Result<(), eyre::Error> {
     )
     .wrap_err("failed to configure tracing")?;
 
+    let cmd = Cmd::parse();
+
     let mut store = FuzzStore::new(Path::new("abc")).wrap_err("failed to init fuzz store")?;
     let mut fuzzer = Fuzzer::new(
         &mut store,
@@ -63,9 +72,14 @@ fn main() -> Result<(), eyre::Error> {
             ("wazero", Box::new(Wazero::new(Path::new("wazero")))),
         ],
     );
-    let data = fs::read("data")?;
+    let data = cmd
+        .data
+        .as_ref()
+        .map(|path| fs::read(path))
+        .transpose()
+        .wrap_err("failed to read data")?;
 
-    fuzzer.fuzz(Some(data))?;
+    fuzzer.fuzz(data)?;
 
     Ok(())
 }

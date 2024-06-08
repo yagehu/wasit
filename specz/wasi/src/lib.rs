@@ -134,7 +134,7 @@ impl WasiType {
             },
             | WasiType::Record(_) => todo!(),
             | WasiType::String => {
-                let s: Vec<u8> = u.arbitrary()?;
+                let s: Vec<u8> = u.arbitrary::<String>()?.as_bytes().to_vec();
                 let mut string_prefix = string_prefix.unwrap_or_default().to_vec();
 
                 if s.starts_with(&[47u8]) {
