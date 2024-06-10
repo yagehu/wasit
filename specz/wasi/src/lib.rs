@@ -105,9 +105,9 @@ impl WasiType {
     ) -> Result<WasiValue, arbitrary::Error> {
         Ok(match self {
             | WasiType::S64 => WasiValue::S64(u.arbitrary()?),
-            | WasiType::U8 => todo!(),
+            | WasiType::U8 => WasiValue::U8(u.arbitrary()?),
             | WasiType::U16 => todo!(),
-            | WasiType::U32 => todo!(),
+            | WasiType::U32 => WasiValue::U32(u.arbitrary()?),
             | WasiType::U64 => WasiValue::U64(u.arbitrary()?),
             | WasiType::Handle => WasiValue::Handle(u.arbitrary()?),
             | WasiType::Flags(flags) => WasiValue::Flags(FlagsValue {
@@ -132,7 +132,13 @@ impl WasiType {
                         .transpose()?,
                 }))
             },
-            | WasiType::Record(_) => todo!(),
+            | WasiType::Record(record) => WasiValue::Record(RecordValue {
+                members: record
+                    .members
+                    .iter()
+                    .map(|member| member.ty.wasi.arbitrary_value(u, string_prefix))
+                    .collect::<Result<Vec<_>, _>>()?,
+            }),
             | WasiType::String => {
                 let s: Vec<u8> = u.arbitrary::<String>()?.as_bytes().to_vec();
                 let mut string_prefix = string_prefix.unwrap_or_default().to_vec();
@@ -149,7 +155,16 @@ impl WasiType {
                     WasiValue::String(string_prefix)
                 }
             },
-            | WasiType::List(_) => todo!(),
+            | WasiType::List(list) => {
+                let len = u.choose_index(4)?;
+                let mut items = Vec::with_capacity(len);
+
+                for _i in 0..len {
+                    items.push(list.item.wasi.arbitrary_value(u, string_prefix)?);
+                }
+
+                WasiValue::List(ListValue { items })
+            },
         })
     }
 
@@ -332,12 +347,32 @@ impl RecordType {
             .max()
             .unwrap_or(1)
     }
+
+    pub fn member_layout(&self) -> Vec<RecordMemberLayout> {
+        let mut offset: u32 = 0;
+        let mut layout = Vec::with_capacity(self.members.len());
+
+        for member in &self.members {
+            let alignment = member.ty.wasi.alignment();
+
+            offset = offset.div_ceil(alignment) * alignment;
+            layout.push(RecordMemberLayout { offset });
+            offset += member.ty.wasi.mem_size();
+        }
+
+        layout
+    }
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct RecordMemberType {
     pub name: String,
     pub ty:   WazziType,
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct RecordMemberLayout {
+    pub offset: u32,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]

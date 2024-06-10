@@ -254,6 +254,7 @@ impl WasiRunner for Wamr<'_> {
         args.extend(self.mount_base_dir(base_dir));
         args.push(wasm_path.into());
 
+        command.arg("--stack-size=1000000");
         command.args(args);
         command.stdin(process::Stdio::piped());
         command.stdout(process::Stdio::piped());

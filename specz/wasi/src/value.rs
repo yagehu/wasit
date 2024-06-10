@@ -6,8 +6,12 @@ use crate::WasiType;
 pub enum WasiValue {
     Handle(u32),
     S64(i64),
+    U8(u8),
+    U32(u32),
     U64(u64),
+    Record(RecordValue),
     Flags(FlagsValue),
+    List(ListValue),
     String(Vec<u8>),
     Variant(Box<VariantValue>),
 }
@@ -22,12 +26,45 @@ impl WasiValue {
                     special_fields: Default::default(),
                 },
             ),
+            | (_, Self::U8(i)) => wazzi_executor_pb_rust::value::Which::Builtin(
+                wazzi_executor_pb_rust::value::Builtin {
+                    which:          Some(wazzi_executor_pb_rust::value::builtin::Which::U8(i.into())),
+                    special_fields: Default::default(),
+                },
+            ),
+            | (_, Self::U32(i)) => wazzi_executor_pb_rust::value::Which::Builtin(
+                wazzi_executor_pb_rust::value::Builtin {
+                    which:          Some(wazzi_executor_pb_rust::value::builtin::Which::U32(i)),
+                    special_fields: Default::default(),
+                },
+            ),
             | (_, Self::U64(i)) => wazzi_executor_pb_rust::value::Which::Builtin(
                 wazzi_executor_pb_rust::value::Builtin {
                     which:          Some(wazzi_executor_pb_rust::value::builtin::Which::U64(i)),
                     special_fields: Default::default(),
                 },
             ),
+            | (WasiType::Record(record_type), Self::Record(record)) => {
+                wazzi_executor_pb_rust::value::Which::Record(wazzi_executor_pb_rust::value::Record {
+                    members: record
+                        .members
+                        .into_iter()
+                        .zip(record_type.members.iter())
+                        .zip(record_type.member_layout())
+                        .map(|((value, member), member_layout)| {
+                            wazzi_executor_pb_rust::value::record::Member {
+                                name: member.name.clone(),
+                                value: Some(value.into_pb(&member.ty.wasi)).into(),
+                                offset: member_layout.offset,
+                                special_fields: Default::default(),
+                            }
+                        })
+                        .collect(),
+                    size: record_type.mem_size(),
+                    special_fields: Default::default(),
+                })
+
+            },
             | (WasiType::Flags(flags_type), Self::Flags(flags)) => {
                 wazzi_executor_pb_rust::value::Which::Bitflags(
                     wazzi_executor_pb_rust::value::Bitflags {
@@ -48,6 +85,13 @@ impl WasiValue {
                         special_fields: Default::default(),
                     },
                 )
+            },
+            | (WasiType::List(list_type), Self::List(list)) => {
+                let items = list.items.into_iter().map(|item| {
+                    item.into_pb(&list_type.item.wasi)
+                }).collect();
+
+                wazzi_executor_pb_rust::value::Which::Array(wazzi_executor_pb_rust::value::Array { items, item_size: list_type.item.wasi.mem_size(), special_fields: Default::default() })
             },
             | (_, Self::String(string)) => wazzi_executor_pb_rust::value::Which::String(string),
             | (WasiType::Variant(variant_type), Self::Variant(variant)) => {
@@ -72,7 +116,7 @@ impl WasiValue {
                     },
                 ))
             },
-            | (_, Self::Flags(_)) | (_, Self::Variant(_)) => unreachable!(),
+            | (_, Self::Record(_)) | (_, Self::Flags(_)) | (_, Self::List(_)) | (_, Self::Variant(_)) => unreachable!(),
         };
 
         wazzi_executor_pb_rust::Value {
@@ -88,7 +132,7 @@ impl WasiValue {
                 match builtin.which.unwrap() {
                     | wazzi_executor_pb_rust::value::builtin::Which::Char(_) => todo!(),
                     | wazzi_executor_pb_rust::value::builtin::Which::U8(_) => todo!(),
-                    | wazzi_executor_pb_rust::value::builtin::Which::U32(_) => todo!(),
+                    | wazzi_executor_pb_rust::value::builtin::Which::U32(i) => Self::U32(i),
                     | wazzi_executor_pb_rust::value::builtin::Which::U64(i) => Self::U64(i),
                     | wazzi_executor_pb_rust::value::builtin::Which::S64(i) => Self::S64(i),
                     | _ => todo!(),
@@ -135,8 +179,18 @@ impl WasiValue {
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
+pub struct RecordValue {
+    pub members: Vec<WasiValue>,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 pub struct FlagsValue {
     pub fields: Vec<bool>,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
+pub struct ListValue {
+    pub items: Vec<WasiValue>,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]

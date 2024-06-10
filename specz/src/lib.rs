@@ -502,9 +502,16 @@ impl<'ctx, 'e, 'r> FunctionScope<'ctx, 'e, 'r> {
                                 | &WasiValue::S64(i) => {
                                     ctor.apply(&[&z3::ast::Int::from_i64(z3_ctx, i)])
                                 },
+                                | &WasiValue::U8(i) => {
+                                    ctor.apply(&[&z3::ast::Int::from_u64(z3_ctx, i.into())])
+                                },
+                                | &WasiValue::U32(i) => {
+                                    ctor.apply(&[&z3::ast::Int::from_u64(z3_ctx, i.into())])
+                                },
                                 | &WasiValue::U64(i) => {
                                     ctor.apply(&[&z3::ast::Int::from_u64(z3_ctx, i)])
                                 },
+                                | WasiValue::Record(record) => todo!(),
                                 | WasiValue::Flags(flags) => {
                                     let fields = flags
                                         .fields
@@ -518,6 +525,7 @@ impl<'ctx, 'e, 'r> FunctionScope<'ctx, 'e, 'r> {
 
                                     ctor.apply(fields.as_slice())
                                 },
+                                | WasiValue::List(list) => todo!(),
                                 | WasiValue::String(_) => todo!(),
                                 | WasiValue::Variant(variant) => {
                                     let ctor = &attr_datatype
