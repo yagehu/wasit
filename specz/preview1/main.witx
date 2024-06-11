@@ -854,6 +854,24 @@
     )
   )
 
+  ;;; Read from a file descriptor.
+  ;;; Note: This is similar to `readv` in POSIX.
+  (@interface func (export "fd_read")
+    (param $fd $fd)
+    ;;; List of scatter/gather vectors to which to store data.
+    (param $iovs $iovec_array)
+    ;;; The number of bytes read.
+    (result $error (expected $size (error $errno)))
+    (@input
+      (@and
+        (@value.eq
+          (@attr.get (param $fd) $type)
+          (@variant.const $filetype $regular_file)
+        )
+      )
+    )
+  )
+
   ;;; Move the offset of a file descriptor.
   ;;; Note: This is similar to `lseek` in POSIX.
   (@interface func (export "fd_seek")
