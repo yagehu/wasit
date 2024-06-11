@@ -28,10 +28,14 @@ static uint64_t u64_from_bytes(const uint8_t m[8]) {
 }
 
 static void u64_to_bytes(uint8_t buf[8], uint64_t i) {
-    buf[7] = i >> 56;
-    buf[6] = i >> 48;
-    buf[5] = i >> 40;
-    buf[4] = i >> 32;
+    //buf[7] = i >> 56;
+    //buf[6] = i >> 48;
+    //buf[5] = i >> 40;
+    //buf[4] = i >> 32;
+    buf[7] = 0;
+    buf[6] = 0;
+    buf[5] = 0;
+    buf[4] = 0;
     buf[3] = i >> 24;
     buf[2] = i >> 16;
     buf[1] = i >> 8;

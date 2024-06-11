@@ -1859,6 +1859,7 @@ version = "0.1.0"
 dependencies = [
  "eyre",
  "protobuf",
+ "tracing",
  "wazzi-executor-pb-c",
  "wazzi-executor-pb-rust",
  "wazzi-executor-protobuf-c-wasm",

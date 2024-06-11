@@ -446,7 +446,7 @@ impl<'ctx, 'e, 'r> FunctionScope<'ctx, 'e, 'r> {
                 datatypes.insert(name.clone(), datatype.finish());
             },
             | _ => {
-                tracing::warn!("Ignoring type {}", name);
+                tracing::trace!("Ignoring type {}", name);
             },
         }
     }

@@ -10,6 +10,7 @@ wazzi-runners.workspace = true
 
 eyre.workspace = true
 protobuf.workspace = true
+tracing.workspace = true
 
 [build-dependencies]
 wazzi-executor-pb-c.workspace = true
