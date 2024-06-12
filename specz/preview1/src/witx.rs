@@ -7,7 +7,6 @@ use pest::{
     Parser as _,
 };
 use pest_derive::Parser;
-use std::collections::HashMap;
 
 use wazzi_specz_wasi::{
     effects,
@@ -167,10 +166,12 @@ fn preview1_module(spec: &mut Spec, pairs: Pairs<'_, Rule>) -> Result<Interface,
                                 {
                                     r#return = Some(());
 
-                                    results.push(FunctionResult {
-                                        name: "expected".to_owned(),
-                                        ty:   c1.payload.as_ref().unwrap().clone(),
-                                    });
+                                    if let Some(payload) = c1.payload.as_ref() {
+                                        results.push(FunctionResult {
+                                            name: "expected".to_owned(),
+                                            ty:   payload.clone(),
+                                        });
+                                    }
                                 },
                                 | _ => results.push(FunctionResult { name, ty }),
                             }
@@ -340,16 +341,23 @@ fn preview1_type(
             })
         },
         | Rule::expected => {
-            let mut pairs = pair.into_inner();
-            let expected_pair = pairs.next().unwrap();
-            let error_pair = pairs.next().unwrap();
+            let mut pairs = pair.into_inner().collect::<Vec<_>>();
+            let mut expected_pair = None;
+            let error_pair;
+
+            if pairs.len() >= 2 {
+                error_pair = pairs.remove(1);
+                expected_pair = Some(pairs.remove(0));
+            } else {
+                error_pair = pairs.remove(0);
+            }
 
             WasiType::Variant(VariantType {
                 tag_repr: IntRepr::U8,
                 cases:    vec![
                     VariantCaseType {
                         name:    "expected".to_owned(),
-                        payload: Some(preview1_tref(spec, expected_pair)?),
+                        payload: expected_pair.map(|p| preview1_tref(spec, p)).transpose()?,
                     },
                     VariantCaseType {
                         name:    "error".to_owned(),

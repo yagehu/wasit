@@ -69,7 +69,7 @@ record =
   }
 
 expected =
-  { "(" ~ "expected" ~ type_ref
+  { "(" ~ "expected" ~ type_ref?
   ~ "(" ~ "error" ~ type_ref ~ ")"
   ~ ")"
   }

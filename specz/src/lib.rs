@@ -556,8 +556,6 @@ impl<'ctx, 'e, 'r> FunctionScope<'ctx, 'e, 'r> {
 
                         value_resource_id_map.insert(value, id);
 
-                        //subclauses.push(z3::ast::Dynamic::from_ast(&x)._eq(&resource_const));
-
                         z3::ast::Bool::and(z3_ctx, subclauses.iter().collect::<Vec<_>>().as_slice())
                     })
                     .collect::<Vec<_>>();
@@ -565,7 +563,7 @@ impl<'ctx, 'e, 'r> FunctionScope<'ctx, 'e, 'r> {
                 solver.assert(&z3::ast::Bool::or(z3_ctx, &clauses));
                 variables.insert(type_name, x);
             } else {
-                let type_name = param.ty.name.as_ref().unwrap();
+                let type_name = param.ty.name.as_ref().expect(&format!("{:#?}", param.ty));
                 let datatype = datatypes.get(type_name).expect(type_name);
                 let x = z3::ast::Datatype::new_const(
                     z3_ctx,

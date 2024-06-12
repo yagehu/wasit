@@ -137,7 +137,7 @@ impl<'s> Fuzzer<'s> {
         let data = match data {
             | Some(d) => d,
             | None => {
-                let mut data = vec![0u8; 65536];
+                let mut data = vec![0u8; 131072];
 
                 thread_rng().fill_bytes(&mut data);
 

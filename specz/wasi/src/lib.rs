@@ -3,11 +3,37 @@ pub mod term;
 
 mod value;
 
-use arbitrary::Unstructured;
+use arbitrary::{Arbitrary, Unstructured};
 pub use term::Term;
 pub use value::*;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+
+#[derive(Clone, Debug)]
+pub struct RestrictedString(Vec<u8>);
+
+impl RestrictedString {
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl<'a> Arbitrary<'a> for RestrictedString {
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        let len = u.choose_index(32)? + 1;
+        let mut bytes = Vec::with_capacity(len);
+
+        for _ in 0..len {
+            bytes.push(*u.choose(&[b'.', b'/', b'a'])?);
+        }
+
+        Ok(Self(bytes))
+    }
+}
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Spec {
@@ -140,7 +166,20 @@ impl WasiType {
                     .collect::<Result<Vec<_>, _>>()?,
             }),
             | WasiType::String => {
-                let s: Vec<u8> = u.arbitrary::<String>()?.as_bytes().to_vec();
+                let s: Vec<u8> = loop {
+                    let s = u.arbitrary::<RestrictedString>()?;
+
+                    if !s.is_empty() {
+                        break s;
+                    }
+
+                    if u.is_empty() {
+                        panic!("data exhausted");
+                    }
+                }
+                .as_bytes()
+                .to_vec();
+
                 let mut string_prefix = string_prefix.unwrap_or_default().to_vec();
 
                 if s.starts_with(&[47u8]) {
