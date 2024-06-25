@@ -1,10 +1,11 @@
 pub mod function_picker;
+pub mod param_generator;
 pub mod resource;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use self::resource::Context;
-use crate::function_picker::FunctionPicker;
+use crate::{function_picker::FunctionPicker, param_generator::ParamsGenerator};
 use arbitrary::Unstructured;
 use eyre::{eyre as err, Context as _, ContextCompat};
 use serde::{Deserialize, Serialize};
@@ -111,34 +112,10 @@ impl Environment {
         ctx: &mut Context,
         executor: &RunningExecutor,
         store: &mut TraceStore<Call>,
-        function_name: &str,
+        function: &Function,
+        params_generator: &dyn ParamsGenerator,
     ) -> Result<(bool, Vec<Value>), eyre::Error> {
-        let interface = self
-            .spec
-            .interfaces
-            .get(
-                *self
-                    .spec
-                    .interfaces_map
-                    .get("wasi_snapshot_preview1")
-                    .unwrap(),
-            )
-            .unwrap();
-        let function = interface.functions.get(function_name).unwrap();
-        let z3_cfg = z3::Config::new();
-        let random_seed: u32 = u.arbitrary()?;
-        let z3_ctx = z3::Context::new(&z3_cfg);
-        let solver = z3::Solver::new(&z3_ctx);
-        let mut solver_params = z3::Params::new(&z3_ctx);
-
-        solver_params.set_bool("randomize", false);
-        solver_params.set_u32("smt.random_seed", random_seed);
-        solver.set_params(&solver_params);
-
-        let function_scope = FunctionScope::new(&z3_ctx, solver, self, ctx, function);
-        let params = function_scope
-            .solve_input_contract(&z3_ctx, u)?
-            .wrap_err("no solution found")?;
+        let params = params_generator.generate_params(u, self, ctx, function)?;
         let mut next_resource_id = self.resources.len();
         let results = function
             .results
@@ -158,7 +135,7 @@ impl Environment {
             .collect::<Vec<_>>();
 
         store.begin_call(&Call {
-            function: function_name.to_string(),
+            function: function.name.to_string(),
             errno:    None,
             params:   params.clone(),
             results:  results.clone(),
@@ -166,7 +143,7 @@ impl Environment {
 
         let response = executor
             .call(wazzi_executor_pb_rust::request::Call {
-                func:           WasiFunc::try_from(function_name)
+                func:           WasiFunc::try_from(function.name.as_str())
                     .map_err(|_| err!("unknown wasi function name"))?
                     .into(),
                 params:         function
@@ -210,7 +187,7 @@ impl Environment {
         }
 
         store.end_call(&Call {
-            function: function_name.to_string(),
+            function: function.name.to_string(),
             // TODO(huyage)
             errno: match response.errno_option.as_ref().unwrap() {
                 | &wazzi_executor_pb_rust::response::call::Errno_option::ErrnoSome(i) => Some(i),
@@ -564,11 +541,9 @@ impl<'ctx, 'e, 'r> FunctionScope<'ctx, 'e, 'r> {
             let model = self.solver.get_model().unwrap();
             let mut clauses = Vec::new();
 
-            for (name, var) in &self.variables {
+            for (_name, var) in &self.variables {
                 if let Some(v) = model.get_const_interp(&var.simplify()) {
-                    //if name != "fd" {
                     clauses.push(var._eq(&v).not());
-                    //}
                 }
             }
 

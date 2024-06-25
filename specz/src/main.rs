@@ -1,9 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
-    fmt,
     fs,
     io,
-    ops::Deref,
     path::{Path, PathBuf},
     sync::{
         atomic::{self, AtomicBool, AtomicUsize},
@@ -18,7 +16,7 @@ use std::{
 
 use arbitrary::Unstructured;
 use clap::Parser;
-use eyre::{eyre as err, Context as _};
+use eyre::{eyre as err, Context as _, Report};
 use itertools::{EitherOrBoth, Itertools as _};
 use rand::{thread_rng, RngCore};
 use tracing::level_filters::LevelFilter;
@@ -29,10 +27,12 @@ use wazzi_executor::ExecutorRunner;
 use wazzi_runners::{Node, Wamr, WasiRunner, Wasmedge, Wasmer, Wasmtime, Wazero};
 use wazzi_specz::{
     function_picker::{resource::ResourcePicker, solver::SolverPicker, FunctionPicker},
+    param_generator::{solver::SolverParamsGenerator, ParamsGenerator},
     resource::Context,
     Call,
     Environment,
     Resource,
+    Value,
 };
 use wazzi_specz_wasi::{Spec, WasiValue};
 use wazzi_store::FuzzStore;
@@ -42,8 +42,11 @@ struct Cmd {
     #[arg(long)]
     data: Option<PathBuf>,
 
-    #[arg(long, value_enum, default_value_t = FunctionPickerType::Solver)]
+    #[arg(long, value_enum, default_value_t = FunctionPickerType::Stateful)]
     function_picker: FunctionPickerType,
+
+    #[arg(long, value_enum, default_value_t = ParamsGeneratorType::Stateful)]
+    params_generator: ParamsGeneratorType,
 
     #[arg(long)]
     max_epochs: Option<usize>,
@@ -51,15 +54,30 @@ struct Cmd {
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
 enum FunctionPickerType {
-    Resource,
-    Solver,
+    Stateless,
+    Stateful,
 }
 
 impl From<FunctionPickerType> for Arc<dyn FunctionPicker + Send + Sync> {
     fn from(value: FunctionPickerType) -> Self {
         match value {
-            | FunctionPickerType::Resource => Arc::new(ResourcePicker),
-            | FunctionPickerType::Solver => Arc::new(SolverPicker),
+            | FunctionPickerType::Stateless => Arc::new(ResourcePicker),
+            | FunctionPickerType::Stateful => Arc::new(SolverPicker),
+        }
+    }
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+enum ParamsGeneratorType {
+    Stateless,
+    Stateful,
+}
+
+impl From<ParamsGeneratorType> for Arc<dyn ParamsGenerator + Send + Sync> {
+    fn from(value: ParamsGeneratorType) -> Self {
+        match value {
+            | ParamsGeneratorType::Stateless => todo!(),
+            | ParamsGeneratorType::Stateful => Arc::new(SolverParamsGenerator),
         }
     }
 }
@@ -92,6 +110,7 @@ fn main() -> Result<(), eyre::Error> {
     let mut store = FuzzStore::new(Path::new("abc")).wrap_err("failed to init fuzz store")?;
     let mut fuzzer = Fuzzer::new(
         cmd.function_picker.into(),
+        cmd.params_generator.into(),
         &mut store,
         [
             (
@@ -119,19 +138,22 @@ fn main() -> Result<(), eyre::Error> {
 
 #[derive(Debug)]
 struct Fuzzer<'s> {
-    function_picker: Arc<dyn FunctionPicker + Send + Sync>,
-    store:           &'s mut FuzzStore,
-    runtimes:        Vec<(&'static str, Box<dyn WasiRunner>)>,
+    function_picker:  Arc<dyn FunctionPicker + Send + Sync>,
+    params_generator: Arc<dyn ParamsGenerator + Send + Sync>,
+    store:            &'s mut FuzzStore,
+    runtimes:         Vec<(&'static str, Box<dyn WasiRunner>)>,
 }
 
 impl<'s> Fuzzer<'s> {
     pub fn new(
         function_picker: Arc<dyn FunctionPicker + Send + Sync>,
+        params_generator: Arc<dyn ParamsGenerator + Send + Sync>,
         store: &'s mut FuzzStore,
         runtimes: impl IntoIterator<Item = (&'static str, Box<dyn WasiRunner>)>,
     ) -> Self {
         Self {
             function_picker,
+            params_generator,
             store,
             runtimes: runtimes.into_iter().collect(),
         }
@@ -249,6 +271,7 @@ impl<'s> Fuzzer<'s> {
                                 .get(*spec.interfaces_map.get("wasi_snapshot_preview1").unwrap())
                                 .unwrap();
                             let function_picker = self.function_picker.clone();
+                            let params_generator = self.params_generator.clone();
 
                             move || -> Result<(), FuzzError> {
                                 let stderr = fs::OpenOptions::new()
@@ -310,17 +333,26 @@ impl<'s> Fuzzer<'s> {
                                     );
                                     iteration += 1;
 
-                                    let (ok, _results) = env
-                                        .read()
-                                        .unwrap()
-                                        .call(
-                                            &mut u,
-                                            &mut ctx,
-                                            &executor,
-                                            store.trace_mut(),
-                                            &function.name,
-                                        )
-                                        .unwrap();
+                                    let (ok, _results) = match env.read().unwrap().call(
+                                        &mut u,
+                                        &mut ctx,
+                                        &executor,
+                                        store.trace_mut(),
+                                        function,
+                                        &*params_generator,
+                                    ) {
+                                        | Ok(x) => x,
+                                        | Err(err) => {
+                                            let (pause_mu, pause_cond) = &*pause_pair;
+                                            let mut pause_state = pause_mu.lock().unwrap();
+
+                                            pause_state.0 += 1;
+                                            drop(pause_state);
+                                            cancel.store(true, atomic::Ordering::SeqCst);
+
+                                            return Err(FuzzError::Unknown(err));
+                                        },
+                                    };
                                     let function = function.clone();
 
                                     let (pause_mu, pause_cond) = &*pause_pair;
