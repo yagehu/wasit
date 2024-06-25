@@ -1,7 +1,9 @@
 use std::{
     collections::{HashMap, HashSet},
+    fmt,
     fs,
     io,
+    ops::Deref,
     path::{Path, PathBuf},
     sync::{
         atomic::{self, AtomicBool, AtomicUsize},
@@ -25,14 +27,41 @@ use tracing_subscriber::{layer::SubscriberExt as _, EnvFilter};
 use walkdir::WalkDir;
 use wazzi_executor::ExecutorRunner;
 use wazzi_runners::{Node, Wamr, WasiRunner, Wasmedge, Wasmer, Wasmtime, Wazero};
-use wazzi_specz::{resource::Context, Call, Environment, Resource};
-use wazzi_specz_wasi::WasiValue;
+use wazzi_specz::{
+    function_picker::{resource::ResourcePicker, solver::SolverPicker, FunctionPicker},
+    resource::Context,
+    Call,
+    Environment,
+    Resource,
+};
+use wazzi_specz_wasi::{Spec, WasiValue};
 use wazzi_store::FuzzStore;
 
 #[derive(Parser, Debug)]
 struct Cmd {
     #[arg(long)]
     data: Option<PathBuf>,
+
+    #[arg(long, value_enum, default_value_t = FunctionPickerType::Solver)]
+    function_picker: FunctionPickerType,
+
+    #[arg(long)]
+    max_epochs: Option<usize>,
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+enum FunctionPickerType {
+    Resource,
+    Solver,
+}
+
+impl From<FunctionPickerType> for Arc<dyn FunctionPicker + Send + Sync> {
+    fn from(value: FunctionPickerType) -> Self {
+        match value {
+            | FunctionPickerType::Resource => Arc::new(ResourcePicker),
+            | FunctionPickerType::Solver => Arc::new(SolverPicker),
+        }
+    }
 }
 
 fn main() -> Result<(), eyre::Error> {
@@ -55,10 +84,14 @@ fn main() -> Result<(), eyre::Error> {
     )
     .wrap_err("failed to configure tracing")?;
 
-    let cmd = Cmd::parse();
+    let mut spec = Spec::new();
 
+    wazzi_specz_preview1::witx::preview1(&mut spec)?;
+
+    let cmd = Cmd::parse();
     let mut store = FuzzStore::new(Path::new("abc")).wrap_err("failed to init fuzz store")?;
     let mut fuzzer = Fuzzer::new(
+        cmd.function_picker.into(),
         &mut store,
         [
             (
@@ -79,30 +112,69 @@ fn main() -> Result<(), eyre::Error> {
         .transpose()
         .wrap_err("failed to read data")?;
 
-    fuzzer.fuzz(data)?;
+    fuzzer.fuzz_loop(spec, data, cmd.max_epochs)?;
 
     Ok(())
 }
 
 #[derive(Debug)]
 struct Fuzzer<'s> {
-    store:    &'s mut FuzzStore,
-    runtimes: Vec<(&'static str, Box<dyn WasiRunner>)>,
+    function_picker: Arc<dyn FunctionPicker + Send + Sync>,
+    store:           &'s mut FuzzStore,
+    runtimes:        Vec<(&'static str, Box<dyn WasiRunner>)>,
 }
 
 impl<'s> Fuzzer<'s> {
     pub fn new(
+        function_picker: Arc<dyn FunctionPicker + Send + Sync>,
         store: &'s mut FuzzStore,
         runtimes: impl IntoIterator<Item = (&'static str, Box<dyn WasiRunner>)>,
     ) -> Self {
         Self {
+            function_picker,
             store,
             runtimes: runtimes.into_iter().collect(),
         }
     }
 
-    pub fn fuzz(&mut self, data: Option<Vec<u8>>) -> Result<(), eyre::Error> {
-        let mut run_store = self.store.new_run()?;
+    pub fn fuzz_loop(
+        &mut self,
+        spec: Spec,
+        data: Option<Vec<u8>>,
+        max_epochs: Option<usize>,
+    ) -> Result<(), eyre::Error> {
+        let mut data = data;
+        let mut epoch = 0;
+
+        loop {
+            if let Some(max_epochs) = max_epochs {
+                if epoch == max_epochs {
+                    break;
+                }
+            }
+
+            epoch += 1;
+
+            match self.fuzz(epoch, &spec, data.take()) {
+                | Ok(_) => continue,
+                | Err(FuzzError::DiffFound) => continue,
+                | Err(err) => return Err(err!(err)),
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn fuzz(
+        &mut self,
+        epoch: usize,
+        spec: &Spec,
+        data: Option<Vec<u8>>,
+    ) -> Result<(), FuzzError> {
+        let mut run_store = self
+            .store
+            .new_run()
+            .wrap_err("failed to init new run store")?;
         let mut env = Environment::preview1()?;
         let fdflags = env
             .spec()
@@ -145,9 +217,11 @@ impl<'s> Fuzzer<'s> {
             },
         };
 
-        run_store.write_data(&data)?;
+        run_store
+            .write_data(&data)
+            .wrap_err("failed to write data")?;
 
-        thread::scope(|scope| -> Result<_, eyre::Error> {
+        thread::scope(|scope| -> Result<_, FuzzError> {
             let (tx, rx) = mpsc::channel();
             let cancel = Arc::new(AtomicBool::new(false));
             let pause_pair = Arc::new((Mutex::new((0, 0usize)), Condvar::new()));
@@ -162,18 +236,26 @@ impl<'s> Fuzzer<'s> {
                         .spawn_scoped(scope, {
                             let mut u = Unstructured::new(&data);
                             let env = env.clone();
-                            let mut store = run_store.new_runtime(runtime_name.to_string(), "-")?;
+                            let mut store = run_store
+                                .new_runtime(runtime_name.to_string(), "-")
+                                .wrap_err("failed to init runtime store")?;
                             let tx = tx.clone();
                             let cancel = cancel.clone();
                             let pause_pair = pause_pair.clone();
                             let resume_pair = resume_pair.clone();
                             let n_live_threads = n_live_threads.clone();
+                            let interface = spec
+                                .interfaces
+                                .get(*spec.interfaces_map.get("wasi_snapshot_preview1").unwrap())
+                                .unwrap();
+                            let function_picker = self.function_picker.clone();
 
-                            move || -> Result<(), eyre::Error> {
+                            move || -> Result<(), FuzzError> {
                                 let stderr = fs::OpenOptions::new()
                                     .write(true)
                                     .create_new(true)
-                                    .open(store.path.join("stderr"))?;
+                                    .open(store.path.join("stderr"))
+                                    .wrap_err("failed to open stderr file")?;
                                 let (executor, prefix) = ExecutorRunner::new(
                                     runtime.as_ref(),
                                     PathBuf::from("target/debug/wazzi-executor-pb.wasm")
@@ -185,6 +267,7 @@ impl<'s> Fuzzer<'s> {
                                 .run(Arc::new(Mutex::new(stderr)))
                                 .unwrap();
                                 let mut ctx = Context::new();
+                                let mut iteration = 0;
 
                                 ctx.resources.insert(
                                     resource_id,
@@ -205,21 +288,37 @@ impl<'s> Fuzzer<'s> {
                                     );
 
                                     if cancel.load(atomic::Ordering::SeqCst) {
-                                        panic!("cancelled");
+                                        return Err(FuzzError::DiffFound);
                                     }
 
                                     if u.is_empty() {
                                         panic!("data exhausted");
                                     }
 
-                                    let (function, ok, _results) = env
+                                    let function = function_picker.pick_function(
+                                        &mut u,
+                                        interface,
+                                        &env.read().unwrap(),
+                                        &ctx,
+                                    )?;
+
+                                    tracing::info!(
+                                        epoch = epoch,
+                                        iteration = iteration,
+                                        function = function.name,
+                                        "Calling function."
+                                    );
+                                    iteration += 1;
+
+                                    let (ok, _results) = env
                                         .read()
                                         .unwrap()
-                                        .call_arbitrary_function(
+                                        .call(
                                             &mut u,
                                             &mut ctx,
                                             &executor,
                                             store.trace_mut(),
+                                            &function.name,
                                         )
                                         .unwrap();
                                     let function = function.clone();
@@ -295,7 +394,7 @@ impl<'s> Fuzzer<'s> {
             thread::Builder::new()
                 .name("wazzi-differ".to_string())
                 .spawn_scoped(scope, {
-                    move || -> Result<(), eyre::Error> {
+                    move || -> Result<(), FuzzError> {
                         while let Ok((function, ok, result_resources)) = rx.recv() {
                             let runtimes = run_store
                                 .runtimes::<Call>()
@@ -365,8 +464,10 @@ impl<'s> Fuzzer<'s> {
                                                     || a.file_type() != b.file_type()
                                                     || a.file_name() != b.file_name()
                                                     || (a.file_type().is_file()
-                                                        && fs::read(a.path())?
-                                                            != fs::read(b.path())?)
+                                                        && fs::read(a.path())
+                                                            .wrap_err("failed to read file")?
+                                                            != fs::read(b.path())
+                                                                .wrap_err("failed to read file")?)
                                                 {
                                                     tracing::error!("Fs diff found.");
 
@@ -405,9 +506,22 @@ impl<'s> Fuzzer<'s> {
                 })
                 .wrap_err("failed to spawn differ thread")?;
 
+            for runtime_thread in runtime_threads {
+                runtime_thread.join().unwrap()?;
+            }
+
             Ok(())
         })?;
 
-        Err(err!("fuzz loop ended"))
+        Err(FuzzError::Unknown(err!("fuzz loop ended")))
     }
+}
+
+#[derive(thiserror::Error, Debug)]
+enum FuzzError {
+    #[error(transparent)]
+    Unknown(#[from] eyre::Error),
+
+    #[error("execution diff found")]
+    DiffFound,
 }

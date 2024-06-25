@@ -1,7 +1,10 @@
+pub mod function_picker;
 pub mod resource;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+use self::resource::Context;
+use crate::function_picker::FunctionPicker;
 use arbitrary::Unstructured;
 use eyre::{eyre as err, Context as _, ContextCompat};
 use serde::{Deserialize, Serialize};
@@ -20,8 +23,6 @@ use wazzi_specz_wasi::{
 };
 use wazzi_store::TraceStore;
 use z3::ast::Ast;
-
-use self::resource::Context;
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 pub struct Call {
@@ -82,7 +83,7 @@ impl Environment {
     ) -> Result<(), eyre::Error> {
         for stmt in function.effects.stmts.iter() {
             match stmt {
-                | wazzi_specz_wasi::effects::Stmt::AttrSet(attr_set) => {
+                | effects::Stmt::AttrSet(attr_set) => {
                     let new_attr_value = self.eval_effects_expr(&attr_set.value);
                     let resource_id = *result_resources
                         .get(&attr_set.resource)
@@ -104,57 +105,6 @@ impl Environment {
         }
     }
 
-    pub fn call_arbitrary_function(
-        &self,
-        u: &mut Unstructured,
-        ctx: &mut Context,
-        executor: &RunningExecutor,
-        store: &mut TraceStore<Call>,
-    ) -> Result<(Function, bool, Vec<Value>), eyre::Error> {
-        let interface = self
-            .spec
-            .interfaces
-            .get(
-                *self
-                    .spec
-                    .interfaces_map
-                    .get("wasi_snapshot_preview1")
-                    .unwrap(),
-            )
-            .unwrap();
-        let functions = interface.functions.values().collect::<Vec<_>>();
-        let mut candidates = Vec::new();
-
-        for function in functions {
-            let z3_cfg = z3::Config::new();
-            let z3_ctx = z3::Context::new(&z3_cfg);
-            let solver = z3::Solver::new(&z3_ctx);
-            let mut solver_params = z3::Params::new(&z3_ctx);
-            let random_seed: u32 = u.arbitrary()?;
-
-            solver_params.set_bool("randomize", false);
-            solver_params.set_u32("smt.random_seed", random_seed);
-            solver.set_params(&solver_params);
-
-            let scope = FunctionScope::new(&z3_ctx, solver, self, ctx, function);
-
-            if scope.solve_input_contract(&z3_ctx, u)?.is_some() {
-                candidates.push(function);
-            }
-        }
-
-        eprintln!(
-            "candidates {:?}",
-            candidates
-                .iter()
-                .map(|f| f.name.clone())
-                .collect::<Vec<_>>()
-        );
-        let function = *u.choose(&candidates)?;
-
-        self.call(u, ctx, executor, store, &function.name)
-    }
-
     pub fn call(
         &self,
         u: &mut Unstructured,
@@ -162,7 +112,7 @@ impl Environment {
         executor: &RunningExecutor,
         store: &mut TraceStore<Call>,
         function_name: &str,
-    ) -> Result<(Function, bool, Vec<Value>), eyre::Error> {
+    ) -> Result<(bool, Vec<Value>), eyre::Error> {
         let interface = self
             .spec
             .interfaces
@@ -271,7 +221,7 @@ impl Environment {
             results: results.clone(),
         })?;
 
-        Ok((function.to_owned(), ok, results))
+        Ok((ok, results))
     }
 }
 

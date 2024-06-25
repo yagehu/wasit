@@ -1953,6 +1953,7 @@ dependencies = [
  "rand",
  "serde",
  "tempfile",
+ "thiserror",
  "tracing",
  "tracing-error",
  "tracing-subscriber",
