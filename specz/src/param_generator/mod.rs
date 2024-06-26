@@ -1,4 +1,5 @@
-pub mod solver;
+pub mod stateful;
+pub mod stateless;
 
 use std::fmt;
 

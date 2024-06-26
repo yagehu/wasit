@@ -16,7 +16,7 @@ use std::{
 
 use arbitrary::Unstructured;
 use clap::Parser;
-use eyre::{eyre as err, Context as _, Report};
+use eyre::{eyre as err, Context as _};
 use itertools::{EitherOrBoth, Itertools as _};
 use rand::{thread_rng, RngCore};
 use tracing::level_filters::LevelFilter;
@@ -27,12 +27,15 @@ use wazzi_executor::ExecutorRunner;
 use wazzi_runners::{Node, Wamr, WasiRunner, Wasmedge, Wasmer, Wasmtime, Wazero};
 use wazzi_specz::{
     function_picker::{resource::ResourcePicker, solver::SolverPicker, FunctionPicker},
-    param_generator::{solver::SolverParamsGenerator, ParamsGenerator},
+    param_generator::{
+        stateful::StatefulParamsGenerator,
+        stateless::StatelessParamsGenerator,
+        ParamsGenerator,
+    },
     resource::Context,
     Call,
     Environment,
     Resource,
-    Value,
 };
 use wazzi_specz_wasi::{Spec, WasiValue};
 use wazzi_store::FuzzStore;
@@ -76,8 +79,8 @@ enum ParamsGeneratorType {
 impl From<ParamsGeneratorType> for Arc<dyn ParamsGenerator + Send + Sync> {
     fn from(value: ParamsGeneratorType) -> Self {
         match value {
-            | ParamsGeneratorType::Stateless => todo!(),
-            | ParamsGeneratorType::Stateful => Arc::new(SolverParamsGenerator),
+            | ParamsGeneratorType::Stateless => Arc::new(StatelessParamsGenerator),
+            | ParamsGeneratorType::Stateful => Arc::new(StatefulParamsGenerator),
         }
     }
 }
@@ -343,7 +346,7 @@ impl<'s> Fuzzer<'s> {
                                     ) {
                                         | Ok(x) => x,
                                         | Err(err) => {
-                                            let (pause_mu, pause_cond) = &*pause_pair;
+                                            let (pause_mu, _pause_cond) = &*pause_pair;
                                             let mut pause_state = pause_mu.lock().unwrap();
 
                                             pause_state.0 += 1;

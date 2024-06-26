@@ -11,9 +11,9 @@ use crate::{
 };
 
 #[derive(Clone, Copy, Debug)]
-pub struct SolverParamsGenerator;
+pub struct StatefulParamsGenerator;
 
-impl ParamsGenerator for SolverParamsGenerator {
+impl ParamsGenerator for StatefulParamsGenerator {
     fn generate_params(
         &self,
         u: &mut Unstructured,
