@@ -28,7 +28,7 @@ root = {
 s = Solver()
 
 def declare_option(sort: Sort):
-    Option = Datatype("Option")
+    Option = Datatype(f"{ sort.name() }Option")
     Option.declare("none")
     Option.declare("some", ("inner", sort))
 
@@ -135,6 +135,7 @@ Segment = Datatype("Segment")
 Segment.declare("separator")
 Segment.declare("component", ("string", StringSort()))
 Segment = Segment.create()
+OptionSegment = declare_option(Segment)
 
 segments = []
 component_idx_accs = []
@@ -205,30 +206,97 @@ s.add(Or(*[param_fd == fd for fd in fd_set]))
 at_least_components(3)
 
 
+last_component = Const("last_component", Segment)
+any_component = FreshConst(Segment)
+num_components = Const("num_components", IntSort())
+s.add(Segment.is_component(last_component))
+s.add(Or(*[last_component == segment for segment in segments]))
+s.add(
+    # [num_components, last_component],
+    And(
+        ForAll(
+            [any_component],
+            component_idx(last_component) >= component_idx(any_component),
+        ),
+        num_components == component_idx(last_component) + 1,
+    )
+)
+
+
 component_file_map = Function("component_file_map", Segment, File, BoolSort())
 component_file_list = list()
-curr_file = FreshConst(File)
-s.add(Or(*[curr_file == file for file in file_list]))
-for i in range(len(segments) - 1):
+root_file = FreshConst(OptionFile)
+# Start resolving each component from param_fd.
+s.add(fd_map(param_fd, OptionFile.inner(root_file)))
+s.add(OptionFile.is_some(root_file))
+component_file_list.append(root_file)
+for i in range(len(segments)):
     seg = segments[i]
-    component = FreshConst(Segment)
-    next_component = FreshConst(Segment)
-    some_file = FreshConst(File)
+    next_component = Const(f"next_component_{i}", OptionSegment)
 
-    s.add(Or(*[component == segment for segment in segments]))
-    s.add(Or(*[next_component == segment for segment in segments]))
-    s.add(Or(
-        component_idx(next_component) == i + 1,
-        component_idx(next_component) == 0,
+    s.add(If(
+        And(
+            Segment.is_component(seg),
+            component_idx(seg) != num_components - 1,
+        ),
+        And(
+            OptionSegment.is_some(next_component),
+            Segment.is_component(OptionSegment.inner(next_component)),
+            Or(*[OptionSegment.inner(next_component) == segment for segment in segments]),
+        ),
+        OptionSegment.is_none(next_component),
+    ))
+    s.add(Implies(
+        And(
+            Segment.is_component(seg),
+            OptionSegment.is_some(next_component),
+            Segment.is_component(OptionSegment.inner(next_component)),
+        ),
+        component_idx(seg) + 1 == component_idx(OptionSegment.inner(next_component)),
     ))
 
-    if i == 0:
-        root_file = FreshConst(OptionFile)
-
-        # Start resolving each component from param_fd.
-        s.add(fd_map(param_fd, root_file))
-
-        component_file_list.append(root_file)
+    file = component_file_list[-1]
+    next_file = Const(f"next_file_{i}", OptionFile)
+    some_file = FreshConst(File)
+    any_file = FreshConst(File)
+    s.add(Exists(
+        [some_file],
+        Implies(
+            And(
+                Segment.is_component(seg),
+                OptionFile.is_some(file),
+                entries_map(
+                    OptionFile.inner(file),
+                    Segment.string(seg),
+                    some_file,
+                ),
+            ),
+            And(
+                OptionFile.is_some(next_file),
+                OptionFile.inner(next_file) == some_file,
+            ),
+        )
+    ))
+    s.add(ForAll(
+        [any_file],
+        Implies(
+            And(
+                Segment.is_component(seg),
+                OptionFile.is_some(file),
+                OptionSegment.is_some(next_component),
+                Not(entries_map(
+                    OptionFile.inner(file),
+                    Segment.string(seg),
+                    any_file,
+                )),
+            ),
+            And(
+                OptionFile.is_none(next_file),
+                Segment.string(OptionSegment.inner(next_component))!= StringVal(".."),
+            ),
+        )
+    ))
+    component_file_list.append(next_file)
 
 
 def test_unsat():
@@ -256,6 +324,7 @@ def test_unsat():
     m = s.model()
     for segment in segments:
         print(m.evaluate(segment))
+    print(m)
     s.pop()
 
 test_unsat()
