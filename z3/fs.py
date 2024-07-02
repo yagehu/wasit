@@ -29,6 +29,12 @@ def declare_option(sort: Sort):
 
     return Option.create()
 
+File = Datatype("File")
+File.declare("regular-file")
+File.declare("directory")
+File = File.create()
+OptionFile = declare_option(File)
+
 Segment = Datatype("Segment")
 Segment.declare("separator")
 Segment.declare("component", ("string", StringSort()))
@@ -38,15 +44,44 @@ Path = Datatype("Path")
 Path.declare("path", ("segments", SeqSort(Segment)))
 Path = Path.create()
 
-param_path = Const("param_path", Path)
-path_idx = Int("PathIdx")
+Fd = DeclareSort("Fd")
 
-path_idx_in_bound = And(0 <= path_idx, path_idx < Length(Path.segments(param_path)))
+base_fd = Const("base-fd", Fd)
+fd1 = Const("fd1", Fd)
+
+fd_pool = [
+    {
+        "name": "base-direcotry",
+        "value": base_fd,
+    },
+    {
+        "name": "fd1",
+        "value": fd1,
+    },
+]
+
+param_fd = Const("param-fd", Fd)
+param_path = Const("param-path", Path)
+
+path_idx = Int("path-idx")
+
+s.add(And(
+    base_fd != fd1,
+))
+s.add(
+    Or(
+        param_fd == base_fd,
+        param_fd == fd1,
+    )
+)
+
+def path_idx_in_bound(path):
+    return And(0 <= path_idx, path_idx < Length(Path.segments(path)))
 
 s.add(ForAll(
     [path_idx],
     Implies(
-        Not(path_idx_in_bound),
+        Not(path_idx_in_bound(param_path)),
         Path.segments(param_path)[path_idx] == Segment.component(StringVal("")),
     ),
 ))
@@ -61,7 +96,7 @@ s.add(
         [path_idx],
         Implies(
             And(
-                path_idx_in_bound,
+                path_idx_in_bound(param_path),
                 Segment.is_component(Path.segments(param_path)[path_idx]),
             ),
             And(
@@ -78,7 +113,7 @@ s.add(
         [path_idx],
         Implies(
             And(
-                path_idx_in_bound,
+                path_idx_in_bound(param_path),
                 path_idx < Length(Path.segments(param_path)) - 1,
             ),
             Not(And(
@@ -89,35 +124,43 @@ s.add(
     ),
 )
 
-# ComponentIdxAcc = Datatype("ComponentIdxAcc")
-# ComponentIdxAcc.declare("component-idx-acc", ("idx", IntSort()), ())
-# ComponentIdxAcc
+component_idx = Function("component-idx", Path, IntSort(), IntSort())
+idx = Int("idx")
+acc = Int("component-idx--acc")
+seg = Const("component-idx--seg", Segment)
+path = Const("path", Path)
+s.add(ForAll(
+    [path, path_idx],
+    component_idx(path, path_idx) == If(
+        And(
+            path_idx_in_bound(path),
+            Segment.is_component(Path.segments(path)[path_idx])
+        ),
+        SeqFoldLeftI(
+            Lambda([idx, acc, seg], If(
+                And(Segment.is_component(seg), idx <= path_idx),
+                acc + 1,
+                acc,
+            )),
+            0,
+            0,
+            Path.segments(path),
+        ) - 1,
+        -1,
+    )
+))
 
-# component_idx = Function("component-idx", Path, IntSort(), IntSort())
-# idx = Int("idx")
-# acc = Int("component-idx--acc")
-# seg = Const("component-idx--seg", Segment)
-# path = Const("path", Path)
-# s.add(ForAll(
-#     [path, path_idx],
-#     component_idx(path, path_idx) == If(
-#         And(
-#             path_idx_in_bound,
-#             Segment.is_component(Path.segments(path)[path_idx])
-#         ),
-#         SeqFoldLeftI(
-#             Lambda([idx, acc, seg], If(
-#                 And(Segment.is_component(seg), idx <= path_idx),
-#                 acc + 1,
-#                 acc,
-#             )),
-#             0,
-#             0,
-#             Path.segments(path),
-#         ) - 1,
-#         -1,
-#     )
-# ))
+
+component_to_file = Function("component-to-file", Path, IntSort(), OptionFile)
+# curr_fd = Const("curr-fd", Fd)
+s.add(ForAll(
+    [path_idx],
+    If(
+        path_idx_in_bound(param_path),
+        component_to_file(param_path, path_idx) == OptionFile.none,
+        component_to_file(param_path, path_idx) == OptionFile.none,
+    ),
+))
 
 
 def unsat_cases():
@@ -148,15 +191,13 @@ def unsat_cases():
 
 def sat_cases():
     def component_idx_ok():
-        s.add(Length(Path.segments(param_path)) == 5)
+        s.add(Length(Path.segments(param_path)) == 3)
         s.add(Path.segments(param_path)[0] == Segment.component(StringVal("a")))
         s.add(Path.segments(param_path)[1] == Segment.separator)
         s.add(Path.segments(param_path)[2] == Segment.component(StringVal("b")))
-        s.add(Path.segments(param_path)[3] == Segment.separator)
-        s.add(Path.segments(param_path)[4] == Segment.component(StringVal("c")))
-        # s.add(component_idx(param_path, 0) == 0)
-        # s.add(component_idx(param_path, 1) == -1)
-        # s.add(component_idx(param_path, 2) == 1)
+        s.add(component_idx(param_path, 0) == 0)
+        s.add(component_idx(param_path, 1) == -1)
+        s.add(component_idx(param_path, 2) == 1)
 
     cases = [
         component_idx_ok,
@@ -175,15 +216,13 @@ unsat_cases()
 sat_cases()
 
 
-s.add(Length(Path.segments(param_path)) > 6)
+s.add(Length(Path.segments(param_path)) == 7)
 
 
 result = s.check()
 
 assert result == sat, f"{result}"
 m = s.model()
-
-print(m)
 
 p = ""
 
@@ -196,3 +235,10 @@ for i in range(0, m.eval(Length(Path.segments(m[param_path]))).as_long()):
         p += m.eval(Segment.string(segment)).as_string()
 
 print("path", p)
+
+for fd_entry in fd_pool:
+    if m[param_fd] == m.eval(fd_entry["value"]):
+        print(f"chosen fd: {fd_entry["name"]}")
+        break
+
+print(m[component_to_file])
