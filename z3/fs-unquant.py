@@ -320,16 +320,11 @@ def test_unsat():
         Not(entries_map(root, Segment.string(component_0), some_file))
     ))
     s.add(Segment.string(component_1) == "..")
-    assert s.check() == sat, f"{ s.check() }"
-    m = s.model()
-    for segment in segments:
-        print(m.evaluate(segment))
-    print(m)
+    assert s.check() == unsat, f"{ s.check() }"
     s.pop()
 
 test_unsat()
 
-exit(1)
 result = s.check()
 
 assert result == sat, f"{result}"

@@ -17,6 +17,9 @@ svg-inkscape
 # IntelliJ
 .idea
 
+# Python
+venv/
+
 # Rust
 target
 
