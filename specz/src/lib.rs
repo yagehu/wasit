@@ -1,6 +1,7 @@
 pub mod function_picker;
 pub mod param_generator;
 pub mod resource;
+pub mod slang;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
