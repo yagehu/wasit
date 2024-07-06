@@ -1,5 +1,5 @@
 use z3::{
-    ast::{forall_const, Ast, Bool, Datatype, Int},
+    ast::{self, forall_const, Ast, Bool, Datatype, Int},
     Context,
     DatatypeAccessor,
     DatatypeBuilder,
@@ -40,22 +40,6 @@ impl<'ctx, 's> PathEncoder<'ctx, 's> {
             segment_datatype,
             component_idx_map,
         }
-    }
-
-    pub fn segment_is_separator(&self, segment: &dyn Ast<'ctx>) -> Bool<'ctx> {
-        self.segment_datatype.variants[0]
-            .tester
-            .apply(&[segment])
-            .as_bool()
-            .unwrap()
-    }
-
-    pub fn segment_is_component(&self, segment: &dyn Ast<'ctx>) -> Bool<'ctx> {
-        self.segment_datatype.variants[1]
-            .tester
-            .apply(&[segment])
-            .as_bool()
-            .unwrap()
     }
 
     pub fn component_string(&self, segment: &dyn Ast<'ctx>) -> z3::ast::String<'ctx> {
@@ -154,6 +138,60 @@ impl<'ctx, 's> PathEncoder<'ctx, 's> {
         segments
     }
 }
+
+#[derive(Debug)]
+pub struct SegmentType<'ctx>(DatatypeSort<'ctx>);
+
+impl<'ctx> SegmentType<'ctx> {
+    pub fn new(ctx: &'ctx Context) -> Self {
+        Self(
+            DatatypeBuilder::new(ctx, "segment")
+                .variant("separator", vec![])
+                .variant(
+                    "component",
+                    vec![("string", DatatypeAccessor::Sort(Sort::string(ctx)))],
+                )
+                .finish(),
+        )
+    }
+
+    pub fn sort(&self) -> &Sort {
+        &self.0.sort
+    }
+
+    pub fn fresh_const(&self, ctx: &'ctx Context) -> impl Ast {
+        ast::Dynamic::fresh_const(ctx, "path-param--segment--", &self.0.sort)
+    }
+
+    pub fn is_separator(&self, segment: &dyn Ast<'ctx>) -> ast::Bool<'ctx> {
+        self.0.variants[0]
+            .tester
+            .apply(&[segment])
+            .as_bool()
+            .unwrap()
+    }
+
+    pub fn is_component(&self, segment: &dyn Ast<'ctx>) -> ast::Bool<'ctx> {
+        self.0.variants[1]
+            .tester
+            .apply(&[segment])
+            .as_bool()
+            .unwrap()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct PathParam {
+    n_components: usize,
+}
+
+impl PathParam {
+    pub fn encode(&self) -> PathParamEncoding {
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct PathParamEncoding {}
 
 #[cfg(test)]
 mod tests {

@@ -227,7 +227,7 @@ impl WasiFs {
 }
 
 #[derive(Debug)]
-pub struct EncodedWasiFs<'ctx> {
+pub struct WasiFsEncoding<'ctx> {
     fds:   BTreeMap<FdId, ast::Dynamic<'ctx>>,
     files: BTreeMap<FileId, ast::Dynamic<'ctx>>,
 
@@ -236,7 +236,7 @@ pub struct EncodedWasiFs<'ctx> {
     fd_file_mapping:   FdFileMapping<'ctx>,
 }
 
-impl<'ctx> EncodedWasiFs<'ctx> {
+impl<'ctx> WasiFsEncoding<'ctx> {
     pub fn assert(&self, solver: &Solver) {
         self.clauses.iter().for_each(|clause| solver.assert(clause));
     }
@@ -256,7 +256,7 @@ impl WasiFs {
         ctx: &'ctx Context,
         fd_type: &'ctx FdType,
         file_type: &'ctx FileType,
-    ) -> EncodedWasiFs<'ctx> {
+    ) -> WasiFsEncoding<'ctx> {
         let mut clauses = Vec::new();
         let fds = self
             .fds
@@ -374,7 +374,7 @@ impl WasiFs {
             ));
         }
 
-        EncodedWasiFs {
+        WasiFsEncoding {
             fds,
             files,
             clauses,
@@ -411,13 +411,13 @@ mod tests {
 
         let fd_type = FdType::new(&ctx);
         let file_type = FileType::new(&ctx);
-        let encoded_fs = fs.encode(&ctx, &fd_type, &file_type);
+        let fs_encoding = fs.encode(&ctx, &fd_type, &file_type);
 
-        encoded_fs.assert(&solver);
+        fs_encoding.assert(&solver);
 
         let some_fd = fd_type.fresh_const(&ctx);
 
-        encoded_fs.some_fd_maps_to_file(&solver, &some_fd, root_dir);
+        fs_encoding.some_fd_maps_to_file(&solver, &some_fd, root_dir);
 
         let result = solver.check();
 
