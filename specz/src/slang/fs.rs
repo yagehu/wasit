@@ -1,6 +1,10 @@
+use std::{collections::BTreeMap, fs, path::Path, vec::IntoIter};
+
+use eyre::{Context as _, ContextCompat};
 use z3::{
-    ast::{forall_const, Ast, Bool, Datatype, Dynamic},
+    ast::{self, forall_const, Ast},
     Context,
+    DatatypeBuilder,
     DatatypeSort,
     FuncDecl,
     Solver,
@@ -8,207 +12,384 @@ use z3::{
 };
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub enum File {
-    RegularFile(RegularFile),
-    Directory(Directory),
-}
+pub struct FdType<'ctx>(Sort<'ctx>);
 
-#[derive(PartialEq, Eq, Clone, Debug)]
-pub struct RegularFile {}
+impl<'ctx> FdType<'ctx> {
+    pub fn new(ctx: &'ctx Context) -> Self {
+        Self(Sort::uninterpreted(
+            &ctx,
+            z3::Symbol::String("fd".to_string()),
+        ))
+    }
 
-#[derive(PartialEq, Eq, Clone, Debug)]
-pub struct Directory {
-    pub entries: Vec<DirEntry>,
-}
+    pub fn sort(&self) -> &Sort {
+        &self.0
+    }
 
-#[derive(PartialEq, Eq, Clone, Debug)]
-pub struct DirEntry {
-    pub name: String,
-    pub file: File,
+    pub fn fresh_const(&self, ctx: &'ctx Context) -> ast::Dynamic<'ctx> {
+        ast::Dynamic::fresh_const(ctx, "fs--fd--", &self.0)
+    }
 }
 
 #[derive(Debug)]
-pub struct FsEncoder<'ctx, 'd, 's> {
-    solver: &'s Solver<'ctx>,
+pub struct FileType<'ctx>(DatatypeSort<'ctx>);
 
-    fd_sort:       &'d Sort<'ctx>,
-    file_datatype: &'d DatatypeSort<'ctx>,
+impl<'ctx> FileType<'ctx> {
+    pub fn new(ctx: &'ctx Context) -> Self {
+        Self(
+            DatatypeBuilder::new(ctx, "file")
+                .variant("regular-file", vec![])
+                .variant("directory", vec![])
+                .finish(),
+        )
+    }
 
-    /// Maps directories to the entries they contain through their filenames.
-    pub entries_map: FuncDecl<'ctx>,
+    pub fn sort(&self) -> &Sort {
+        &self.0.sort
+    }
 
-    /// Maps fds to files.
-    pub fd_map: FuncDecl<'ctx>,
+    pub fn fresh_const(&self, ctx: &'ctx Context) -> ast::Dynamic<'ctx> {
+        ast::Dynamic::fresh_const(ctx, "fs--fd--", &self.0.sort)
+    }
+
+    pub fn is_regular_file(&self, file: &dyn Ast<'ctx>) -> ast::Bool<'ctx> {
+        self.0.variants[0].tester.apply(&[file]).as_bool().unwrap()
+    }
+
+    pub fn is_directory(&self, file: &dyn Ast<'ctx>) -> ast::Bool<'ctx> {
+        self.0.variants[1].tester.apply(&[file]).as_bool().unwrap()
+    }
 }
 
-impl<'ctx, 'd, 's> FsEncoder<'ctx, 'd, 's>
-where
-    'd: 'ctx,
-    's: 'ctx,
-{
-    pub fn new(
-        ctx: &'ctx Context,
-        solver: &'s Solver<'ctx>,
-        fd: &'d Sort<'ctx>,
-        file: &'d DatatypeSort<'ctx>,
-    ) -> Self {
-        let entries_map = FuncDecl::new(
+#[derive(Debug)]
+pub struct DirEntryMapping<'ctx>(FuncDecl<'ctx>);
+
+impl<'ctx> DirEntryMapping<'ctx> {
+    pub fn new(ctx: &'ctx Context, file: &'ctx FileType<'ctx>) -> Self {
+        Self(FuncDecl::new(
             ctx,
-            "entries-map",
-            &[&file.sort, &Sort::string(ctx), &file.sort],
+            "fs--dir-entry-mapping",
+            &[file.sort(), &Sort::string(ctx), file.sort()],
             &Sort::bool(ctx),
-        );
-        let fd_map = FuncDecl::new(ctx, "fd-map", &[fd], &file.sort);
+        ))
+    }
 
+    pub fn exists(
+        &self,
+        dir: &dyn Ast<'ctx>,
+        name: &ast::String<'ctx>,
+        child: &dyn Ast<'ctx>,
+    ) -> ast::Bool<'ctx> {
+        self.0.apply(&[dir, name, child]).as_bool().unwrap()
+    }
+}
+
+#[derive(Debug)]
+pub struct FdFileMapping<'ctx>(FuncDecl<'ctx>);
+
+impl<'ctx> FdFileMapping<'ctx> {
+    pub fn new(ctx: &'ctx Context, fd: &'ctx FdType<'ctx>, file: &'ctx FileType<'ctx>) -> Self {
+        Self(FuncDecl::new(
+            ctx,
+            "fs--fd-file-mapping",
+            &[fd.sort(), file.sort()],
+            &Sort::bool(ctx),
+        ))
+    }
+
+    pub fn exists(&self, fd: &dyn Ast<'ctx>, file: &dyn Ast<'ctx>) -> ast::Bool<'ctx> {
+        self.0.apply(&[fd, file]).as_bool().unwrap()
+    }
+}
+
+#[derive(Debug)]
+pub struct FsEncodingContext<'ctx> {
+    fd_sort:       Sort<'ctx>,
+    file_datatype: DatatypeSort<'ctx>,
+}
+
+impl<'ctx> FsEncodingContext<'ctx> {
+    pub fn fd_sort(&self) -> &Sort<'ctx> {
+        &self.fd_sort
+    }
+
+    pub fn file_datatype(&self) -> &DatatypeSort<'ctx> {
+        &self.file_datatype
+    }
+}
+
+#[derive(Default, PartialEq, Eq, Clone, Debug)]
+pub struct Entities<T>(Vec<T>);
+
+impl<T> Entities<T> {
+    pub fn new() -> Self {
+        Self(Vec::new())
+    }
+
+    pub fn push(&mut self, entity: T) -> usize {
+        self.0.push(entity);
+        self.0.len() - 1
+    }
+
+    pub fn get(&self, i: usize) -> Option<&T> {
+        self.0.get(i)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (usize, &T)> {
+        self.0.iter().enumerate()
+    }
+}
+
+impl<T> IntoIterator for Entities<T> {
+    type Item = T;
+    type IntoIter = IntoIter<T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+type FdId = usize;
+type FileId = usize;
+
+#[derive(Clone, Debug)]
+pub struct WasiFs {
+    fds:   Entities<()>,
+    files: Entities<()>,
+
+    dir_entry_mappings: BTreeMap<(FileId, String), FileId>,
+    fd_file_mappings:   BTreeMap<FdId, FileId>,
+}
+
+impl WasiFs {
+    pub fn new() -> Self {
         Self {
-            solver,
-            fd_sort: fd,
-            file_datatype: file,
-            entries_map,
-            fd_map,
+            fds:                Default::default(),
+            files:              Default::default(),
+            dir_entry_mappings: Default::default(),
+            fd_file_mappings:   Default::default(),
         }
     }
 
-    pub fn encode_file(
-        &self,
-        ctx: &'ctx Context,
-        file: &File,
-        fd: &Dynamic<'ctx>,
-    ) -> Datatype<'ctx> {
-        let mut dir_entries = Vec::new();
-        let root = self.encode_file_helper(ctx, file, &mut dir_entries);
-        let fd_mappings = vec![(fd, &root)];
+    pub fn push_dir(&mut self, path: &Path) -> Result<FileId, eyre::Error> {
+        let root_file_id = self.files.push(());
+        let mut stack = vec![(root_file_id, path.to_path_buf())];
 
-        self.encode_entries_map(ctx, dir_entries);
-        self.encode_fd_map(ctx, fd_mappings);
+        while let Some((file_id, path)) = stack.pop() {
+            let metadata = fs::metadata(&path)?;
 
-        root
-    }
+            if metadata.file_type().is_dir() {
+                let mut entries = fs::read_dir(&path)?.collect::<Result<Vec<_>, _>>()?;
 
-    fn encode_file_helper(
-        &self,
-        ctx: &'ctx Context,
-        file: &File,
-        dir_entries: &mut Vec<(Datatype<'ctx>, z3::ast::String<'ctx>, Datatype<'ctx>)>,
-    ) -> Datatype<'ctx> {
-        let f = Datatype::fresh_const(ctx, "fs--file--", &self.file_datatype.sort);
+                entries.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
 
-        match file {
-            | File::RegularFile(_) => {
-                self.solver.assert(
-                    &self.file_datatype.variants[0]
-                        .tester
-                        .apply(&[&f])
-                        .as_bool()
-                        .unwrap(),
-                );
-            },
-            | File::Directory(directory) => {
-                self.solver.assert(
-                    &self.file_datatype.variants[1]
-                        .tester
-                        .apply(&[&f])
-                        .as_bool()
-                        .unwrap(),
-                );
+                for entry in entries {
+                    let child_file_id = self.files.push(());
 
-                for entry in directory.entries.iter() {
-                    let child = self.encode_file_helper(ctx, &entry.file, dir_entries);
-                    let filename = z3::ast::String::from_str(ctx, &entry.name).unwrap();
+                    if entry.file_type()?.is_dir() {
+                        stack.push((child_file_id, entry.path()));
+                    }
 
-                    dir_entries.push((f.clone(), filename, child));
+                    self.dir_entry_mappings.insert(
+                        (
+                            file_id,
+                            String::from_utf8(entry.file_name().as_encoded_bytes().to_vec())
+                                .wrap_err("file name is not UTF-8")?,
+                        ),
+                        child_file_id,
+                    );
                 }
-            },
+            }
         }
 
-        f
+        Ok(root_file_id)
     }
 
-    fn encode_entries_map(
+    pub fn register_fd(&mut self, base_file_id: FileId, path: &Path) -> Result<(), eyre::Error> {
+        let mut curr_file_id = base_file_id;
+
+        for component in path.components() {
+            let component = String::from_utf8(component.as_os_str().as_encoded_bytes().to_vec())
+                .wrap_err("invalid UTF-8 component")?;
+
+            curr_file_id = *self
+                .dir_entry_mappings
+                .get(&(curr_file_id, component))
+                .wrap_err("no child matching component")?;
+        }
+
+        let fd_id = self.fds.push(());
+
+        self.fd_file_mappings.insert(fd_id, curr_file_id);
+
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct EncodedWasiFs<'ctx> {
+    fds:   BTreeMap<FdId, ast::Dynamic<'ctx>>,
+    files: BTreeMap<FileId, ast::Dynamic<'ctx>>,
+
+    clauses:           Vec<ast::Bool<'ctx>>,
+    dir_entry_mapping: DirEntryMapping<'ctx>,
+    fd_file_mapping:   FdFileMapping<'ctx>,
+}
+
+impl<'ctx> EncodedWasiFs<'ctx> {
+    pub fn assert(&self, solver: &Solver) {
+        self.clauses.iter().for_each(|clause| solver.assert(clause));
+    }
+
+    pub fn some_fd_maps_to_file(&self, solver: &Solver, fd: &dyn Ast<'ctx>, file: FileId) {
+        solver.assert(
+            &self
+                .fd_file_mapping
+                .exists(fd, self.files.get(&file).unwrap()),
+        );
+    }
+}
+
+impl WasiFs {
+    pub fn encode<'ctx>(
         &self,
         ctx: &'ctx Context,
-        dir_entries: Vec<(Datatype, z3::ast::String, Datatype)>,
-    ) {
-        let some_dir = Datatype::fresh_const(ctx, "fs--", &self.file_datatype.sort);
-        let some_file = Datatype::fresh_const(ctx, "fs--", &self.file_datatype.sort);
-        let some_filename = z3::ast::String::fresh_const(ctx, "fs--");
-        let mut clauses = Vec::with_capacity(dir_entries.len());
+        fd_type: &'ctx FdType,
+        file_type: &'ctx FileType,
+    ) -> EncodedWasiFs<'ctx> {
+        let mut clauses = Vec::new();
+        let fds = self
+            .fds
+            .iter()
+            .map(|(id, _)| (id, fd_type.fresh_const(ctx)))
+            .collect::<BTreeMap<_, _>>();
+        let files = self
+            .files
+            .iter()
+            .map(|(id, _)| (id, file_type.fresh_const(ctx)))
+            .collect::<BTreeMap<_, _>>();
 
-        for (dir, filename, file) in dir_entries.iter() {
-            clauses.push(Bool::and(
+        if !fds.is_empty() {
+            let any_fd = fd_type.fresh_const(ctx);
+
+            clauses.push(forall_const(
                 ctx,
-                &[
-                    some_dir._eq(dir),
-                    some_filename._eq(filename),
-                    some_file._eq(file),
-                ],
+                &[&any_fd],
+                &[],
+                &ast::Bool::or(
+                    ctx,
+                    fds.values()
+                        .map(|fd| any_fd._eq(fd))
+                        .collect::<Vec<_>>()
+                        .as_slice(),
+                ),
             ));
         }
 
-        self.solver.assert(&forall_const(
-            ctx,
-            &[&some_dir, &some_filename, &some_file],
-            &[],
-            &Bool::or(ctx, &clauses).ite(
-                &self
-                    .entries_map
-                    .apply(&[&some_dir, &some_filename, &some_file])
-                    .as_bool()
-                    .unwrap(),
-                &self
-                    .entries_map
-                    .apply(&[&some_dir, &some_filename, &some_file])
-                    .as_bool()
-                    .unwrap()
-                    .not(),
-            ),
-        ));
-    }
+        if !files.is_empty() {
+            let some_file = file_type.fresh_const(ctx);
 
-    fn encode_fd_map(
-        &self,
-        ctx: &'ctx Context,
-        fd_mappings: Vec<(&Dynamic<'ctx>, &Datatype<'ctx>)>,
-    ) {
-        let some_fd = Dynamic::fresh_const(ctx, "fs--", &self.fd_sort);
-        let some_file = Datatype::fresh_const(ctx, "fs--", &self.file_datatype.sort);
-        let mut clauses = Vec::with_capacity(fd_mappings.len());
-
-        for (fd, file) in fd_mappings.iter() {
-            clauses.push(Bool::and(ctx, &[some_fd._eq(fd), some_file._eq(file)]));
+            clauses.push(forall_const(
+                ctx,
+                &[&some_file],
+                &[],
+                &ast::Bool::or(
+                    ctx,
+                    files
+                        .values()
+                        .map(|f| some_file._eq(f))
+                        .collect::<Vec<_>>()
+                        .as_slice(),
+                ),
+            ));
         }
 
-        self.solver.assert(&forall_const(
-            ctx,
-            &[&some_fd, &some_file],
-            &[],
-            &Bool::or(ctx, &clauses).ite(
-                &self
-                    .fd_map
-                    .apply(&[&some_fd])
-                    .as_datatype()
-                    .unwrap()
-                    ._eq(&some_file),
-                &self
-                    .fd_map
-                    .apply(&[&some_fd])
-                    .as_datatype()
-                    .unwrap()
-                    ._eq(&some_file)
-                    .not(),
-            ),
-        ));
+        let dir_entry_mapping = DirEntryMapping::new(ctx, &file_type);
+
+        if !self.dir_entry_mappings.is_empty() {
+            let some_parent = file_type.fresh_const(ctx);
+            let some_child = file_type.fresh_const(ctx);
+            let some_name = ast::String::fresh_const(ctx, "fs--name--");
+
+            clauses.push(forall_const(
+                ctx,
+                &[&some_parent, &some_name, &some_child],
+                &[],
+                &ast::Bool::or(
+                    ctx,
+                    self.dir_entry_mappings
+                        .iter()
+                        .map(|((parent, name), child)| {
+                            ast::Bool::and(
+                                ctx,
+                                &[
+                                    some_parent._eq(files.get(parent).unwrap()),
+                                    some_name._eq(&ast::String::from_str(ctx, &name).unwrap()),
+                                    some_child._eq(files.get(child).unwrap()),
+                                ],
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .as_slice(),
+                )
+                .ite(
+                    &dir_entry_mapping.exists(&some_parent, &some_name, &some_child),
+                    &dir_entry_mapping
+                        .exists(&some_parent, &some_name, &some_child)
+                        .not(),
+                ),
+            ));
+        }
+
+        let fd_file_mapping = FdFileMapping::new(ctx, &fd_type, &file_type);
+
+        if !self.fd_file_mappings.is_empty() {
+            let some_fd = fd_type.fresh_const(ctx);
+            let some_file = file_type.fresh_const(ctx);
+
+            clauses.push(forall_const(
+                ctx,
+                &[&some_fd, &some_file],
+                &[],
+                &ast::Bool::or(
+                    ctx,
+                    self.fd_file_mappings
+                        .iter()
+                        .map(|(&fd, &file)| {
+                            ast::Bool::and(
+                                ctx,
+                                &[
+                                    some_fd._eq(fds.get(&fd).unwrap()),
+                                    some_file._eq(files.get(&file).unwrap()),
+                                ],
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .as_slice(),
+                )
+                .ite(
+                    &fd_file_mapping.exists(&some_fd, &some_file),
+                    &fd_file_mapping.exists(&some_fd, &some_file).not(),
+                ),
+            ));
+        }
+
+        EncodedWasiFs {
+            fds,
+            files,
+            clauses,
+            dir_entry_mapping,
+            fd_file_mapping,
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use z3::{
-        ast::{self, exists_const, Dynamic},
-        Config,
-        DatatypeBuilder,
-        SatResult,
-    };
+    use std::fs;
+
+    use tempfile::tempdir;
+    use z3::{Config, SatResult};
 
     use super::*;
 
@@ -217,72 +398,29 @@ mod tests {
         let cfg = Config::new();
         let ctx = Context::new(&cfg);
         let solver = Solver::new(&ctx);
-        let fd_sort = Sort::uninterpreted(&ctx, z3::Symbol::String("fd".to_string()));
-        let file_datatype = DatatypeBuilder::new(&ctx, "file")
-            .variant("regular-file", vec![])
-            .variant("directory", vec![])
-            .finish();
-        let fd = Dynamic::new_const(&ctx, "fd", &fd_sort);
-        let encoder = FsEncoder::new(&ctx, &solver, &fd_sort, &file_datatype);
-        let root = encoder.encode_file(
-            &ctx,
-            &File::Directory(Directory {
-                entries: vec![
-                    DirEntry {
-                        name: "f".to_owned(),
-                        file: File::RegularFile(RegularFile {}),
-                    },
-                    DirEntry {
-                        name: "d".to_owned(),
-                        file: File::Directory(Directory { entries: vec![] }),
-                    },
-                ],
-            }),
-            &fd,
-        );
-        let some_file_f = Datatype::fresh_const(&ctx, "", &file_datatype.sort);
-        let some_file_d = Datatype::fresh_const(&ctx, "", &file_datatype.sort);
+        let tempdir = tempdir().unwrap();
+
+        fs::create_dir_all(tempdir.path().join("d")).unwrap();
+        fs::write(tempdir.path().join("d").join("nested"), &[]).unwrap();
+        fs::write(tempdir.path().join("f"), &[]).unwrap();
+
+        let mut fs = WasiFs::new();
+        let root_dir = fs.push_dir(tempdir.path()).unwrap();
+
+        fs.register_fd(root_dir, Path::new("")).unwrap();
+
+        let fd_type = FdType::new(&ctx);
+        let file_type = FileType::new(&ctx);
+        let encoded_fs = fs.encode(&ctx, &fd_type, &file_type);
+
+        encoded_fs.assert(&solver);
+
+        let some_fd = fd_type.fresh_const(&ctx);
+
+        encoded_fs.some_fd_maps_to_file(&solver, &some_fd, root_dir);
+
         let result = solver.check();
 
         assert_eq!(result, SatResult::Sat);
-
-        let model = solver.get_model().unwrap();
-
-        assert!(model
-            .eval(
-                &exists_const(
-                    &ctx,
-                    &[&some_file_f, &some_file_d],
-                    &[],
-                    &Bool::and(
-                        &ctx,
-                        &[
-                            some_file_f._eq(&some_file_d).not(),
-                            encoder
-                                .entries_map
-                                .apply(&[
-                                    &root,
-                                    &ast::String::from_str(&ctx, "f").unwrap(),
-                                    &some_file_f,
-                                ])
-                                .as_bool()
-                                .unwrap(),
-                            encoder
-                                .entries_map
-                                .apply(&[
-                                    &root,
-                                    &ast::String::from_str(&ctx, "d").unwrap(),
-                                    &some_file_d,
-                                ])
-                                .as_bool()
-                                .unwrap(),
-                        ],
-                    ),
-                ),
-                false,
-            )
-            .unwrap()
-            .as_bool()
-            .unwrap());
     }
 }
