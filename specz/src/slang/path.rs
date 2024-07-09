@@ -5,61 +5,87 @@ use z3::{
     DatatypeBuilder,
     DatatypeSort,
     FuncDecl,
-    Solver,
     Sort,
 };
 
 #[derive(Debug)]
-pub struct PathEncoder<'ctx, 's> {
-    solver: &'s Solver<'ctx>,
+pub struct SegmentType<'ctx>(DatatypeSort<'ctx>);
 
-    segment_datatype: DatatypeSort<'ctx>,
+impl<'ctx> SegmentType<'ctx> {
+    pub fn new(ctx: &'ctx Context) -> Self {
+        Self(
+            DatatypeBuilder::new(ctx, "segment")
+                .variant("separator", vec![])
+                .variant(
+                    "component",
+                    vec![("string", DatatypeAccessor::Sort(Sort::string(ctx)))],
+                )
+                .finish(),
+        )
+    }
 
-    /// Maps path components to their indices.
-    pub component_idx_map: FuncDecl<'ctx>,
-}
+    pub fn sort(&self) -> &Sort {
+        &self.0.sort
+    }
 
-impl<'ctx, 's> PathEncoder<'ctx, 's> {
-    pub fn new(ctx: &'ctx Context, solver: &'s Solver<'ctx>) -> Self {
-        let segment_datatype = DatatypeBuilder::new(ctx, "segment")
-            .variant("separator", vec![])
-            .variant(
-                "component",
-                vec![("string", DatatypeAccessor::Sort(Sort::string(ctx)))],
-            )
-            .finish();
-        let component_idx_map = FuncDecl::new(
-            ctx,
-            "component-idx-map",
-            &[&segment_datatype.sort, &Sort::int(ctx)],
-            &Sort::bool(ctx),
-        );
+    pub fn fresh_const(&self, ctx: &'ctx Context) -> impl Ast {
+        ast::Dynamic::fresh_const(ctx, "path-param--segment--", &self.0.sort)
+    }
 
-        Self {
-            solver,
-            segment_datatype,
-            component_idx_map,
-        }
+    pub fn is_separator(&self, segment: &dyn Ast<'ctx>) -> ast::Bool<'ctx> {
+        self.0.variants[0]
+            .tester
+            .apply(&[segment])
+            .as_bool()
+            .unwrap()
+    }
+
+    pub fn is_component(&self, segment: &dyn Ast<'ctx>) -> ast::Bool<'ctx> {
+        self.0.variants[1]
+            .tester
+            .apply(&[segment])
+            .as_bool()
+            .unwrap()
     }
 
     pub fn component_string(&self, segment: &dyn Ast<'ctx>) -> z3::ast::String<'ctx> {
-        self.segment_datatype.variants[1].accessors[0]
+        self.0.variants[1].accessors[0]
             .apply(&[segment])
             .as_string()
             .unwrap()
     }
+}
 
-    pub fn encode_path(&self, ctx: &'ctx Context, num_segments: usize) -> Vec<Datatype> {
-        let mut segments: Vec<Datatype> = Vec::with_capacity(num_segments);
-        let mut component_idx_mappings = Vec::new();
+#[derive(Clone, Debug)]
+pub struct PathParam {
+    n_segments: usize,
+}
 
-        for i in 0..num_segments {
-            let segment =
-                Datatype::fresh_const(ctx, &format!("path--{i}"), &self.segment_datatype.sort);
+impl PathParam {
+    pub fn new(n_segments: usize) -> Self {
+        Self { n_segments }
+    }
+}
 
-            self.solver.assert(
-                &self.segment_is_component(&segment).implies(
-                    &self
+impl PathParam {
+    pub fn encode(&self, ctx: &Context) -> PathParamEncoding {
+        let segment_type = SegmentType::new(ctx);
+        let mut clauses = Vec::new();
+        let mut segments = Vec::with_capacity(self.n_segments);
+        let mut component_idx_mapping = Vec::new();
+        let component_idx_mapping = FuncDecl::new(
+            ctx,
+            "component-idx-map",
+            &[segment_type.sort(), &Sort::int(ctx)],
+            &Sort::bool(ctx),
+        );
+
+        for i in 0..self.n_segments {
+            let segment = segment_type.fresh_const(ctx);
+
+            clauses.push(
+                segment_type.is_component(&segment).implies(
+                    &segment_type
                         .component_string(&segment)
                         .contains(&z3::ast::String::from_str(ctx, "/").unwrap())
                         .not(),
@@ -68,16 +94,16 @@ impl<'ctx, 's> PathEncoder<'ctx, 's> {
 
             // The first segment must be a component.
             if i == 0 {
-                self.solver.assert(&self.segment_is_component(&segment));
+                clauses.push(segment_type.is_component(&segment));
             }
 
             // Adjacent segments can't both be components.
             if i > 0 {
                 if let Some(prev_segment) = segments.get(i - 1) {
-                    self.solver.assert(
-                        &self
-                            .segment_is_component(&segment)
-                            .implies(&self.segment_is_component(prev_segment).not()),
+                    clauses.push(
+                        segment_type
+                            .is_component(&segment)
+                            .implies(&segment_type.is_component(prev_segment).not()),
                     );
                 }
             }
@@ -88,11 +114,10 @@ impl<'ctx, 's> PathEncoder<'ctx, 's> {
                 let prev_segment = segments.get(j).unwrap();
                 let idx = Int::fresh_const(ctx, "path--");
 
-                self.solver
-                    .assert(&self.segment_is_component(prev_segment).ite(
-                        &idx._eq(&Int::add(ctx, &[&component_idx, &Int::from_u64(ctx, 1)])),
-                        &idx._eq(&component_idx),
-                    ));
+                clauses.push(segment_type.is_component(prev_segment).ite(
+                    &idx._eq(&Int::add(ctx, &[&component_idx, &Int::from_u64(ctx, 1)])),
+                    &idx._eq(&component_idx),
+                ));
 
                 component_idx = idx;
             }
@@ -135,63 +160,15 @@ impl<'ctx, 's> PathEncoder<'ctx, 's> {
             ),
         ));
 
-        segments
-    }
-}
-
-#[derive(Debug)]
-pub struct SegmentType<'ctx>(DatatypeSort<'ctx>);
-
-impl<'ctx> SegmentType<'ctx> {
-    pub fn new(ctx: &'ctx Context) -> Self {
-        Self(
-            DatatypeBuilder::new(ctx, "segment")
-                .variant("separator", vec![])
-                .variant(
-                    "component",
-                    vec![("string", DatatypeAccessor::Sort(Sort::string(ctx)))],
-                )
-                .finish(),
-        )
-    }
-
-    pub fn sort(&self) -> &Sort {
-        &self.0.sort
-    }
-
-    pub fn fresh_const(&self, ctx: &'ctx Context) -> impl Ast {
-        ast::Dynamic::fresh_const(ctx, "path-param--segment--", &self.0.sort)
-    }
-
-    pub fn is_separator(&self, segment: &dyn Ast<'ctx>) -> ast::Bool<'ctx> {
-        self.0.variants[0]
-            .tester
-            .apply(&[segment])
-            .as_bool()
-            .unwrap()
-    }
-
-    pub fn is_component(&self, segment: &dyn Ast<'ctx>) -> ast::Bool<'ctx> {
-        self.0.variants[1]
-            .tester
-            .apply(&[segment])
-            .as_bool()
-            .unwrap()
+        PathParamEncoding { clauses, segments }
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct PathParam {
-    n_components: usize,
+pub struct PathParamEncoding<'ctx, T> {
+    clauses:  Vec<ast::Bool<'ctx>>,
+    segments: Vec<T>,
 }
-
-impl PathParam {
-    pub fn encode(&self) -> PathParamEncoding {
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct PathParamEncoding {}
 
 #[cfg(test)]
 mod tests {
