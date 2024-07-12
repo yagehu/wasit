@@ -102,22 +102,6 @@ impl<'ctx> FdFileMapping<'ctx> {
     }
 }
 
-#[derive(Debug)]
-pub struct FsEncodingContext<'ctx> {
-    fd_sort:       Sort<'ctx>,
-    file_datatype: DatatypeSort<'ctx>,
-}
-
-impl<'ctx> FsEncodingContext<'ctx> {
-    pub fn fd_sort(&self) -> &Sort<'ctx> {
-        &self.fd_sort
-    }
-
-    pub fn file_datatype(&self) -> &DatatypeSort<'ctx> {
-        &self.file_datatype
-    }
-}
-
 #[derive(Default, PartialEq, Eq, Clone, Debug)]
 pub struct Entities<T>(Vec<T>);
 

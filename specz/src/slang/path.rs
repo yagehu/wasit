@@ -5,6 +5,7 @@ use z3::{
     DatatypeBuilder,
     DatatypeSort,
     FuncDecl,
+    Solver,
     Sort,
 };
 
@@ -28,7 +29,7 @@ impl<'ctx> SegmentType<'ctx> {
         &self.0.sort
     }
 
-    pub fn fresh_const(&self, ctx: &'ctx Context) -> impl Ast {
+    pub fn fresh_const(&self, ctx: &'ctx Context) -> ast::Dynamic {
         ast::Dynamic::fresh_const(ctx, "path-param--segment--", &self.0.sort)
     }
 
@@ -68,11 +69,14 @@ impl PathParam {
 }
 
 impl PathParam {
-    pub fn encode(&self, ctx: &Context) -> PathParamEncoding {
-        let segment_type = SegmentType::new(ctx);
+    pub fn encode<'ctx>(
+        &self,
+        ctx: &'ctx Context,
+        segment_type: &'ctx SegmentType,
+    ) -> PathParamEncoding<'ctx, ast::Dynamic<'ctx>> {
         let mut clauses = Vec::new();
-        let mut segments = Vec::with_capacity(self.n_segments);
-        let mut component_idx_mapping = Vec::new();
+        let mut segments: Vec<ast::Dynamic> = Vec::with_capacity(self.n_segments);
+        let mut component_idxs = Vec::new();
         let component_idx_mapping = FuncDecl::new(
             ctx,
             "component-idx-map",
@@ -122,37 +126,40 @@ impl PathParam {
                 component_idx = idx;
             }
 
-            component_idx_mappings.push((segment.clone(), component_idx));
+            component_idxs.push((segment.clone(), component_idx));
             segments.push(segment);
         }
 
-        let mut clauses = Vec::with_capacity(component_idx_mappings.len());
-        let some_segment = Datatype::fresh_const(ctx, "path--", &self.segment_datatype.sort);
+        let some_segment = segment_type.fresh_const(ctx);
         let some_int = Int::fresh_const(ctx, "path--");
 
-        for (component, idx) in component_idx_mappings {
-            clauses.push(Bool::and(
-                ctx,
-                &[
-                    self.segment_is_component(&component),
-                    some_segment._eq(&component),
-                    some_int._eq(&idx),
-                ],
-            ));
-        }
-
-        self.solver.assert(&forall_const(
+        clauses.push(forall_const(
             ctx,
             &[&some_segment, &some_int],
             &[],
-            &Bool::or(ctx, &clauses).ite(
-                &self
-                    .component_idx_map
+            &Bool::or(
+                ctx,
+                &component_idxs
+                    .iter()
+                    .map(|(segment, idx)| {
+                        Bool::and(
+                            ctx,
+                            &[
+                                segment_type.is_component(segment),
+                                some_segment._eq(segment),
+                                some_int._eq(&idx),
+                            ],
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .as_slice(),
+            )
+            .ite(
+                &component_idx_mapping
                     .apply(&[&some_segment, &some_int])
                     .as_bool()
                     .unwrap(),
-                &self
-                    .component_idx_map
+                &component_idx_mapping
                     .apply(&[&some_segment, &some_int])
                     .as_bool()
                     .unwrap()
@@ -160,19 +167,40 @@ impl PathParam {
             ),
         ));
 
-        PathParamEncoding { clauses, segments }
+        PathParamEncoding {
+            clauses,
+            segments,
+            component_idx_mapping,
+        }
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct PathParamEncoding<'ctx, T> {
-    clauses:  Vec<ast::Bool<'ctx>>,
-    segments: Vec<T>,
+    clauses:               Vec<ast::Bool<'ctx>>,
+    segments:              Vec<T>,
+    component_idx_mapping: FuncDecl<'ctx>,
+}
+
+impl<'ctx, T> PathParamEncoding<'ctx, T> {
+    pub fn assert(&self, solver: &Solver) {
+        self.clauses.iter().for_each(|clause| {
+            solver.assert(clause);
+        });
+    }
+
+    pub fn segments(&self) -> impl Iterator<Item = &T> {
+        self.segments.iter()
+    }
+
+    pub fn component_idx_mapping(&self) -> &FuncDecl {
+        &self.component_idx_mapping
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use z3::{Config, SatResult};
+    use z3::{Config, SatResult, Solver};
 
     use super::*;
 
@@ -181,11 +209,14 @@ mod tests {
         let cfg = Config::new();
         let ctx = Context::new(&cfg);
         let solver = Solver::new(&ctx);
-        let encoder = PathEncoder::new(&ctx, &solver);
-        let segments = encoder.encode_path(&ctx, 3);
+        let path_param = PathParam::new(6);
+        let segment_type = SegmentType::new(&ctx);
+        let encoding = path_param.encode(&ctx, &segment_type);
+        let segments = encoding.segments().collect::<Vec<_>>();
 
-        solver.assert(&encoder.segment_is_separator(segments.get(1).unwrap()));
-        solver.assert(&encoder.segment_is_component(segments.get(2).unwrap()));
+        encoding.assert(&solver);
+        solver.assert(&segment_type.is_separator(*segments.get(1).unwrap()));
+        solver.assert(&segment_type.is_component(*segments.get(2).unwrap()));
 
         assert!(solver.check() == SatResult::Sat);
 
@@ -194,9 +225,9 @@ mod tests {
 
         assert!(model
             .eval(
-                &encoder
-                    .component_idx_map
-                    .apply(&[segments.first().unwrap(), &Int::from_u64(&ctx, 0)]),
+                &encoding
+                    .component_idx_mapping()
+                    .apply(&[*segments.first().unwrap(), &Int::from_u64(&ctx, 0)]),
                 false,
             )
             .unwrap()
@@ -210,9 +241,9 @@ mod tests {
                     &ctx,
                     &[&some_int],
                     &[],
-                    &encoder
-                        .component_idx_map
-                        .apply(&[segments.get(1).unwrap(), &some_int])
+                    &encoding
+                        .component_idx_mapping()
+                        .apply(&[*segments.get(1).unwrap(), &some_int])
                         .as_bool()
                         .unwrap()
                         .not(),
@@ -224,9 +255,9 @@ mod tests {
             .unwrap());
         assert!(model
             .eval(
-                &encoder
-                    .component_idx_map
-                    .apply(&[segments.get(2).unwrap(), &Int::from_u64(&ctx, 1)]),
+                &encoding
+                    .component_idx_mapping()
+                    .apply(&[*segments.get(2).unwrap(), &Int::from_u64(&ctx, 1)]),
                 false,
             )
             .unwrap()
@@ -241,15 +272,17 @@ mod tests {
         let cfg = Config::new();
         let ctx = Context::new(&cfg);
         let solver = Solver::new(&ctx);
-        let encoder = PathEncoder::new(&ctx, &solver);
-        let segments = encoder.encode_path(&ctx, 3);
+        let path = PathParam::new(3);
+        let segment_type = SegmentType::new(&ctx);
+        let encoding = path.encode(&ctx, &segment_type);
 
+        encoding.assert(&solver);
         solver.assert(
-            &encoder
-                .component_string(segments.first().unwrap())
+            &segment_type
+                .component_string(encoding.segments().next().unwrap())
                 ._eq(&z3::ast::String::from_str(&ctx, "/").unwrap()),
         );
 
-        assert!(solver.check() == SatResult::Unsat);
+        assert_eq!(solver.check(), SatResult::Unsat);
     }
 }
