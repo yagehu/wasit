@@ -168,8 +168,6 @@ impl WasiRunner for Wasmer<'_> {
         command.stderr(process::Stdio::piped());
         command.current_dir(working_dir);
 
-        use std::os::unix::ffi::OsStrExt;
-
         (command, base_dir.map(|_p| "base".as_bytes().to_vec()))
     }
 }

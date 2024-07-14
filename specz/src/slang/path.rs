@@ -1,5 +1,5 @@
 use z3::{
-    ast::{self, forall_const, Ast, Bool, Datatype, Int},
+    ast::{self, forall_const, Ast},
     Context,
     DatatypeAccessor,
     DatatypeBuilder,
@@ -112,14 +112,17 @@ impl PathParam {
                 }
             }
 
-            let mut component_idx = Int::from_u64(ctx, 0);
+            let mut component_idx = ast::Int::from_u64(ctx, 0);
 
             for j in 0..i {
                 let prev_segment = segments.get(j).unwrap();
-                let idx = Int::fresh_const(ctx, "path--");
+                let idx = ast::Int::fresh_const(ctx, "path--");
 
                 clauses.push(segment_type.is_component(prev_segment).ite(
-                    &idx._eq(&Int::add(ctx, &[&component_idx, &Int::from_u64(ctx, 1)])),
+                    &idx._eq(&ast::Int::add(
+                        ctx,
+                        &[&component_idx, &ast::Int::from_u64(ctx, 1)],
+                    )),
                     &idx._eq(&component_idx),
                 ));
 
@@ -131,18 +134,18 @@ impl PathParam {
         }
 
         let some_segment = segment_type.fresh_const(ctx);
-        let some_int = Int::fresh_const(ctx, "path--");
+        let some_int = ast::Int::fresh_const(ctx, "path--");
 
         clauses.push(forall_const(
             ctx,
             &[&some_segment, &some_int],
             &[],
-            &Bool::or(
+            &ast::Bool::or(
                 ctx,
                 &component_idxs
                     .iter()
                     .map(|(segment, idx)| {
-                        Bool::and(
+                        ast::Bool::and(
                             ctx,
                             &[
                                 segment_type.is_component(segment),
@@ -221,13 +224,13 @@ mod tests {
         assert!(solver.check() == SatResult::Sat);
 
         let model = solver.get_model().unwrap();
-        let some_int = Int::fresh_const(&ctx, "");
+        let some_int = ast::Int::fresh_const(&ctx, "");
 
         assert!(model
             .eval(
                 &encoding
                     .component_idx_mapping()
-                    .apply(&[*segments.first().unwrap(), &Int::from_u64(&ctx, 0)]),
+                    .apply(&[*segments.first().unwrap(), &ast::Int::from_u64(&ctx, 0)]),
                 false,
             )
             .unwrap()
@@ -257,7 +260,7 @@ mod tests {
             .eval(
                 &encoding
                     .component_idx_mapping()
-                    .apply(&[*segments.get(2).unwrap(), &Int::from_u64(&ctx, 1)]),
+                    .apply(&[*segments.get(2).unwrap(), &ast::Int::from_u64(&ctx, 1)]),
                 false,
             )
             .unwrap()
