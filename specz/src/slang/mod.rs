@@ -41,12 +41,17 @@ impl<'ctx> OptionType<'ctx> {
     fn inner(&self, x: &dyn Ast<'ctx>) -> ast::Dynamic {
         self.0.variants[1].accessors[0].apply(&[x])
     }
+
+    fn fresh_const(&self, ctx: &'ctx Context) -> ast::Dynamic {
+        ast::Dynamic::fresh_const(ctx, "", &self.0.sort)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::{fs, path::Path};
 
+    use serde::de::IntoDeserializer;
     use tempfile::tempdir;
     use z3::{
         ast::{self, exists_const},
@@ -74,14 +79,26 @@ mod tests {
         let fd_type = FdType::new(&ctx);
         let file_type = FileType::new(&ctx);
         let segment_type = SegmentType::new(&ctx);
+        let option_file = OptionType::new(&ctx, file_type.sort());
         let option_segment = OptionType::new(&ctx, segment_type.sort());
+        let root_dir = wasi_fs.push_dir(tempdir.path()).unwrap();
 
         fs::create_dir_all(tempdir.path().join("d")).unwrap();
         fs::write(tempdir.path().join("f"), &[]).unwrap();
-        wasi_fs.push_dir(tempdir.path()).unwrap();
+        wasi_fs.register_fd(root_dir, Path::new("")).unwrap();
 
+        let param_fd = fd_type.fresh_const(&ctx);
         let fs_encoding = wasi_fs.encode(&ctx, &fd_type, &file_type);
         let path_encoding = path.encode(&ctx, &segment_type);
+        let mut curr_component_file = option_file.fresh_const(&ctx);
+
+        solver.assert(&ast::Bool::and(
+            &ctx,
+            &[
+                option_file.is_some(&curr_component_file),
+                fs_encoding.fd_maps_to_file(fd, root_dir),
+            ],
+        ));
 
         for segment in path_encoding.segments() {
             let next_component = ast::Dynamic::fresh_const(&ctx, "", &option_segment.sort());

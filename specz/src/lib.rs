@@ -3,6 +3,8 @@ pub mod param_generator;
 pub mod resource;
 pub mod slang;
 
+mod type_def;
+
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use self::resource::Context;
@@ -21,7 +23,7 @@ use wazzi_specz_wasi::{
     VariantValue,
     WasiType,
     WasiValue,
-    WazziType,
+    WazziTypedef,
 };
 use wazzi_store::TraceStore;
 use z3::ast::Ast;
@@ -217,7 +219,7 @@ pub struct FunctionScope<'ctx, 'e, 'r> {
 impl<'ctx, 'e, 'r> FunctionScope<'ctx, 'e, 'r> {
     fn wasi_type_to_z3_sort(
         ctx: &'ctx z3::Context,
-        ty: &WazziType,
+        ty: &WazziTypedef,
         datatypes: &mut HashMap<String, z3::DatatypeSort<'ctx>>,
     ) {
         let name = ty.name.as_ref().unwrap().to_string();

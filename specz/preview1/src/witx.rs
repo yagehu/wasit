@@ -1,15 +1,17 @@
 pub mod elang;
 pub mod slang;
 
-use eyre::{eyre as err, Context as _};
+use std::collections::BTreeMap;
+
+use elang::Program;
+use eyre::{eyre as err, Context as _, ContextCompat as _};
 use pest::{
     iterators::{Pair, Pairs},
     Parser as _,
 };
 use pest_derive::Parser;
 
-use wazzi_specz_wasi::{
-    effects,
+use crate::spec::{
     FlagsType,
     Function,
     FunctionParam,
@@ -20,10 +22,11 @@ use wazzi_specz_wasi::{
     RecordMemberType,
     RecordType,
     Spec,
+    TypeDef,
+    TypeRef,
     VariantCaseType,
     VariantType,
     WasiType,
-    WazziType,
 };
 
 #[derive(Parser)]
@@ -64,20 +67,57 @@ pub fn preview1(spec: &mut Spec) -> Result<(), eyre::Error> {
                                 panic!("{target_type_name}");
                             },
                             | Rule::r#type => {
-                                if spec.types_map.get(name).is_some() {
+                                if spec.types.get_by_key(name).is_some() {
                                     return Err(err!("typename {name} already defined"));
                                 }
 
-                                let ty = preview1_type(
-                                    spec,
-                                    pair,
-                                    Some(name.to_owned()),
-                                    annotation_pairs,
-                                )
-                                .wrap_err("failed to handle type pair")?;
+                                let wasi = preview1_wasi_type(spec, pair)
+                                    .wrap_err("failed to handle type pair")?;
+                                let attributes = if !annotation_pairs.is_empty() {
+                                    let mut attributes = BTreeMap::new();
 
-                                spec.types.push(ty);
-                                spec.types_map.insert(name.to_owned(), spec.types.len() - 1);
+                                    for pair in annotation_pairs {
+                                        match pair.as_rule() {
+                                            | Rule::annotation_expr => {
+                                                let mut pairs = pair.into_inner();
+                                                let annot = pairs.next().unwrap();
+
+                                                if annot.as_str().strip_prefix('@').unwrap()
+                                                    == "attribute"
+                                                {
+                                                    let name = pairs
+                                                        .next()
+                                                        .unwrap()
+                                                        .as_str()
+                                                        .strip_prefix('$')
+                                                        .unwrap();
+                                                    let tref =
+                                                        preview1_tref(spec, pairs.next().unwrap())?;
+
+                                                    attributes.insert(name.to_owned(), tref);
+
+                                                    continue;
+                                                }
+
+                                                panic!("not attribute annotation")
+                                            },
+                                            | _ => panic!("not annotation"),
+                                        }
+                                    }
+
+                                    Some(attributes)
+                                } else {
+                                    None
+                                };
+
+                                spec.types.push(
+                                    name.to_string(),
+                                    TypeDef {
+                                        name: name.to_string(),
+                                        wasi,
+                                        attributes,
+                                    },
+                                );
                             },
                             | _ => unreachable!(),
                         }
@@ -94,9 +134,7 @@ pub fn preview1(spec: &mut Spec) -> Result<(), eyre::Error> {
                 };
                 let ty = preview1_module(spec, pairs)?;
 
-                spec.interfaces.push(ty);
-                spec.interfaces_map
-                    .insert(name.to_owned(), spec.interfaces.len() - 1);
+                spec.interfaces.push(name.to_string(), ty);
             },
             | Rule::EOI => (),
             | _ => panic!("{:?}", pair.as_rule()),
@@ -129,7 +167,7 @@ fn preview1_module(spec: &mut Spec, pairs: Pairs<'_, Rule>) -> Result<Interface,
         let mut results = Vec::new();
         let mut r#return = None;
         let mut input_contract = None;
-        let mut effects = effects::Program { stmts: Vec::new() };
+        let mut effects = Program { stmts: Vec::new() };
 
         for pair in pairs {
             match pair.as_rule() {
@@ -142,10 +180,10 @@ fn preview1_module(spec: &mut Spec, pairs: Pairs<'_, Rule>) -> Result<Interface,
                         | _ => unreachable!(),
                     };
                     let tref_pair = pairs.next().unwrap();
-                    let ty =
+                    let tref =
                         preview1_tref(spec, tref_pair).wrap_err("failed to handle param tref")?;
 
-                    params.push(FunctionParam { name, ty });
+                    params.push(FunctionParam { name, tref });
                 },
                 | Rule::result => {
                     let mut pairs = pair.into_inner();
@@ -155,10 +193,10 @@ fn preview1_module(spec: &mut Spec, pairs: Pairs<'_, Rule>) -> Result<Interface,
                         | _ => unreachable!(),
                     };
                     let tref_pair = pairs.next().unwrap();
-                    let ty =
+                    let tref =
                         preview1_tref(spec, tref_pair).wrap_err("failed to handle param tref")?;
 
-                    match &ty.wasi {
+                    match tref.wasi_type(spec) {
                         | WasiType::Variant(variant) => {
                             match (variant.cases.first(), variant.cases.get(1)) {
                                 | (Some(c1), Some(c2))
@@ -169,14 +207,14 @@ fn preview1_module(spec: &mut Spec, pairs: Pairs<'_, Rule>) -> Result<Interface,
                                     if let Some(payload) = c1.payload.as_ref() {
                                         results.push(FunctionResult {
                                             name: "expected".to_owned(),
-                                            ty:   payload.clone(),
+                                            tref: payload.to_owned(),
                                         });
                                     }
                                 },
-                                | _ => results.push(FunctionResult { name, ty }),
+                                | _ => results.push(FunctionResult { name, tref }),
                             }
                         },
-                        | _ => results.push(FunctionResult { name, ty }),
+                        | _ => results.push(FunctionResult { name, tref }),
                     }
                 },
                 | Rule::annotation_expr => {
@@ -227,14 +265,10 @@ fn preview1_module(spec: &mut Spec, pairs: Pairs<'_, Rule>) -> Result<Interface,
     Ok(interface)
 }
 
-fn preview1_type(
-    spec: &mut Spec,
-    pair: Pair<'_, Rule>,
-    name: Option<String>,
-    annotations: Vec<Pair<'_, Rule>>,
-) -> Result<WazziType, eyre::Error> {
+fn preview1_wasi_type(spec: &mut Spec, pair: Pair<'_, Rule>) -> Result<WasiType, eyre::Error> {
     let pair = pair.into_inner().next().unwrap();
-    let wasi = match pair.as_rule() {
+
+    Ok(match pair.as_rule() {
         | Rule::s64 => WasiType::S64,
         | Rule::r#u8 => WasiType::U8,
         | Rule::r#u16 => WasiType::U16,
@@ -306,10 +340,10 @@ fn preview1_type(
                 | Rule::id => tag_pair.as_str().strip_prefix('$').unwrap(),
                 | _ => unreachable!(),
             };
-            let tag_type = match spec.types_map.get(tag_name) {
-                | Some(&i) => spec.types.get(i).unwrap(),
-                | None => return Err(err!("unknown tag type {tag_name}")),
-            };
+            let tag_type = spec
+                .types
+                .get_by_key(tag_name)
+                .wrap_err("unknown tag type")?;
             let tag = match &tag_type.wasi {
                 | WasiType::Variant(variant) => variant,
                 | _ => panic!(),
@@ -324,14 +358,10 @@ fn preview1_type(
                     },
                     | _ => return Err(err!("unexpected field {:?}", case_pair)),
                 };
-                let payload = match spec.types_map.get(case_type_name) {
-                    | Some(&i) => spec.types.get(i).unwrap().clone(),
-                    | None => return Err(err!("unknown type id {case_type_name}")),
-                };
 
                 cases.push(VariantCaseType {
                     name:    case_name_type.name.clone(),
-                    payload: Some(payload),
+                    payload: Some(TypeRef::Named(case_type_name.to_string())),
                 });
             }
 
@@ -389,20 +419,9 @@ fn preview1_type(
                     | Rule::type_ref => tref_pair.into_inner().next().unwrap(),
                     | _ => unreachable!(),
                 };
-                let ty = match tref_pair.as_rule() {
-                    | Rule::id => {
-                        let id = tref_pair.as_str().strip_prefix('$').unwrap();
+                let tref = preview1_tref(spec, tref_pair)?;
 
-                        match spec.types_map.get(id) {
-                            | Some(&i) => spec.types.get(i).unwrap().clone(),
-                            | None => return Err(err!("unknown type ref {id}")),
-                        }
-                    },
-                    | Rule::r#type => preview1_type(spec, tref_pair, None, vec![])?,
-                    | _ => unreachable!(),
-                };
-
-                members.push(RecordMemberType { name, ty });
+                members.push(RecordMemberType { name, tref });
             }
 
             WasiType::Record(RecordType { members })
@@ -415,49 +434,10 @@ fn preview1_type(
             WasiType::List(Box::new(ListType { item }))
         },
         | t => return Err(err!("unexpected type {:?}", t)),
-    };
-    let mut attributes = Vec::new();
-
-    for pair in annotations {
-        match pair.as_rule() {
-            | Rule::annotation_expr => {
-                let mut pairs = pair.into_inner();
-                let annot = pairs.next().unwrap();
-
-                if annot.as_str().strip_prefix('@').unwrap() == "attribute" {
-                    let name = pairs.next().unwrap().as_str().strip_prefix('$').unwrap();
-                    let type_name = pairs.next().unwrap().as_str().strip_prefix('$').unwrap();
-
-                    attributes.push((
-                        name.to_owned(),
-                        spec.types
-                            .get(
-                                *spec
-                                    .types_map
-                                    .get(type_name)
-                                    .expect(&format!("{type_name}")),
-                            )
-                            .unwrap()
-                            .clone(),
-                    ));
-
-                    continue;
-                }
-
-                panic!("not attribute annotation")
-            },
-            | _ => panic!("not annotation"),
-        }
-    }
-
-    Ok(WazziType {
-        name,
-        wasi,
-        attributes,
     })
 }
 
-fn preview1_tref(spec: &mut Spec, pair: Pair<'_, Rule>) -> Result<WazziType, eyre::Error> {
+fn preview1_tref(spec: &mut Spec, pair: Pair<'_, Rule>) -> Result<TypeRef, eyre::Error> {
     let pair = match pair.as_rule() {
         | Rule::type_ref => pair.into_inner().next().unwrap(),
         | _ => unreachable!(),
@@ -467,12 +447,9 @@ fn preview1_tref(spec: &mut Spec, pair: Pair<'_, Rule>) -> Result<WazziType, eyr
         | Rule::id => {
             let id = pair.as_str().strip_prefix('$').unwrap();
 
-            match spec.types_map.get(id) {
-                | Some(i) => Ok(spec.types.get(*i).cloned().unwrap()),
-                | None => Err(err!("unknown type ref {id}")),
-            }
+            Ok(TypeRef::Named(id.to_string()))
         },
-        | Rule::r#type => preview1_type(spec, pair, None, vec![]),
+        | Rule::r#type => Ok(TypeRef::Anonymous(preview1_wasi_type(spec, pair)?)),
         | _ => unreachable!("{:?}", pair),
     }
 }

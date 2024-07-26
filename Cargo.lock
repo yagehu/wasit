@@ -129,6 +129,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "bimap"
+version = "0.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "230c5f1ca6a325a32553f8640d31ac9b49f2411e901e427570154868b46da4f7"
+
+[[package]]
 name = "bindgen"
 version = "0.69.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -631,6 +637,13 @@ checksum = "634d9b1461af396cad843f47fdba5597a4f9e6ddd4bfb6ff5d85028c25cb12f6"
 dependencies = [
  "unicode-bidi",
  "unicode-normalization",
+]
+
+[[package]]
+name = "idxspace"
+version = "0.0.0"
+dependencies = [
+ "bimap",
 ]
 
 [[package]]
@@ -1945,9 +1958,11 @@ name = "wazzi-specz"
 version = "0.1.0"
 dependencies = [
  "arbitrary",
+ "bimap",
  "clap",
  "color-eyre",
  "eyre",
+ "idxspace",
  "itertools",
  "num-bigint",
  "rand",
@@ -1962,7 +1977,6 @@ dependencies = [
  "wazzi-executor-pb-rust",
  "wazzi-runners",
  "wazzi-specz-preview1",
- "wazzi-specz-wasi",
  "wazzi-store",
  "z3",
  "z3-sys",
@@ -1972,25 +1986,18 @@ dependencies = [
 name = "wazzi-specz-preview1"
 version = "0.1.0"
 dependencies = [
+ "arbitrary",
  "color-eyre",
  "eyre",
+ "idxspace",
  "num-bigint",
  "pest",
  "pest_derive",
  "tracing",
  "tracing-error",
  "tracing-subscriber",
- "wazzi-specz-wasi",
-]
-
-[[package]]
-name = "wazzi-specz-wasi"
-version = "0.1.0"
-dependencies = [
- "arbitrary",
- "num-bigint",
- "serde",
  "wazzi-executor-pb-rust",
+ "z3",
 ]
 
 [[package]]

@@ -225,12 +225,9 @@ impl<'ctx> WasiFsEncoding<'ctx> {
         self.clauses.iter().for_each(|clause| solver.assert(clause));
     }
 
-    pub fn some_fd_maps_to_file(&self, solver: &Solver, fd: &dyn Ast<'ctx>, file: FileId) {
-        solver.assert(
-            &self
-                .fd_file_mapping
-                .exists(fd, self.files.get(&file).unwrap()),
-        );
+    pub fn fd_maps_to_file(&self, fd: &dyn Ast<'ctx>, file: FileId) -> ast::Bool {
+        self.fd_file_mapping
+            .exists(fd, self.files.get(&file).unwrap())
     }
 }
 
@@ -401,7 +398,7 @@ mod tests {
 
         let some_fd = fd_type.fresh_const(&ctx);
 
-        fs_encoding.some_fd_maps_to_file(&solver, &some_fd, root_dir);
+        solver.assert(&fs_encoding.fd_maps_to_file(&some_fd, root_dir));
 
         let result = solver.check();
 
