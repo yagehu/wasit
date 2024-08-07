@@ -1,7 +1,12 @@
 use arbitrary::Unstructured;
-use wazzi_specz_wasi::Function;
 
-use crate::{param_generator::ParamsGenerator, resource::Context, Environment, Value};
+use crate::{
+    param_generator::ParamsGenerator,
+    preview1::spec::{Function, TypeRef},
+    resource::Context,
+    Environment,
+    Value,
+};
 
 #[derive(Clone, Copy, Debug)]
 pub struct StatelessParamsGenerator;
@@ -18,22 +23,39 @@ impl ParamsGenerator for StatelessParamsGenerator {
         let mut string_prefix: Option<Vec<u8>> = None;
 
         for param in function.params.iter() {
-            if param.ty.attributes.is_empty() {
-                params.push(Value {
-                    wasi:     param
-                        .ty
-                        .wasi
-                        .arbitrary_value(u, string_prefix.as_ref().map(|sp| sp.as_slice()))?,
-                    resource: None,
-                });
+            let name = match &param.tref {
+                | TypeRef::Named(name) => {
+                    match &env.spec.types.get_by_key(name).unwrap().attributes {
+                        | Some(_attributes) => name,
+                        | None => {
+                            params.push(Value {
+                                wasi:     param.tref.arbitrary_value(
+                                    &env.spec,
+                                    u,
+                                    string_prefix.as_ref().map(|sp| sp.as_slice()),
+                                )?,
+                                resource: None,
+                            });
 
-                continue;
-            }
+                            continue;
+                        },
+                    }
+                },
+                | TypeRef::Anonymous(_) => {
+                    params.push(Value {
+                        wasi:     param.tref.arbitrary_value(
+                            &env.spec,
+                            u,
+                            string_prefix.as_ref().map(|sp| sp.as_slice()),
+                        )?,
+                        resource: None,
+                    });
 
-            let resources = env
-                .resources_by_types
-                .get(param.ty.name.as_ref().unwrap())
-                .unwrap();
+                    continue;
+                },
+            };
+
+            let resources = env.resources_by_types.get(name).unwrap();
             let resource_pool = resources.iter().cloned().collect::<Vec<_>>();
             let resource_idx = *u.choose(&resource_pool)?;
             let (resource, maybe_string_prefix) = ctx.resources.get(&resource_idx).unwrap();

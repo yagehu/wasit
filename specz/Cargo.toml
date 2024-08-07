@@ -9,7 +9,6 @@ idxspace.workspace = true
 wazzi-executor-pb-rust.workspace = true
 wazzi-executor.workspace = true
 wazzi-runners.workspace = true
-wazzi-specz-preview1.workspace = true
 wazzi-store.workspace = true
 
 arbitrary.workspace = true
@@ -20,6 +19,8 @@ walkdir.workspace = true
 eyre.workspace = true
 itertools.workspace = true
 num-bigint.workspace = true
+pest.workspace = true
+pest_derive.workspace = true
 rand.workspace = true
 serde.workspace = true
 tracing.workspace = true

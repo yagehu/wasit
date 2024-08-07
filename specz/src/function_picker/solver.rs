@@ -1,7 +1,12 @@
 use arbitrary::Unstructured;
-use wazzi_specz_wasi::{Function, Interface, Spec};
 
-use crate::{function_picker::FunctionPicker, resource::Context, Environment, FunctionScope};
+use crate::{
+    function_picker::FunctionPicker,
+    preview1::spec::{Function, Interface, Spec},
+    resource::Context,
+    solve::FunctionScope,
+    Environment,
+};
 
 #[derive(Clone, Copy, Debug)]
 pub struct SolverPicker;
@@ -10,6 +15,7 @@ impl FunctionPicker for SolverPicker {
     fn pick_function<'i>(
         &self,
         u: &mut Unstructured,
+        spec: &Spec,
         interface: &'i Interface,
         env: &Environment,
         ctx: &Context,
@@ -27,9 +33,9 @@ impl FunctionPicker for SolverPicker {
             solver_params.set_u32("smt.random_seed", random_seed);
             solver.set_params(&solver_params);
 
-            let scope = FunctionScope::new(&z3_ctx, solver, env, ctx, function);
+            let scope = FunctionScope::new(&z3_ctx, spec, ctx, env, function);
 
-            if scope.solve_input_contract(&z3_ctx, u)?.is_some() {
+            if scope.solve_input_contract(&z3_ctx, &solver, u)?.is_some() {
                 candidates.push(function);
             }
         }

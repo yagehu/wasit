@@ -1,12 +1,12 @@
 use arbitrary::Unstructured;
-use eyre::ContextCompat;
-use wazzi_specz_wasi::Function;
+use eyre::ContextCompat as _;
 
 use crate::{
     param_generator::ParamsGenerator,
+    preview1::spec::Function,
     resource::Context,
+    solve::FunctionScope,
     Environment,
-    FunctionScope,
     Value,
 };
 
@@ -31,9 +31,9 @@ impl ParamsGenerator for StatefulParamsGenerator {
         solver_params.set_u32("smt.random_seed", random_seed);
         solver.set_params(&solver_params);
 
-        let function_scope = FunctionScope::new(&z3_ctx, solver, env, ctx, function);
+        let function_scope = FunctionScope::new(&z3_ctx, &env.spec, ctx, env, function);
         let params = function_scope
-            .solve_input_contract(&z3_ctx, u)?
+            .solve_input_contract(&z3_ctx, &solver, u)?
             .wrap_err("no solution found")?;
 
         Ok(params)

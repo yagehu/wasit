@@ -51,7 +51,6 @@ impl<'ctx> OptionType<'ctx> {
 mod tests {
     use std::{fs, path::Path};
 
-    use serde::de::IntoDeserializer;
     use tempfile::tempdir;
     use z3::{
         ast::{self, exists_const},
@@ -96,7 +95,7 @@ mod tests {
             &ctx,
             &[
                 option_file.is_some(&curr_component_file),
-                fs_encoding.fd_maps_to_file(fd, root_dir),
+                fs_encoding.fd_maps_to_file(&param_fd, root_dir),
             ],
         ));
 

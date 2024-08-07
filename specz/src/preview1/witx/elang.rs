@@ -1,7 +1,7 @@
 use pest::iterators::Pair;
 use pest_derive::Parser;
 
-use crate::spec::{Spec, VariantValue, WasiValue};
+use crate::preview1::spec::{Spec, VariantValue, WasiValue};
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum Stmt {
@@ -26,7 +26,7 @@ pub enum Expr {
 }
 
 #[derive(Parser)]
-#[grammar = "witx/elang.pest"]
+#[grammar = "preview1/witx/elang.pest"]
 pub struct Parser;
 
 pub fn to_stmt(spec: &Spec, pair: Pair<'_, Rule>) -> Result<Stmt, eyre::Error> {

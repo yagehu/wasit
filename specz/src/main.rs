@@ -32,12 +32,15 @@ use wazzi_specz::{
         stateless::StatelessParamsGenerator,
         ParamsGenerator,
     },
+    preview1::{
+        spec::{Spec, WasiValue},
+        witx,
+    },
     resource::Context,
     Call,
     Environment,
     Resource,
 };
-use wazzi_specz_wasi::{Spec, WasiValue};
 use wazzi_store::FuzzStore;
 
 #[derive(Parser, Debug)]
@@ -107,7 +110,7 @@ fn main() -> Result<(), eyre::Error> {
 
     let mut spec = Spec::new();
 
-    wazzi_specz_preview1::witx::preview1(&mut spec)?;
+    witx::preview1(&mut spec)?;
 
     let cmd = Cmd::parse();
     let mut store = FuzzStore::new(Path::new("abc")).wrap_err("failed to init fuzz store")?;
@@ -204,7 +207,7 @@ impl<'s> Fuzzer<'s> {
         let fdflags = env
             .spec()
             .types
-            .get(*env.spec().types_map.get("fdflags").unwrap())
+            .get_by_key("fdflags")
             .unwrap()
             .wasi
             .flags()
@@ -212,7 +215,7 @@ impl<'s> Fuzzer<'s> {
         let filetype = env
             .spec()
             .types
-            .get(*env.spec().types_map.get("filetype").unwrap())
+            .get_by_key("filetype")
             .unwrap()
             .wasi
             .variant()
@@ -271,7 +274,7 @@ impl<'s> Fuzzer<'s> {
                             let n_live_threads = n_live_threads.clone();
                             let interface = spec
                                 .interfaces
-                                .get(*spec.interfaces_map.get("wasi_snapshot_preview1").unwrap())
+                                .get_by_key("wasi_snapshot_preview1")
                                 .unwrap();
                             let function_picker = self.function_picker.clone();
                             let params_generator = self.params_generator.clone();
@@ -323,6 +326,7 @@ impl<'s> Fuzzer<'s> {
 
                                     let function = function_picker.pick_function(
                                         &mut u,
+                                        spec,
                                         interface,
                                         &env.read().unwrap(),
                                         &ctx,
@@ -376,31 +380,35 @@ impl<'s> Fuzzer<'s> {
                                             function
                                                 .results
                                                 .iter()
-                                                .filter(|result| !result.ty.attributes.is_empty())
-                                                .map(|result| {
-                                                    (
-                                                        result.name.clone(),
-                                                        env.write().unwrap().new_resource(
-                                                            result
-                                                                .ty
-                                                                .name
-                                                                .as_ref()
-                                                                .unwrap()
-                                                                .to_string(),
-                                                            Resource {
-                                                                attributes: result
-                                                                    .ty
-                                                                    .attributes
-                                                                    .iter()
-                                                                    .map(|(name, ty)| {
-                                                                        (
-                                                                            name.clone(),
-                                                                            ty.wasi.zero_value(),
-                                                                        )
-                                                                    })
-                                                                    .collect(),
-                                                            },
-                                                        ),
+                                                .filter_map(|result| {
+                                                    result.tref.resource_type_def(spec).map(
+                                                        |tdef| {
+                                                            (
+                                                                result.name.clone(),
+                                                                env.write().unwrap().new_resource(
+                                                                    tdef.name.clone(),
+                                                                    Resource {
+                                                                        attributes: tdef
+                                                                            .attributes
+                                                                            .as_ref()
+                                                                            .unwrap()
+                                                                            .iter()
+                                                                            .map(|(name, tref)| {
+                                                                                (
+                                                                                    name.clone(),
+                                                                                    tref.wasi_type(
+                                                                                        spec,
+                                                                                    )
+                                                                                    .zero_value(
+                                                                                        spec,
+                                                                                    ),
+                                                                                )
+                                                                            })
+                                                                            .collect(),
+                                                                    },
+                                                                ),
+                                                            )
+                                                        },
                                                     )
                                                 })
                                                 .collect::<HashMap<_, _>>()

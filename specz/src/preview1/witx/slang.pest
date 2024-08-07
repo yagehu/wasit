@@ -29,7 +29,7 @@ num_lit = @{ ASCII_DIGIT+ }
 
 attr_get = { "(" ~ "@attr.get" ~ term ~ id ~ ")" }
 
-flags_get = { "(" ~ "@flags.get" ~ term ~ id ~ id ~ ")" }
+flags_get = { "(" ~ "@flags.get" ~ term ~ id ~ ")" }
 
 int_add = { "(" ~ "@int.add" ~ term ~ term ~ ")" }
 int_le = { "(" ~ "@int.le" ~ term ~ term ~ ")" }

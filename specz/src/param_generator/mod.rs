@@ -4,9 +4,8 @@ pub mod stateless;
 use std::fmt;
 
 use arbitrary::Unstructured;
-use wazzi_specz_wasi::Function;
 
-use crate::{resource::Context, Environment, Value};
+use crate::{preview1::spec::Function, resource::Context, Environment, Value};
 
 pub trait ParamsGenerator: fmt::Debug {
     fn generate_params(

@@ -1,16 +1,21 @@
 pub mod resource;
 pub mod solver;
 
-use arbitrary::Unstructured;
 use std::fmt;
-use wazzi_specz_wasi::{Function, Interface};
 
-use crate::{resource::Context, Environment};
+use arbitrary::Unstructured;
+
+use crate::{
+    preview1::spec::{Function, Interface, Spec},
+    resource::Context,
+    Environment,
+};
 
 pub trait FunctionPicker: fmt::Debug {
     fn pick_function<'i>(
         &self,
         u: &mut Unstructured,
+        spec: &Spec,
         interface: &'i Interface,
         env: &Environment,
         ctx: &Context,

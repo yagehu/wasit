@@ -53,7 +53,6 @@ pub struct Param {
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct FlagsGet {
     pub target: Term,
-    pub r#type: String,
     pub field:  String,
 }
 
@@ -83,7 +82,7 @@ pub struct VariantConst {
 }
 
 #[derive(Parser)]
-#[grammar = "witx/slang.pest"]
+#[grammar = "preview1/witx/slang.pest"]
 pub struct Parser;
 
 pub fn to_term(pair: Pair<'_, Rule>) -> Result<Term, eyre::Error> {
@@ -137,13 +136,6 @@ pub fn to_term(pair: Pair<'_, Rule>) -> Result<Term, eyre::Error> {
             let mut pairs = pair.into_inner();
             let target =
                 to_term(pairs.next().unwrap()).wrap_err("failed to handle @flags.get target")?;
-            let r#type = pairs
-                .next()
-                .unwrap()
-                .as_str()
-                .strip_prefix('$')
-                .unwrap()
-                .to_owned();
             let field = pairs
                 .next()
                 .unwrap()
@@ -152,11 +144,7 @@ pub fn to_term(pair: Pair<'_, Rule>) -> Result<Term, eyre::Error> {
                 .unwrap()
                 .to_owned();
 
-            Term::FlagsGet(Box::new(FlagsGet {
-                target,
-                r#type,
-                field,
-            }))
+            Term::FlagsGet(Box::new(FlagsGet { target, field }))
         },
         | Rule::int_add => {
             let mut pairs = pair.into_inner();

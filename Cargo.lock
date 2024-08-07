@@ -1965,6 +1965,8 @@ dependencies = [
  "idxspace",
  "itertools",
  "num-bigint",
+ "pest",
+ "pest_derive",
  "rand",
  "serde",
  "tempfile",
@@ -1976,28 +1978,9 @@ dependencies = [
  "wazzi-executor",
  "wazzi-executor-pb-rust",
  "wazzi-runners",
- "wazzi-specz-preview1",
  "wazzi-store",
  "z3",
  "z3-sys",
-]
-
-[[package]]
-name = "wazzi-specz-preview1"
-version = "0.1.0"
-dependencies = [
- "arbitrary",
- "color-eyre",
- "eyre",
- "idxspace",
- "num-bigint",
- "pest",
- "pest_derive",
- "tracing",
- "tracing-error",
- "tracing-subscriber",
- "wazzi-executor-pb-rust",
- "z3",
 ]
 
 [[package]]

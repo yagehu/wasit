@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use wazzi_specz_wasi::WasiValue;
+use crate::preview1::spec::WasiValue;
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Context {

@@ -11,7 +11,7 @@ use pest::{
 };
 use pest_derive::Parser;
 
-use crate::spec::{
+use crate::preview1::spec::{
     FlagsType,
     Function,
     FunctionParam,
@@ -30,11 +30,11 @@ use crate::spec::{
 };
 
 #[derive(Parser)]
-#[grammar = "witx.pest"]
+#[grammar = "preview1/witx.pest"]
 pub struct Parser;
 
 pub fn preview1(spec: &mut Spec) -> Result<(), eyre::Error> {
-    const DOC: &str = include_str!("../main.witx");
+    const DOC: &str = include_str!("../../preview1.witx");
 
     let doc = Parser::parse(Rule::document, DOC)
         .wrap_err("failed to parse document")?

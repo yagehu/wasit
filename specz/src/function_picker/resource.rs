@@ -1,7 +1,11 @@
 use arbitrary::Unstructured;
-use wazzi_specz_wasi::{Function, Interface};
 
-use crate::{function_picker::FunctionPicker, resource::Context, Environment};
+use crate::{
+    function_picker::FunctionPicker,
+    preview1::spec::{Function, Interface, Spec, TypeRef},
+    resource::Context,
+    Environment,
+};
 
 /// A function is a candidate if each parameter can be either safely randomly
 /// generated, or chosen from a pool of resources.
@@ -12,6 +16,7 @@ impl FunctionPicker for ResourcePicker {
     fn pick_function<'i>(
         &self,
         u: &mut Unstructured,
+        _spec: &Spec,
         interface: &'i Interface,
         env: &Environment,
         _ctx: &Context,
@@ -22,11 +27,23 @@ impl FunctionPicker for ResourcePicker {
             let mut is_candidate = true;
 
             for param in function.params.iter() {
-                if param.ty.attributes.is_empty() {
+                if param.tref.resource_type_def(&env.spec).is_none() {
                     continue;
                 }
 
-                let resources = match env.resources_by_types.get(param.ty.name.as_ref().unwrap()) {
+                let resource_type = match &param.tref {
+                    | TypeRef::Named(name) => {
+                        let tdef = env.spec.types.get_by_key(name).unwrap();
+
+                        match &tdef.attributes {
+                            | Some(_attributes) => name,
+                            | None => continue,
+                        }
+                    },
+                    | TypeRef::Anonymous(_) => continue,
+                };
+
+                let resources = match env.resources_by_types.get(resource_type) {
                     | None => {
                         is_candidate = false;
                         break;
