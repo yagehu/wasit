@@ -2,7 +2,7 @@ use arbitrary::Unstructured;
 
 use crate::{
     param_generator::ParamsGenerator,
-    preview1::spec::{Function, TypeRef},
+    preview1::spec::{Function, Spec, TypeRef},
     resource::Context,
     Environment,
     Value,
@@ -17,6 +17,7 @@ impl ParamsGenerator for StatelessParamsGenerator {
         u: &mut Unstructured,
         env: &Environment,
         ctx: &Context,
+        spec: &Spec,
         function: &Function,
     ) -> Result<Vec<Value>, eyre::Error> {
         let mut params = Vec::with_capacity(function.params.len());
@@ -24,27 +25,25 @@ impl ParamsGenerator for StatelessParamsGenerator {
 
         for param in function.params.iter() {
             let name = match &param.tref {
-                | TypeRef::Named(name) => {
-                    match &env.spec.types.get_by_key(name).unwrap().attributes {
-                        | Some(_attributes) => name,
-                        | None => {
-                            params.push(Value {
-                                wasi:     param.tref.arbitrary_value(
-                                    &env.spec,
-                                    u,
-                                    string_prefix.as_ref().map(|sp| sp.as_slice()),
-                                )?,
-                                resource: None,
-                            });
+                | TypeRef::Named(name) => match &spec.get_type_def(name).unwrap().attributes {
+                    | Some(_attributes) => name,
+                    | None => {
+                        params.push(Value {
+                            wasi:     param.tref.arbitrary_value(
+                                spec,
+                                u,
+                                string_prefix.as_ref().map(|sp| sp.as_slice()),
+                            )?,
+                            resource: None,
+                        });
 
-                            continue;
-                        },
-                    }
+                        continue;
+                    },
                 },
                 | TypeRef::Anonymous(_) => {
                     params.push(Value {
                         wasi:     param.tref.arbitrary_value(
-                            &env.spec,
+                            spec,
                             u,
                             string_prefix.as_ref().map(|sp| sp.as_slice()),
                         )?,

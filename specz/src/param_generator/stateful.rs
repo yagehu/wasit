@@ -3,7 +3,7 @@ use eyre::ContextCompat as _;
 
 use crate::{
     param_generator::ParamsGenerator,
-    preview1::spec::Function,
+    preview1::spec::{Function, Spec},
     resource::Context,
     solve::FunctionScope,
     Environment,
@@ -19,6 +19,7 @@ impl ParamsGenerator for StatefulParamsGenerator {
         u: &mut Unstructured,
         env: &Environment,
         ctx: &Context,
+        spec: &Spec,
         function: &Function,
     ) -> Result<Vec<Value>, eyre::Error> {
         let z3_cfg = z3::Config::new();
@@ -31,9 +32,9 @@ impl ParamsGenerator for StatefulParamsGenerator {
         solver_params.set_u32("smt.random_seed", random_seed);
         solver.set_params(&solver_params);
 
-        let function_scope = FunctionScope::new(&z3_ctx, &env.spec, ctx, env, function);
+        let function_scope = FunctionScope::new(&z3_ctx, spec, ctx, env, function);
         let params = function_scope
-            .solve_input_contract(&z3_ctx, &solver, u)?
+            .solve_input_contract(&z3_ctx, spec, &solver, u)?
             .wrap_err("no solution found")?;
 
         Ok(params)

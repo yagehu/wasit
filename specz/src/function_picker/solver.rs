@@ -15,10 +15,10 @@ impl FunctionPicker for SolverPicker {
     fn pick_function<'i>(
         &self,
         u: &mut Unstructured,
-        spec: &Spec,
         interface: &'i Interface,
         env: &Environment,
         ctx: &Context,
+        spec: &Spec,
     ) -> Result<&'i Function, eyre::Error> {
         let mut candidates = Vec::new();
 
@@ -35,7 +35,10 @@ impl FunctionPicker for SolverPicker {
 
             let scope = FunctionScope::new(&z3_ctx, spec, ctx, env, function);
 
-            if scope.solve_input_contract(&z3_ctx, &solver, u)?.is_some() {
+            if scope
+                .solve_input_contract(&z3_ctx, spec, &solver, u)?
+                .is_some()
+            {
                 candidates.push(function);
             }
         }

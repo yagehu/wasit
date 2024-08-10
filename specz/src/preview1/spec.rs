@@ -1,34 +1,118 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use arbitrary::{Arbitrary, Unstructured};
 use idxspace::IndexSpace;
 use serde::{Deserialize, Serialize};
 
+use super::witx::{elang, slang};
 use crate::Resource;
 
-use super::witx::{elang, slang};
-
-#[derive(PartialEq, Eq, Clone, Debug)]
-pub struct Spec {
-    pub types:      IndexSpace<String, TypeDef>,
+#[derive(PartialEq, Eq, Debug)]
+pub struct Spec<'ctx> {
     pub interfaces: IndexSpace<String, Interface>,
+
+    types:         IndexSpace<String, TypeDef>,
+    encoded_types: HashMap<String, EncodedType<'ctx>>,
 }
 
-impl Spec {
-    pub fn new() -> Self {
+impl<'ctx> Spec<'ctx> {
+    pub fn new(ctx: &'ctx z3::Context) -> Self {
+        let encoded_types = [
+            (
+                "bool".to_string(),
+                EncodedType {
+                    kind:     EncodedTypeKind::Bool,
+                    name:     "bool".to_string(),
+                    datatype: z3::DatatypeBuilder::new(ctx, "bool")
+                        .variant(
+                            "bool",
+                            vec![("value", z3::DatatypeAccessor::Sort(z3::Sort::bool(ctx)))],
+                        )
+                        .finish(),
+                },
+            ),
+            (
+                "s64".to_string(),
+                EncodedType {
+                    kind:     EncodedTypeKind::Wasi(WasiType::S64),
+                    name:     "s64".to_string(),
+                    datatype: z3::DatatypeBuilder::new(ctx, "s64")
+                        .variant(
+                            "s64",
+                            vec![("value", z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))],
+                        )
+                        .finish(),
+                },
+            ),
+            (
+                "u8".to_string(),
+                EncodedType {
+                    kind:     EncodedTypeKind::Wasi(WasiType::U8),
+                    name:     "u8".to_string(),
+                    datatype: z3::DatatypeBuilder::new(ctx, "u8")
+                        .variant(
+                            "u8",
+                            vec![("value", z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))],
+                        )
+                        .finish(),
+                },
+            ),
+            (
+                "u16".to_string(),
+                EncodedType {
+                    kind:     EncodedTypeKind::Wasi(WasiType::U16),
+                    name:     "u16".to_string(),
+                    datatype: z3::DatatypeBuilder::new(ctx, "u16")
+                        .variant(
+                            "u16",
+                            vec![("value", z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))],
+                        )
+                        .finish(),
+                },
+            ),
+            (
+                "u32".to_string(),
+                EncodedType {
+                    kind:     EncodedTypeKind::Wasi(WasiType::U32),
+                    name:     "u32".to_string(),
+                    datatype: z3::DatatypeBuilder::new(ctx, "u32")
+                        .variant(
+                            "u32",
+                            vec![("value", z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))],
+                        )
+                        .finish(),
+                },
+            ),
+            (
+                "u64".to_string(),
+                EncodedType {
+                    kind:     EncodedTypeKind::Wasi(WasiType::U64),
+                    name:     "u64".to_string(),
+                    datatype: z3::DatatypeBuilder::new(ctx, "u64")
+                        .variant(
+                            "u64",
+                            vec![("value", z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))],
+                        )
+                        .finish(),
+                },
+            ),
+        ]
+        .into_iter()
+        .collect();
+
         Self {
-            types:      Default::default(),
+            types: Default::default(),
             interfaces: Default::default(),
+            encoded_types,
         }
     }
 
-    pub fn encoded_type<'ctx>(
-        &self,
-        ctx: &'ctx z3::Context,
-        name: &str,
-    ) -> Option<EncodedType<'ctx>> {
-        let tdef = self.types.get_by_key(name)?;
-        let mut datatype_builder = z3::DatatypeBuilder::new(ctx, tdef.name.as_str());
+    pub fn get_type_def(&self, name: &str) -> Option<&TypeDef> {
+        self.types.get_by_key(name)
+    }
+
+    pub fn insert_type_def(&mut self, ctx: &'ctx z3::Context, name: String, tdef: TypeDef) {
+        let mut datatype_builder = z3::DatatypeBuilder::new(ctx, name.as_str());
         let kind = match &tdef.attributes {
             | Some(attrs) => {
                 datatype_builder = datatype_builder.variant(
@@ -40,11 +124,7 @@ impl Spec {
                                 | TypeRef::Named(type_name) => {
                                     z3::DatatypeAccessor::Datatype(type_name.as_str().into())
                                 },
-                                | TypeRef::Anonymous(wasi_type) => z3::DatatypeAccessor::Sort(
-                                    self.encode_anonymous_wasi_type(ctx, wasi_type)
-                                        .datatype
-                                        .sort,
-                                ),
+                                | TypeRef::Anonymous(_wasi_type) => unimplemented!(),
                             };
 
                             (name.as_str(), datatype_accessor)
@@ -66,7 +146,7 @@ impl Spec {
                     ),
                     | WasiType::Handle => panic!(),
                     | WasiType::Flags(flags) => datatype_builder.variant(
-                        name,
+                        &name,
                         flags
                             .fields
                             .iter()
@@ -81,7 +161,7 @@ impl Spec {
                     | WasiType::Variant(variant) => {
                         for case in &variant.cases {
                             let datatype_accessor = match &case.payload {
-                                | Some(tref) => self.tref_to_datatype_accessor(ctx, tref)?,
+                                | Some(tref) => self.tref_to_datatype_accessor(tref).unwrap(),
                                 | None => z3::DatatypeAccessor::Sort(z3::Sort::bool(ctx)),
                             };
 
@@ -99,46 +179,46 @@ impl Spec {
                             .map(|member| -> Option<_> {
                                 Some((
                                     member.name.as_str(),
-                                    self.tref_to_datatype_accessor(ctx, &member.tref)?,
+                                    self.tref_to_datatype_accessor(&member.tref)?,
                                 ))
                             })
-                            .collect::<Option<_>>()?,
+                            .collect::<Option<_>>()
+                            .unwrap(),
                     ),
                     | WasiType::String => todo!(),
                     | WasiType::List(_) => todo!(),
                 };
 
-                EncodedTypeKind::TypeDef(tdef.wasi.clone())
+                EncodedTypeKind::Wasi(tdef.wasi.clone())
             },
         };
 
-        Some(EncodedType {
-            kind,
-            name: name.to_string(),
-            datatype: datatype_builder.finish(),
-        })
+        self.types.push(name.clone(), tdef);
+        self.encoded_types.insert(
+            name.clone(),
+            EncodedType {
+                kind,
+                name,
+                datatype: datatype_builder.finish(),
+            },
+        );
     }
 
-    fn tref_to_datatype_accessor<'ctx>(
-        &self,
-        ctx: &'ctx z3::Context,
-        tref: &TypeRef,
-    ) -> Option<z3::DatatypeAccessor<'ctx>> {
-        Some(z3::DatatypeAccessor::Sort(match tref {
-            | TypeRef::Named(name) => {
-                let encoded = self.encoded_type(ctx, name)?;
+    pub fn get_encoded_type_by_tref(&self, tref: &TypeRef) -> Option<&EncodedType<'ctx>> {
+        match tref {
+            | TypeRef::Named(name) => self.encoded_types.get(name),
+            | TypeRef::Anonymous(_) => todo!(),
+        }
+    }
 
-                encoded.datatype.sort
-            },
-            | TypeRef::Anonymous(wasi_type) => {
-                self.encode_anonymous_wasi_type(ctx, wasi_type)
-                    .datatype
-                    .sort
-            },
+    fn tref_to_datatype_accessor(&self, tref: &TypeRef) -> Option<z3::DatatypeAccessor<'ctx>> {
+        Some(z3::DatatypeAccessor::Sort(match tref {
+            | TypeRef::Named(name) => self.encoded_types.get(name)?.datatype.sort.clone(),
+            | TypeRef::Anonymous(_) => todo!(),
         }))
     }
 
-    fn encode_anonymous_wasi_type<'ctx>(
+    fn encode_anonymous_wasi_type(
         &self,
         ctx: &'ctx z3::Context,
         wasi_type: &WasiType,
@@ -217,7 +297,7 @@ impl Spec {
 pub enum EncodedTypeKind {
     Bool,
     Int,
-    TypeDef(WasiType),
+    Wasi(WasiType),
     Resource(BTreeMap<String, TypeRef>),
 }
 
@@ -230,39 +310,12 @@ pub struct EncodedType<'ctx> {
 }
 
 impl<'ctx> EncodedType<'ctx> {
-    pub fn plain_bool(ctx: &'ctx z3::Context) -> Self {
-        Self {
-            kind:     EncodedTypeKind::Bool,
-            name:     "bool".to_string(),
-            datatype: z3::DatatypeBuilder::new(ctx, "bool")
-                .variant(
-                    "bool",
-                    vec![("value", z3::DatatypeAccessor::Sort(z3::Sort::bool(ctx)))],
-                )
-                .finish(),
-        }
-    }
-
-    pub fn plain_int(ctx: &'ctx z3::Context) -> Self {
-        Self {
-            kind:     EncodedTypeKind::Int,
-            name:     "int".to_string(),
-            datatype: z3::DatatypeBuilder::new(ctx, "int")
-                .variant(
-                    "int",
-                    vec![("value", z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))],
-                )
-                .finish(),
-        }
-    }
-
-    pub fn attr_get(
+    pub fn attr_get<'spec>(
         &self,
-        ctx: &'ctx z3::Context,
-        spec: &Spec,
+        spec: &'spec Spec<'ctx>,
         value: &z3::ast::Dynamic<'ctx>,
         attr: &str,
-    ) -> Option<(z3::ast::Dynamic<'ctx>, EncodedType<'ctx>)> {
+    ) -> Option<(z3::ast::Dynamic<'ctx>, &'spec EncodedType<'ctx>)> {
         let attrs = match &self.kind {
             | EncodedTypeKind::Resource(attrs) => attrs,
             | _ => return None,
@@ -281,22 +334,22 @@ impl<'ctx> EncodedType<'ctx> {
                 .get(attr_idx)
                 .unwrap()
                 .apply(&[value]),
-            tref.encode(spec, ctx),
+            spec.get_encoded_type_by_tref(tref).unwrap(),
         ))
     }
 
-    pub fn flags_get(
+    pub fn flags_get<'spec>(
         &self,
-        ctx: &'ctx z3::Context,
+        spec: &'spec Spec<'ctx>,
         value: &z3::ast::Dynamic<'ctx>,
         field: &str,
-    ) -> (z3::ast::Dynamic<'ctx>, EncodedType<'ctx>) {
+    ) -> (z3::ast::Dynamic<'ctx>, &'spec EncodedType<'ctx>) {
         let flags = match &self.kind {
             | EncodedTypeKind::Bool => panic!(),
             | EncodedTypeKind::Int => panic!(),
             | EncodedTypeKind::Resource(_) => todo!(),
-            | EncodedTypeKind::TypeDef(WasiType::Flags(flags)) => flags,
-            | EncodedTypeKind::TypeDef(_) => panic!(),
+            | EncodedTypeKind::Wasi(WasiType::Flags(flags)) => flags,
+            | EncodedTypeKind::Wasi(_) => panic!(),
         };
         let (idx, _field) = flags
             .fields
@@ -314,7 +367,8 @@ impl<'ctx> EncodedType<'ctx> {
                 .get(idx)
                 .unwrap()
                 .apply(&[value]),
-            Self::plain_bool(ctx),
+            spec.get_encoded_type_by_tref(&TypeRef::Named("bool".to_string()))
+                .unwrap(),
         )
     }
 
@@ -386,7 +440,7 @@ impl<'ctx> EncodedType<'ctx> {
                 .unwrap()
                 .constructor
                 .apply(&[&z3::ast::Int::from_str(ctx, s).unwrap()]),
-            | EncodedTypeKind::TypeDef(_) => todo!(),
+            | EncodedTypeKind::Wasi(_) => todo!(),
             | EncodedTypeKind::Resource(_) => todo!(),
         }
     }
@@ -402,7 +456,7 @@ impl<'ctx> EncodedType<'ctx> {
             | None => z3::ast::Dynamic::from_ast(&z3::ast::Bool::from_bool(ctx, true)),
         };
         let variant_type = match &self.kind {
-            | EncodedTypeKind::TypeDef(WasiType::Variant(variant)) => variant,
+            | EncodedTypeKind::Wasi(WasiType::Variant(variant)) => variant,
             | _ => panic!(),
         };
         let (i, _case) = variant_type
@@ -427,13 +481,13 @@ impl<'ctx> EncodedType<'ctx> {
             | EncodedTypeKind::Resource(_attrs) => {
                 z3::ast::Dynamic::fresh_const(ctx, &self.name, &self.datatype.sort)
             },
-            | EncodedTypeKind::TypeDef(_) => todo!(),
+            | EncodedTypeKind::Wasi(_) => todo!(),
         }
     }
 
     pub fn wasi_value(&self, value: &z3::ast::Dynamic) -> WasiValue {
         let wasi_type = match &self.kind {
-            | EncodedTypeKind::TypeDef(wasi_type) => wasi_type,
+            | EncodedTypeKind::Wasi(wasi_type) => wasi_type,
             | _ => panic!(),
         };
 
@@ -507,7 +561,7 @@ impl<'ctx> EncodedType<'ctx> {
     pub fn encode_resource(
         &self,
         ctx: &'ctx z3::Context,
-        spec: &Spec,
+        spec: &Spec<'ctx>,
         resource: &Resource,
     ) -> z3::ast::Dynamic<'ctx> {
         let attrs = match &self.kind {
@@ -529,11 +583,11 @@ impl<'ctx> EncodedType<'ctx> {
     pub fn encode_wasi_value(
         &self,
         ctx: &'ctx z3::Context,
-        spec: &Spec,
+        spec: &Spec<'ctx>,
         value: &WasiValue,
     ) -> z3::ast::Dynamic<'ctx> {
         let wasi_type = match &self.kind {
-            | EncodedTypeKind::TypeDef(wasi_type) => wasi_type,
+            | EncodedTypeKind::Wasi(wasi_type) => wasi_type,
             | _ => panic!(),
         };
 
@@ -592,14 +646,17 @@ impl<'ctx> EncodedType<'ctx> {
             | (WasiType::Flags(_), _) => panic!(),
             | (WasiType::Variant(variant_type), WasiValue::Variant(variant)) => {
                 let payload = match &variant.payload {
-                    | Some(value) => variant_type
-                        .cases
-                        .get(variant.case_idx)
+                    | Some(value) => spec
+                        .get_encoded_type_by_tref(
+                            variant_type
+                                .cases
+                                .get(variant.case_idx)
+                                .unwrap()
+                                .payload
+                                .as_ref()
+                                .unwrap(),
+                        )
                         .unwrap()
-                        .payload
-                        .as_ref()
-                        .unwrap()
-                        .encode(spec, ctx)
                         .encode_wasi_value(ctx, spec, &value),
                     | None => z3::ast::Dynamic::from_ast(&z3::ast::Bool::from_bool(ctx, true)),
                 };
@@ -618,9 +675,8 @@ impl<'ctx> EncodedType<'ctx> {
                     .iter()
                     .zip(record.members.iter())
                     .map(|(member_type, member)| {
-                        member_type
-                            .tref
-                            .encode(spec, ctx)
+                        spec.get_encoded_type_by_tref(&member_type.tref)
+                            .unwrap()
                             .encode_wasi_value(ctx, spec, member)
                     })
                     .collect::<Vec<_>>();
@@ -664,13 +720,6 @@ pub enum TypeRef {
 }
 
 impl TypeRef {
-    pub fn encode<'ctx>(&self, spec: &Spec, ctx: &'ctx z3::Context) -> EncodedType<'ctx> {
-        match self {
-            | TypeRef::Named(name) => spec.encoded_type(ctx, name).unwrap(),
-            | TypeRef::Anonymous(wasi_type) => spec.encode_anonymous_wasi_type(ctx, wasi_type),
-        }
-    }
-
     pub fn resource_type_def<'a>(&self, spec: &'a Spec) -> Option<&'a TypeDef> {
         match self {
             | TypeRef::Named(name) => spec.types.get_by_key(name),

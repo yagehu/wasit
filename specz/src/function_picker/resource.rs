@@ -16,10 +16,10 @@ impl FunctionPicker for ResourcePicker {
     fn pick_function<'i>(
         &self,
         u: &mut Unstructured,
-        _spec: &Spec,
         interface: &'i Interface,
         env: &Environment,
         _ctx: &Context,
+        spec: &Spec,
     ) -> Result<&'i Function, eyre::Error> {
         let mut candidates = Vec::new();
 
@@ -27,13 +27,13 @@ impl FunctionPicker for ResourcePicker {
             let mut is_candidate = true;
 
             for param in function.params.iter() {
-                if param.tref.resource_type_def(&env.spec).is_none() {
+                if param.tref.resource_type_def(spec).is_none() {
                     continue;
                 }
 
                 let resource_type = match &param.tref {
                     | TypeRef::Named(name) => {
-                        let tdef = env.spec.types.get_by_key(name).unwrap();
+                        let tdef = spec.get_type_def(name).unwrap();
 
                         match &tdef.attributes {
                             | Some(_attributes) => name,

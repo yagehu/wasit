@@ -15,9 +15,9 @@ pub trait FunctionPicker: fmt::Debug {
     fn pick_function<'i>(
         &self,
         u: &mut Unstructured,
-        spec: &Spec,
         interface: &'i Interface,
         env: &Environment,
         ctx: &Context,
+        spec: &Spec,
     ) -> Result<&'i Function, eyre::Error>;
 }

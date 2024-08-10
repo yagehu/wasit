@@ -33,7 +33,7 @@ use crate::preview1::spec::{
 #[grammar = "preview1/witx.pest"]
 pub struct Parser;
 
-pub fn preview1(spec: &mut Spec) -> Result<(), eyre::Error> {
+pub fn preview1<'ctx>(ctx: &'ctx z3::Context, spec: &mut Spec<'ctx>) -> Result<(), eyre::Error> {
     const DOC: &str = include_str!("../../preview1.witx");
 
     let doc = Parser::parse(Rule::document, DOC)
@@ -67,10 +67,6 @@ pub fn preview1(spec: &mut Spec) -> Result<(), eyre::Error> {
                                 panic!("{target_type_name}");
                             },
                             | Rule::r#type => {
-                                if spec.types.get_by_key(name).is_some() {
-                                    return Err(err!("typename {name} already defined"));
-                                }
-
                                 let wasi = preview1_wasi_type(spec, pair)
                                     .wrap_err("failed to handle type pair")?;
                                 let attributes = if !annotation_pairs.is_empty() {
@@ -110,7 +106,8 @@ pub fn preview1(spec: &mut Spec) -> Result<(), eyre::Error> {
                                     None
                                 };
 
-                                spec.types.push(
+                                spec.insert_type_def(
+                                    ctx,
                                     name.to_string(),
                                     TypeDef {
                                         name: name.to_string(),
@@ -132,9 +129,9 @@ pub fn preview1(spec: &mut Spec) -> Result<(), eyre::Error> {
                     | Rule::id => id.as_str().strip_prefix('$').unwrap(),
                     | _ => return Err(err!("expected typename id")),
                 };
-                let ty = preview1_module(spec, pairs)?;
+                let interface = preview1_module(spec, pairs)?;
 
-                spec.interfaces.push(name.to_string(), ty);
+                spec.interfaces.push(name.to_string(), interface);
             },
             | Rule::EOI => (),
             | _ => panic!("{:?}", pair.as_rule()),
@@ -340,10 +337,7 @@ fn preview1_wasi_type(spec: &mut Spec, pair: Pair<'_, Rule>) -> Result<WasiType,
                 | Rule::id => tag_pair.as_str().strip_prefix('$').unwrap(),
                 | _ => unreachable!(),
             };
-            let tag_type = spec
-                .types
-                .get_by_key(tag_name)
-                .wrap_err("unknown tag type")?;
+            let tag_type = spec.get_type_def(tag_name).wrap_err("unknown tag type")?;
             let tag = match &tag_type.wasi {
                 | WasiType::Variant(variant) => variant,
                 | _ => panic!(),
@@ -438,10 +432,16 @@ fn preview1_wasi_type(spec: &mut Spec, pair: Pair<'_, Rule>) -> Result<WasiType,
 }
 
 fn preview1_tref(spec: &mut Spec, pair: Pair<'_, Rule>) -> Result<TypeRef, eyre::Error> {
-    let pair = match pair.as_rule() {
-        | Rule::type_ref => pair.into_inner().next().unwrap(),
-        | _ => unreachable!(),
-    };
+    // let pair = match pair.as_rule() {
+    //     | Rule::type_ref => pair.into_inner().next().unwrap(),
+    //     | _ => unreachable!("{} {:?}", pair.as_str(), pair.as_rule()),
+    // };
+
+    let mut pair = pair;
+
+    if pair.as_rule() == Rule::type_ref {
+        pair = pair.into_inner().next().unwrap();
+    }
 
     match pair.as_rule() {
         | Rule::id => {

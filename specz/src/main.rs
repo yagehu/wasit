@@ -108,9 +108,11 @@ fn main() -> Result<(), eyre::Error> {
     )
     .wrap_err("failed to configure tracing")?;
 
-    let mut spec = Spec::new();
+    let z3_cfg = z3::Config::new();
+    let z3_ctx = z3::Context::new(&z3_cfg);
+    let mut spec = Spec::new(&z3_ctx);
 
-    witx::preview1(&mut spec)?;
+    witx::preview1(&z3_ctx, &mut spec)?;
 
     let cmd = Cmd::parse();
     let mut store = FuzzStore::new(Path::new("abc")).wrap_err("failed to init fuzz store")?;
@@ -204,18 +206,9 @@ impl<'s> Fuzzer<'s> {
             .new_run()
             .wrap_err("failed to init new run store")?;
         let mut env = Environment::preview1()?;
-        let fdflags = env
-            .spec()
-            .types
-            .get_by_key("fdflags")
-            .unwrap()
-            .wasi
-            .flags()
-            .unwrap();
-        let filetype = env
-            .spec()
-            .types
-            .get_by_key("filetype")
+        let fdflags = spec.get_type_def("fdflags").unwrap().wasi.flags().unwrap();
+        let filetype = spec
+            .get_type_def("filetype")
             .unwrap()
             .wasi
             .variant()
@@ -280,6 +273,12 @@ impl<'s> Fuzzer<'s> {
                             let params_generator = self.params_generator.clone();
 
                             move || -> Result<(), FuzzError> {
+                                let z3_cfg = z3::Config::new();
+                                let z3_ctx = z3::Context::new(&z3_cfg);
+                                let mut spec = Spec::new(&z3_ctx);
+
+                                witx::preview1(&z3_ctx, &mut spec).unwrap();
+
                                 let stderr = fs::OpenOptions::new()
                                     .write(true)
                                     .create_new(true)
@@ -326,10 +325,10 @@ impl<'s> Fuzzer<'s> {
 
                                     let function = function_picker.pick_function(
                                         &mut u,
-                                        spec,
                                         interface,
                                         &env.read().unwrap(),
                                         &ctx,
+                                        &spec,
                                     )?;
 
                                     tracing::info!(
@@ -343,6 +342,7 @@ impl<'s> Fuzzer<'s> {
                                     let (ok, _results) = match env.read().unwrap().call(
                                         &mut u,
                                         &mut ctx,
+                                        &spec,
                                         &executor,
                                         store.trace_mut(),
                                         function,
@@ -381,7 +381,7 @@ impl<'s> Fuzzer<'s> {
                                                 .results
                                                 .iter()
                                                 .filter_map(|result| {
-                                                    result.tref.resource_type_def(spec).map(
+                                                    result.tref.resource_type_def(&spec).map(
                                                         |tdef| {
                                                             (
                                                                 result.name.clone(),
@@ -397,10 +397,10 @@ impl<'s> Fuzzer<'s> {
                                                                                 (
                                                                                     name.clone(),
                                                                                     tref.wasi_type(
-                                                                                        spec,
+                                                                                        &spec,
                                                                                     )
                                                                                     .zero_value(
-                                                                                        spec,
+                                                                                        &spec,
                                                                                     ),
                                                                                 )
                                                                             })

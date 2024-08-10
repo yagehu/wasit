@@ -68,7 +68,7 @@ fn to_expr(spec: &Spec, pair: Pair<'_, Rule>) -> Result<Expr, eyre::Error> {
             let mut pairs = pair.into_inner();
             let type_name = pairs.next().unwrap().as_str().strip_prefix('$').unwrap();
             let case_name = pairs.next().unwrap().as_str().strip_prefix('$').unwrap();
-            let ty = spec.types.get_by_key(type_name).unwrap();
+            let ty = spec.get_type_def(type_name).unwrap();
             let variant_type = ty.wasi.variant().unwrap();
             let (case_idx, _case_type) = variant_type
                 .cases

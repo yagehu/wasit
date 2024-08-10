@@ -42,28 +42,18 @@ pub struct Resource {
     pub attributes: HashMap<String, WasiValue>,
 }
 
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(PartialEq, Eq, Debug)]
 pub struct Environment {
-    spec:               Spec,
     resources:          Vec<Resource>,
     resources_by_types: HashMap<String, BTreeSet<usize>>,
 }
 
 impl Environment {
     pub fn preview1() -> Result<Self, eyre::Error> {
-        let mut spec = Spec::new();
-
-        preview1::witx::preview1(&mut spec)?;
-
         Ok(Environment {
-            spec,
-            resources: Default::default(),
+            resources:          Default::default(),
             resources_by_types: Default::default(),
         })
-    }
-
-    pub fn spec(&self) -> &Spec {
-        &self.spec
     }
 
     pub fn new_resource(&mut self, type_name: String, resource: Resource) -> usize {
@@ -108,19 +98,20 @@ impl Environment {
         &self,
         u: &mut Unstructured,
         ctx: &mut Context,
+        spec: &Spec,
         executor: &RunningExecutor,
         store: &mut TraceStore<Call>,
         function: &Function,
         params_generator: &dyn ParamsGenerator,
     ) -> Result<(bool, Vec<Value>), eyre::Error> {
-        let params = params_generator.generate_params(u, self, ctx, function)?;
+        let params = params_generator.generate_params(u, self, ctx, spec, function)?;
         let mut next_resource_id = self.resources.len();
         let results = function
             .results
             .iter()
             .map(|result| Value {
-                wasi:     result.tref.arbitrary_value(&self.spec, u, None).unwrap(),
-                resource: result.tref.resource_type_def(&self.spec).map(|_| {
+                wasi:     result.tref.arbitrary_value(spec, u, None).unwrap(),
+                resource: result.tref.resource_type_def(spec).map(|_| {
                     let id = next_resource_id;
 
                     next_resource_id += 1;
@@ -145,13 +136,13 @@ impl Environment {
                     .params
                     .iter()
                     .zip(params.clone())
-                    .map(|(param, value)| value.wasi.into_pb(&self.spec, &param.tref))
+                    .map(|(param, value)| value.wasi.into_pb(spec, &param.tref))
                     .collect(),
                 results:        function
                     .results
                     .iter()
                     .zip(results.clone())
-                    .map(|(result, value)| value.wasi.into_pb(&self.spec, &result.tref))
+                    .map(|(result, value)| value.wasi.into_pb(spec, &result.tref))
                     .collect(),
                 special_fields: Default::default(),
             })
@@ -163,7 +154,7 @@ impl Environment {
             .zip(results)
             .zip(function.results.iter())
             .map(|((result_value, before), result)| Value {
-                wasi:     WasiValue::from_pb(&self.spec, &result.tref, result_value),
+                wasi:     WasiValue::from_pb(spec, &result.tref, result_value),
                 resource: before.resource,
             })
             .collect::<Vec<_>>();

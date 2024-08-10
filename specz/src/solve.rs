@@ -7,7 +7,7 @@ use z3::ast::Ast;
 
 use crate::{
     preview1::{
-        spec::{EncodedType, Function, Spec},
+        spec::{EncodedType, Function, Spec, TypeRef},
         witx::slang::Term,
     },
     resource::Context,
@@ -18,7 +18,7 @@ use crate::{
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct FunctionScope<'ctx, 'c, 'e, 's> {
     ctx:       &'c Context,
-    spec:      &'s Spec,
+    spec:      &'s Spec<'ctx>,
     env:       &'e Environment,
     function:  &'e Function,
     variables: IndexSpace<String, z3::ast::Dynamic<'ctx>>,
@@ -27,7 +27,7 @@ pub struct FunctionScope<'ctx, 'c, 'e, 's> {
 impl<'ctx, 'c, 'e, 's> FunctionScope<'ctx, 'c, 'e, 's> {
     pub fn new(
         ctx: &'ctx z3::Context,
-        spec: &'s Spec,
+        spec: &'s Spec<'ctx>,
         resource_ctx: &'c Context,
         env: &'e Environment,
         function: &'e Function,
@@ -37,7 +37,9 @@ impl<'ctx, 'c, 'e, 's> FunctionScope<'ctx, 'c, 'e, 's> {
         for param in function.params.iter() {
             variables.push(
                 param.name.clone(),
-                param.tref.encode(spec, ctx).declare_const(ctx),
+                spec.get_encoded_type_by_tref(&param.tref)
+                    .unwrap()
+                    .declare_const(ctx),
             );
         }
 
@@ -53,13 +55,14 @@ impl<'ctx, 'c, 'e, 's> FunctionScope<'ctx, 'c, 'e, 's> {
     pub fn solve_input_contract(
         &self,
         ctx: &z3::Context,
+        spec: &Spec,
         solver: &z3::Solver,
         u: &mut Unstructured,
     ) -> Result<Option<Vec<Value>>, eyre::Error> {
         let mut value_resource_id_map: HashMap<z3::ast::Dynamic, usize> = Default::default();
 
         for (param, (_param_name, var)) in self.function.params.iter().zip(self.variables.iter()) {
-            let param_type = param.tref.encode(self.spec, ctx);
+            let param_type = self.spec.get_encoded_type_by_tref(&param.tref).unwrap();
 
             if let Some(tdef) = param.tref.resource_type_def(self.spec) {
                 let resource_ids = self
@@ -87,7 +90,7 @@ impl<'ctx, 'c, 'e, 's> FunctionScope<'ctx, 'c, 'e, 's> {
         }
 
         let input_contract = match &self.function.input_contract {
-            | Some(term) => self.term_to_constraint(ctx, term)?.0,
+            | Some(term) => self.term_to_constraint(ctx, spec, term)?.0,
             | None => z3::ast::Dynamic::from_ast(&z3::ast::Bool::from_bool(ctx, true)),
         };
 
@@ -180,9 +183,9 @@ impl<'ctx, 'c, 'e, 's> FunctionScope<'ctx, 'c, 'e, 's> {
                         });
                     } else {
                         params.push(Value {
-                            wasi:     param
-                                .tref
-                                .encode(self.env.spec(), ctx)
+                            wasi:     spec
+                                .get_encoded_type_by_tref(&param.tref)
+                                .unwrap()
                                 .wasi_value(solved_param),
                             resource: None,
                         });
@@ -194,9 +197,7 @@ impl<'ctx, 'c, 'e, 's> FunctionScope<'ctx, 'c, 'e, 's> {
                         | Some(s) => Some(s.as_slice()),
                         | None => None,
                     };
-                    let value = param
-                        .tref
-                        .arbitrary_value(self.env.spec(), u, path_prefix)?;
+                    let value = param.tref.arbitrary_value(spec, u, path_prefix)?;
 
                     params.push(Value {
                         wasi:     value,
@@ -212,25 +213,27 @@ impl<'ctx, 'c, 'e, 's> FunctionScope<'ctx, 'c, 'e, 's> {
     fn term_to_constraint(
         &self,
         ctx: &'ctx z3::Context,
+        spec: &'s Spec<'ctx>,
         term: &Term,
-    ) -> Result<(z3::ast::Dynamic, EncodedType), eyre::Error> {
+    ) -> Result<(z3::ast::Dynamic, &EncodedType), eyre::Error> {
         Ok(match term {
             | Term::Not(t) => (
                 z3::ast::Dynamic::from_ast(
                     &self
-                        .term_to_constraint(ctx, &t.term)?
+                        .term_to_constraint(ctx, spec, &t.term)?
                         .0
                         .as_bool()
                         .unwrap()
                         .not(),
                 ),
-                EncodedType::plain_bool(ctx),
+                spec.get_encoded_type_by_tref(&TypeRef::Named("bool".to_string()))
+                    .unwrap(),
             ),
             | Term::And(t) => {
                 let clauses = t
                     .clauses
                     .iter()
-                    .map(|clause| self.term_to_constraint(ctx, clause))
+                    .map(|clause| self.term_to_constraint(ctx, spec, clause))
                     .collect::<Result<Vec<_>, _>>()?
                     .into_iter()
                     .map(|clause| clause.0.as_bool().unwrap())
@@ -241,14 +244,15 @@ impl<'ctx, 'c, 'e, 's> FunctionScope<'ctx, 'c, 'e, 's> {
                         ctx,
                         clauses.iter().collect::<Vec<_>>().as_slice(),
                     )),
-                    EncodedType::plain_bool(ctx),
+                    spec.get_encoded_type_by_tref(&TypeRef::Named("bool".to_string()))
+                        .unwrap(),
                 )
             },
             | Term::Or(t) => {
                 let clauses = t
                     .clauses
                     .iter()
-                    .map(|clause| self.term_to_constraint(ctx, clause))
+                    .map(|clause| self.term_to_constraint(ctx, spec, clause))
                     .collect::<Result<Vec<_>, _>>()?
                     .into_iter()
                     .map(|clause| clause.0.as_bool().unwrap())
@@ -259,15 +263,14 @@ impl<'ctx, 'c, 'e, 's> FunctionScope<'ctx, 'c, 'e, 's> {
                         ctx,
                         clauses.iter().collect::<Vec<_>>().as_slice(),
                     )),
-                    EncodedType::plain_bool(ctx),
+                    spec.get_encoded_type_by_tref(&TypeRef::Named("bool".to_string()))
+                        .unwrap(),
                 )
             },
             | Term::AttrGet(t) => {
-                let (target, target_type) = self.term_to_constraint(ctx, &t.target)?;
+                let (target, target_type) = self.term_to_constraint(ctx, spec, &t.target)?;
 
-                target_type
-                    .attr_get(ctx, self.env.spec(), &target, &t.attr)
-                    .unwrap()
+                target_type.attr_get(spec, &target, &t.attr).unwrap()
             },
             | Term::Param(param) => {
                 let param = self
@@ -279,53 +282,63 @@ impl<'ctx, 'c, 'e, 's> FunctionScope<'ctx, 'c, 'e, 's> {
 
                 (
                     self.variables.get_by_key(&param.name).unwrap().clone(),
-                    param.tref.encode(self.env.spec(), ctx),
+                    spec.get_encoded_type_by_tref(&param.tref).unwrap(),
                 )
             },
             | Term::FlagsGet(t) => {
                 let (target, target_type) = self
-                    .term_to_constraint(ctx, &t.target)
+                    .term_to_constraint(ctx, spec, &t.target)
                     .wrap_err("failed to translate flags get target to z3")?;
 
-                target_type.flags_get(ctx, &target, &t.field)
+                target_type.flags_get(spec, &target, &t.field)
             },
             | Term::IntConst(t) => {
-                let ty = EncodedType::plain_int(ctx);
+                let ty = spec
+                    .get_encoded_type_by_tref(&TypeRef::Named("int".to_string()))
+                    .unwrap();
 
                 (ty.const_int_from_str(ctx, t.to_string().as_str()), ty)
             },
             | Term::IntAdd(t) => {
-                let (lhs, lhs_type) = self.term_to_constraint(ctx, &t.lhs)?;
-                let (rhs, _rhs_type) = self.term_to_constraint(ctx, &t.rhs)?;
+                let (lhs, lhs_type) = self.term_to_constraint(ctx, spec, &t.lhs)?;
+                let (rhs, _rhs_type) = self.term_to_constraint(ctx, spec, &t.rhs)?;
 
                 (
                     lhs_type.int_add(ctx, &lhs, &rhs),
-                    EncodedType::plain_int(ctx),
+                    spec.get_encoded_type_by_tref(&TypeRef::Named("int".to_string()))
+                        .unwrap(),
                 )
             },
             | Term::IntLe(t) => {
-                let (lhs, lhs_type) = self.term_to_constraint(ctx, &t.lhs)?;
-                let (rhs, _rhs_type) = self.term_to_constraint(ctx, &t.rhs)?;
+                let (lhs, lhs_type) = self.term_to_constraint(ctx, spec, &t.lhs)?;
+                let (rhs, _rhs_type) = self.term_to_constraint(ctx, spec, &t.rhs)?;
 
-                (lhs_type.int_le(&lhs, &rhs), EncodedType::plain_int(ctx))
+                (
+                    lhs_type.int_le(&lhs, &rhs),
+                    spec.get_encoded_type_by_tref(&TypeRef::Named("int".to_string()))
+                        .unwrap(),
+                )
             },
             | Term::ValueEq(t) => {
-                let (lhs, _) = self.term_to_constraint(ctx, &t.lhs)?;
-                let (rhs, _) = self.term_to_constraint(ctx, &t.rhs)?;
+                let (lhs, _) = self.term_to_constraint(ctx, spec, &t.lhs)?;
+                let (rhs, _) = self.term_to_constraint(ctx, spec, &t.rhs)?;
 
                 (
                     z3::ast::Dynamic::from_ast(&lhs._eq(&rhs)),
-                    EncodedType::plain_bool(ctx),
+                    spec.get_encoded_type_by_tref(&TypeRef::Named("bool".to_string()))
+                        .unwrap(),
                 )
             },
             | Term::VariantConst(t) => {
                 let (payload, _payload_type) = t
                     .payload
                     .as_ref()
-                    .map(|term| self.term_to_constraint(ctx, &term))
+                    .map(|term| self.term_to_constraint(ctx, spec, &term))
                     .transpose()?
                     .unzip();
-                let encoded_type = self.env.spec().encoded_type(ctx, &t.ty).unwrap();
+                let encoded_type = spec
+                    .get_encoded_type_by_tref(&TypeRef::Named(t.ty.clone()))
+                    .unwrap();
 
                 (
                     encoded_type.const_variant(ctx, &t.case, payload),
