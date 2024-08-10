@@ -25,3 +25,6 @@ target
 
 # Mac OS
 .DS_Store
+
+# Z3
+.z3-trace

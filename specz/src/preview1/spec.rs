@@ -120,14 +120,12 @@ impl<'ctx> Spec<'ctx> {
                     attrs
                         .iter()
                         .map(|(name, attr_tref)| {
-                            let datatype_accessor = match attr_tref {
-                                | TypeRef::Named(type_name) => {
-                                    z3::DatatypeAccessor::Datatype(type_name.as_str().into())
-                                },
-                                | TypeRef::Anonymous(_wasi_type) => unimplemented!(),
-                            };
+                            let ty = self.get_encoded_type_by_tref(attr_tref).unwrap();
 
-                            (name.as_str(), datatype_accessor)
+                            (
+                                name.as_str(),
+                                z3::DatatypeAccessor::Sort(ty.datatype.sort.clone()),
+                            )
                         })
                         .collect(),
                 );
@@ -185,7 +183,10 @@ impl<'ctx> Spec<'ctx> {
                             .collect::<Option<_>>()
                             .unwrap(),
                     ),
-                    | WasiType::String => todo!(),
+                    | WasiType::String => datatype_builder.variant(
+                        "inner",
+                        vec![("value", z3::DatatypeAccessor::Sort(z3::Sort::string(ctx)))],
+                    ),
                     | WasiType::List(_) => todo!(),
                 };
 
