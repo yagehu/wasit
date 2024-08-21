@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use arbitrary::{Arbitrary, Unstructured};
 use idxspace::IndexSpace;
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
 use super::witx::{elang, slang};
@@ -10,6 +11,7 @@ use crate::Resource;
 #[derive(PartialEq, Eq, Debug)]
 pub struct Spec<'ctx> {
     pub interfaces: IndexSpace<String, Interface>,
+    pub ctx:        &'ctx z3::Context,
 
     types:         IndexSpace<String, TypeDef>,
     encoded_types: HashMap<String, EncodedType<'ctx>>,
@@ -27,6 +29,19 @@ impl<'ctx> Spec<'ctx> {
                         .variant(
                             "bool",
                             vec![("value", z3::DatatypeAccessor::Sort(z3::Sort::bool(ctx)))],
+                        )
+                        .finish(),
+                },
+            ),
+            (
+                "int".to_string(),
+                EncodedType {
+                    kind:     EncodedTypeKind::Int,
+                    name:     "int".to_string(),
+                    datatype: z3::DatatypeBuilder::new(ctx, "int")
+                        .variant(
+                            "int",
+                            vec![("value", z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))],
                         )
                         .finish(),
                 },
@@ -102,6 +117,7 @@ impl<'ctx> Spec<'ctx> {
 
         Self {
             types: Default::default(),
+            ctx,
             interfaces: Default::default(),
             encoded_types,
         }
@@ -187,7 +203,21 @@ impl<'ctx> Spec<'ctx> {
                         "inner",
                         vec![("value", z3::DatatypeAccessor::Sort(z3::Sort::string(ctx)))],
                     ),
-                    | WasiType::List(_) => todo!(),
+                    | WasiType::List(list) => datatype_builder.variant(
+                        "inner",
+                        vec![(
+                            "value",
+                            z3::DatatypeAccessor::Sort(z3::Sort::array(
+                                ctx,
+                                &z3::Sort::int(ctx),
+                                &self
+                                    .get_encoded_type_by_tref(&list.item)
+                                    .unwrap()
+                                    .datatype
+                                    .sort,
+                            )),
+                        )],
+                    ),
                 };
 
                 EncodedTypeKind::Wasi(tdef.wasi.clone())
@@ -418,6 +448,7 @@ impl<'ctx> EncodedType<'ctx> {
             .first()
             .unwrap()
             .apply(&[lhs]);
+        eprintln!("rhs --> {:?}", rhs);
         let rhs = self
             .datatype
             .variants
@@ -479,10 +510,9 @@ impl<'ctx> EncodedType<'ctx> {
         match &self.kind {
             | EncodedTypeKind::Bool => todo!(),
             | EncodedTypeKind::Int => todo!(),
-            | EncodedTypeKind::Resource(_attrs) => {
+            | EncodedTypeKind::Resource(_) | EncodedTypeKind::Wasi(_) => {
                 z3::ast::Dynamic::fresh_const(ctx, &self.name, &self.datatype.sort)
             },
-            | EncodedTypeKind::Wasi(_) => todo!(),
         }
     }
 
@@ -561,7 +591,6 @@ impl<'ctx> EncodedType<'ctx> {
 
     pub fn encode_resource(
         &self,
-        ctx: &'ctx z3::Context,
         spec: &Spec<'ctx>,
         resource: &Resource,
     ) -> z3::ast::Dynamic<'ctx> {
@@ -578,51 +607,57 @@ impl<'ctx> EncodedType<'ctx> {
                 .collect::<Vec<_>>(),
         });
 
-        self.encode_wasi_value(ctx, spec, &wasi_value)
+        self.encode_wasi_value(spec, &wasi_value)
     }
 
     pub fn encode_wasi_value(
         &self,
-        ctx: &'ctx z3::Context,
         spec: &Spec<'ctx>,
         value: &WasiValue,
     ) -> z3::ast::Dynamic<'ctx> {
         let wasi_type = match &self.kind {
-            | EncodedTypeKind::Wasi(wasi_type) => wasi_type,
-            | _ => panic!(),
+            | EncodedTypeKind::Wasi(wasi_type) => wasi_type.clone(),
+            | EncodedTypeKind::Resource(attrs) => WasiType::Record(RecordType {
+                members: attrs
+                    .iter()
+                    .map(|(attr_name, attr_tref)| RecordMemberType {
+                        name: attr_name.clone(),
+                        tref: attr_tref.clone(),
+                    })
+                    .collect_vec(),
+            }),
+            | _ => panic!("{:?}", self.kind),
         };
 
         match (wasi_type, value) {
-            | (WasiType::S64, &WasiValue::S64(i)) => self
-                .datatype
-                .variants
-                .first()
-                .unwrap()
-                .constructor
-                .apply(&[&z3::ast::Dynamic::from_ast(&z3::ast::Int::from_i64(ctx, i))]),
+            | (WasiType::S64, &WasiValue::S64(i)) => {
+                self.datatype.variants.first().unwrap().constructor.apply(&[
+                    &z3::ast::Dynamic::from_ast(&z3::ast::Int::from_i64(spec.ctx, i)),
+                ])
+            },
             | (WasiType::S64, _) => panic!(),
             | (WasiType::U8, &WasiValue::U8(i)) => {
                 self.datatype.variants.first().unwrap().constructor.apply(&[
-                    &z3::ast::Dynamic::from_ast(&z3::ast::Int::from_u64(ctx, i.into())),
+                    &z3::ast::Dynamic::from_ast(&z3::ast::Int::from_u64(spec.ctx, i.into())),
                 ])
             },
             | (WasiType::U8, _) => panic!(),
             | (WasiType::U16, _) => panic!(),
             | (WasiType::U32, &WasiValue::U32(i)) => {
                 self.datatype.variants.first().unwrap().constructor.apply(&[
-                    &z3::ast::Dynamic::from_ast(&z3::ast::Int::from_u64(ctx, i.into())),
+                    &z3::ast::Dynamic::from_ast(&z3::ast::Int::from_u64(spec.ctx, i.into())),
                 ])
             },
             | (WasiType::U32, _) => panic!(),
             | (WasiType::U64, &WasiValue::U64(i)) => {
                 self.datatype.variants.first().unwrap().constructor.apply(&[
-                    &z3::ast::Dynamic::from_ast(&z3::ast::Int::from_u64(ctx, i.into())),
+                    &z3::ast::Dynamic::from_ast(&z3::ast::Int::from_u64(spec.ctx, i.into())),
                 ])
             },
             | (WasiType::U64, _) => panic!(),
             | (WasiType::Handle, &WasiValue::Handle(handle)) => {
                 self.datatype.variants.first().unwrap().constructor.apply(&[
-                    &z3::ast::Dynamic::from_ast(&z3::ast::Int::from_u64(ctx, handle.into())),
+                    &z3::ast::Dynamic::from_ast(&z3::ast::Int::from_u64(spec.ctx, handle.into())),
                 ])
             },
             | (WasiType::Handle, _) => panic!(),
@@ -630,7 +665,7 @@ impl<'ctx> EncodedType<'ctx> {
                 let fields = flags
                     .fields
                     .iter()
-                    .map(|&b| z3::ast::Bool::from_bool(ctx, b))
+                    .map(|&b| z3::ast::Bool::from_bool(spec.ctx, b))
                     .collect::<Vec<_>>();
                 let fields = fields
                     .iter()
@@ -658,8 +693,8 @@ impl<'ctx> EncodedType<'ctx> {
                                 .unwrap(),
                         )
                         .unwrap()
-                        .encode_wasi_value(ctx, spec, &value),
-                    | None => z3::ast::Dynamic::from_ast(&z3::ast::Bool::from_bool(ctx, true)),
+                        .encode_wasi_value(spec, &value),
+                    | None => z3::ast::Dynamic::from_ast(&z3::ast::Bool::from_bool(spec.ctx, true)),
                 };
 
                 self.datatype
@@ -678,7 +713,7 @@ impl<'ctx> EncodedType<'ctx> {
                     .map(|(member_type, member)| {
                         spec.get_encoded_type_by_tref(&member_type.tref)
                             .unwrap()
-                            .encode_wasi_value(ctx, spec, member)
+                            .encode_wasi_value(spec, member)
                     })
                     .collect::<Vec<_>>();
 

@@ -108,12 +108,6 @@ fn main() -> Result<(), eyre::Error> {
     )
     .wrap_err("failed to configure tracing")?;
 
-    let z3_cfg = z3::Config::new();
-    let z3_ctx = z3::Context::new(&z3_cfg);
-    let mut spec = Spec::new(&z3_ctx);
-
-    witx::preview1(&z3_ctx, &mut spec)?;
-
     let cmd = Cmd::parse();
     let mut store = FuzzStore::new(Path::new("abc")).wrap_err("failed to init fuzz store")?;
     let mut fuzzer = Fuzzer::new(
@@ -139,7 +133,7 @@ fn main() -> Result<(), eyre::Error> {
         .transpose()
         .wrap_err("failed to read data")?;
 
-    fuzzer.fuzz_loop(spec, data, cmd.max_epochs)?;
+    fuzzer.fuzz_loop(data, cmd.max_epochs)?;
 
     Ok(())
 }
@@ -169,7 +163,6 @@ impl<'s> Fuzzer<'s> {
 
     pub fn fuzz_loop(
         &mut self,
-        spec: Spec,
         data: Option<Vec<u8>>,
         max_epochs: Option<usize>,
     ) -> Result<(), eyre::Error> {
@@ -185,7 +178,7 @@ impl<'s> Fuzzer<'s> {
 
             epoch += 1;
 
-            match self.fuzz(epoch, &spec, data.take()) {
+            match self.fuzz(epoch, data.take()) {
                 | Ok(_) => continue,
                 | Err(FuzzError::DiffFound) => continue,
                 | Err(err) => return Err(err!(err)),
@@ -195,37 +188,12 @@ impl<'s> Fuzzer<'s> {
         Ok(())
     }
 
-    pub fn fuzz(
-        &mut self,
-        epoch: usize,
-        spec: &Spec,
-        data: Option<Vec<u8>>,
-    ) -> Result<(), FuzzError> {
+    pub fn fuzz(&mut self, epoch: usize, data: Option<Vec<u8>>) -> Result<(), FuzzError> {
         let mut run_store = self
             .store
             .new_run()
             .wrap_err("failed to init new run store")?;
-        let mut env = Environment::preview1()?;
-        let fdflags = spec.get_type_def("fdflags").unwrap().wasi.flags().unwrap();
-        let filetype = spec
-            .get_type_def("filetype")
-            .unwrap()
-            .wasi
-            .variant()
-            .unwrap();
-        let resource_id = env.new_resource(
-            "fd".to_owned(),
-            Resource {
-                attributes: HashMap::from([
-                    ("offset".to_owned(), WasiValue::U64(0)),
-                    ("flags".to_owned(), fdflags.value(HashSet::new())),
-                    (
-                        "type".to_owned(),
-                        filetype.value_from_name("directory", None).unwrap(),
-                    ),
-                ]),
-            },
-        );
+        let env = Environment::preview1()?;
         let env = Arc::new(RwLock::new(env));
         let data = match data {
             | Some(d) => d,
@@ -265,10 +233,6 @@ impl<'s> Fuzzer<'s> {
                             let pause_pair = pause_pair.clone();
                             let resume_pair = resume_pair.clone();
                             let n_live_threads = n_live_threads.clone();
-                            let interface = spec
-                                .interfaces
-                                .get_by_key("wasi_snapshot_preview1")
-                                .unwrap();
                             let function_picker = self.function_picker.clone();
                             let params_generator = self.params_generator.clone();
 
@@ -279,6 +243,33 @@ impl<'s> Fuzzer<'s> {
 
                                 witx::preview1(&z3_ctx, &mut spec).unwrap();
 
+                                let interface = spec
+                                    .interfaces
+                                    .get_by_key("wasi_snapshot_preview1")
+                                    .unwrap();
+                                let fdflags =
+                                    spec.get_type_def("fdflags").unwrap().wasi.flags().unwrap();
+                                let filetype = spec
+                                    .get_type_def("filetype")
+                                    .unwrap()
+                                    .wasi
+                                    .variant()
+                                    .unwrap();
+                                let resource_id = env.write().unwrap().new_resource(
+                                    "fd".to_owned(),
+                                    Resource {
+                                        attributes: HashMap::from([
+                                            ("offset".to_owned(), WasiValue::U64(0)),
+                                            ("flags".to_owned(), fdflags.value(HashSet::new())),
+                                            (
+                                                "type".to_owned(),
+                                                filetype
+                                                    .value_from_name("directory", None)
+                                                    .unwrap(),
+                                            ),
+                                        ]),
+                                    },
+                                );
                                 let stderr = fs::OpenOptions::new()
                                     .write(true)
                                     .create_new(true)

@@ -54,7 +54,6 @@ impl<'ctx, 'c, 'e, 's> FunctionScope<'ctx, 'c, 'e, 's> {
 
     pub fn solve_input_contract(
         &self,
-        ctx: &z3::Context,
         spec: &Spec,
         solver: &z3::Solver,
         u: &mut Unstructured,
@@ -75,7 +74,6 @@ impl<'ctx, 'c, 'e, 's> FunctionScope<'ctx, 'c, 'e, 's> {
                     .iter()
                     .map(|&resource_id| {
                         let resource_value = param_type.encode_resource(
-                            ctx,
                             self.spec,
                             self.env.resources.get(resource_id).unwrap(),
                         );
@@ -85,18 +83,18 @@ impl<'ctx, 'c, 'e, 's> FunctionScope<'ctx, 'c, 'e, 's> {
                     })
                     .collect::<Vec<_>>();
 
-                solver.assert(&z3::ast::Bool::or(ctx, clauses.as_slice()));
+                solver.assert(&z3::ast::Bool::or(spec.ctx, clauses.as_slice()));
             }
         }
 
         let input_contract = match &self.function.input_contract {
-            | Some(term) => self.term_to_constraint(ctx, spec, term)?.0,
-            | None => z3::ast::Dynamic::from_ast(&z3::ast::Bool::from_bool(ctx, true)),
+            | Some(term) => self.term_to_constraint(spec.ctx, spec, term)?.0,
+            | None => z3::ast::Dynamic::from_ast(&z3::ast::Bool::from_bool(spec.ctx, true)),
         };
 
         solver.assert(
             &input_contract._eq(&z3::ast::Dynamic::from_ast(&z3::ast::Bool::from_bool(
-                ctx, true,
+                spec.ctx, true,
             ))),
         );
 
@@ -119,7 +117,10 @@ impl<'ctx, 'c, 'e, 's> FunctionScope<'ctx, 'c, 'e, 's> {
 
             nsolutions += 1;
             solutions.push(model);
-            solver.assert(&z3::ast::Bool::or(ctx, &clauses.iter().collect::<Vec<_>>()));
+            solver.assert(&z3::ast::Bool::or(
+                spec.ctx,
+                &clauses.iter().collect::<Vec<_>>(),
+            ));
         }
 
         if solutions.is_empty() {
@@ -311,8 +312,8 @@ impl<'ctx, 'c, 'e, 's> FunctionScope<'ctx, 'c, 'e, 's> {
             },
             | Term::IntLe(t) => {
                 let (lhs, lhs_type) = self.term_to_constraint(ctx, spec, &t.lhs)?;
-                let (rhs, _rhs_type) = self.term_to_constraint(ctx, spec, &t.rhs)?;
-
+                let (rhs, rhs_type) = self.term_to_constraint(ctx, spec, &t.rhs)?;
+                eprintln!("lhs {:?} {:?}\nrhs {:?} {:?}", lhs, lhs_type, rhs, rhs_type);
                 (
                     lhs_type.int_le(&lhs, &rhs),
                     spec.get_encoded_type_by_tref(&TypeRef::Named("int".to_string()))

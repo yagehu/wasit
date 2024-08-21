@@ -23,22 +23,17 @@ impl FunctionPicker for SolverPicker {
         let mut candidates = Vec::new();
 
         for function in interface.functions.values() {
-            let z3_cfg = z3::Config::new();
-            let z3_ctx = z3::Context::new(&z3_cfg);
-            let solver = z3::Solver::new(&z3_ctx);
-            let mut solver_params = z3::Params::new(&z3_ctx);
+            let solver = z3::Solver::new(spec.ctx);
+            let mut solver_params = z3::Params::new(spec.ctx);
             let random_seed: u32 = u.arbitrary()?;
 
             solver_params.set_bool("randomize", false);
             solver_params.set_u32("smt.random_seed", random_seed);
             solver.set_params(&solver_params);
 
-            let scope = FunctionScope::new(&z3_ctx, spec, ctx, env, function);
+            let scope = FunctionScope::new(spec.ctx, spec, ctx, env, function);
 
-            if scope
-                .solve_input_contract(&z3_ctx, spec, &solver, u)?
-                .is_some()
-            {
+            if scope.solve_input_contract(spec, &solver, u)?.is_some() {
                 candidates.push(function);
             }
         }

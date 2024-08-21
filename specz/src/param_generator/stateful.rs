@@ -34,7 +34,7 @@ impl ParamsGenerator for StatefulParamsGenerator {
 
         let function_scope = FunctionScope::new(&z3_ctx, spec, ctx, env, function);
         let params = function_scope
-            .solve_input_contract(&z3_ctx, spec, &solver, u)?
+            .solve_input_contract(spec, &solver, u)?
             .wrap_err("no solution found")?;
 
         Ok(params)
