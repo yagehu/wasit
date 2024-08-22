@@ -11,6 +11,7 @@ members = [
     "executor",
     "executor/pb/c",
     "executor/pb/rust",
+    "executor/protobuf/build",
     "executor/protobuf-c/wasm",
     "fuzzer",
     "idxspace",

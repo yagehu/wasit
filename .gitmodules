@@ -25,3 +25,6 @@
 [submodule "runtimes/wazero"]
 	path = runtimes/wazero
 	url = git@github.com:yagehu/wazero.git
+[submodule "executor/protobuf/upstream"]
+	path = executor/protobuf/upstream
+	url = https://github.com/protocolbuffers/protobuf.git

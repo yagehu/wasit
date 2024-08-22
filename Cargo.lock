@@ -1895,6 +1895,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "wazzi-executor-protobuf"
+version = "0.1.0"
+dependencies = [
+ "wazzi-compile-time",
+]
+
+[[package]]
 name = "wazzi-executor-protobuf-c-wasm"
 version = "0.1.0"
 dependencies = [
