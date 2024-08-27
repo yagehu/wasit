@@ -10,8 +10,12 @@ fn main() {
         .join("upstream")
         .canonicalize()
         .unwrap();
-
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let target_dir = root
+        .join("target")
+        .join(env::var("PROFILE").unwrap())
+        .canonicalize()
+        .unwrap();
 
     env::set_current_dir(&upstream_dir).unwrap();
 
@@ -39,8 +43,20 @@ fn main() {
 
     env::set_current_dir(&out_dir).unwrap();
 
+    let protobuf_install_dir = target_dir.join("protobuf");
     let status = process::Command::new(upstream_dir.join("configure").canonicalize().unwrap())
         .args(["--host=wasm32-wasi", "--disable-strip"])
+        .env(
+            "protobuf_CFLAGS",
+            format!("-I{}", protobuf_install_dir.join("include").display()),
+        )
+        .env(
+            "protobuf_LIBS",
+            format!(
+                "-lprotobuf -L{}",
+                protobuf_install_dir.join("lib").display()
+            ),
+        )
         .env("CC", &wasi_sdk_bin_dir.join("clang"))
         .env("AR", &wasi_sdk_bin_dir.join("ar"))
         .env("NM", &wasi_sdk_bin_dir.join("nm"))

@@ -1,4 +1,4 @@
-use std::{env, fs, os::unix::fs::PermissionsExt, process};
+use std::{env, path::PathBuf, process};
 
 use wazzi_compile_time::root;
 
@@ -10,11 +10,25 @@ fn main() {
         .join("upstream")
         .canonicalize()
         .unwrap();
+    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let target_dir = root
+        .join("target")
+        .join(env::var("PROFILE").unwrap())
+        .canonicalize()
+        .unwrap();
+    let target_protobuf_dir = target_dir.join("protobuf");
 
-    env::set_current_dir(&upstream_dir).unwrap();
+    println!("cargo::rerun-if-changed={}", upstream_dir.display());
 
-    let status = process::Command::new("bazel")
-        .args(&["build", ":protoc", ":protobuf"])
+    env::set_current_dir(&out_dir).unwrap();
+
+    let status = process::Command::new("cmake")
+        .arg(&upstream_dir)
+        .arg("-DCMAKE_CXX_STANDARD=14")
+        .arg(&format!(
+            "-DCMAKE_INSTALL_PREFIX={}",
+            target_protobuf_dir.display()
+        ))
         .spawn()
         .unwrap()
         .wait()
@@ -22,17 +36,14 @@ fn main() {
 
     assert!(status.success());
 
-    let target_dir = root
-        .join("target")
-        .join(env::var("PROFILE").unwrap())
-        .canonicalize()
+    let status = process::Command::new("cmake")
+        .args(&[
+            "--build", ".", "-j", "8", "--config", "Release", "--target", "install",
+        ])
+        .spawn()
+        .unwrap()
+        .wait()
         .unwrap();
-    let protoc_bin = target_dir.join("protoc");
-    let _ = fs::copy(upstream_dir.join("bazel-bin").join("protoc"), &protoc_bin).unwrap();
-    let mut perm = fs::metadata(&protoc_bin).unwrap().permissions();
 
-    #[cfg(unix)]
-    perm.set_mode(0o775);
-
-    fs::set_permissions(&protoc_bin, perm).unwrap();
+    assert!(status.success());
 }

@@ -1884,6 +1884,7 @@ name = "wazzi-executor-pb-c"
 version = "0.1.0"
 dependencies = [
  "wasi-sdk",
+ "wazzi-executor-protobuf",
 ]
 
 [[package]]
@@ -1902,11 +1903,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "wazzi-executor-protobuf-c"
+version = "0.1.0"
+dependencies = [
+ "wazzi-compile-time",
+ "wazzi-executor-protobuf",
+]
+
+[[package]]
 name = "wazzi-executor-protobuf-c-wasm"
 version = "0.1.0"
 dependencies = [
  "wasi-sdk",
  "wazzi-compile-time",
+ "wazzi-executor-protobuf",
 ]
 
 [[package]]

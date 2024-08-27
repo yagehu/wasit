@@ -7,4 +7,5 @@ publish.workspace = true
 [dependencies]
 
 [build-dependencies]
+wazzi-executor-protobuf.workspace = true
 wasi-sdk.workspace = true

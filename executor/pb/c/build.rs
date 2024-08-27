@@ -46,17 +46,19 @@ fn main() {
         .canonicalize()
         .unwrap();
 
-    assert!(process::Command::new("protoc")
-        .args([
-            &format!("--proto_path={}", schema_dir.display()),
-            &format!("--c_out={}", out_dir.display()),
-            schema_path.to_string_lossy().as_ref(),
-        ])
-        .spawn()
-        .unwrap()
-        .wait()
-        .unwrap()
-        .success());
+    assert!(
+        process::Command::new(target_dir.join("protobuf").join("bin").join("protoc"))
+            .args([
+                &format!("--proto_path={}", schema_dir.display()),
+                &format!("--c_out={}", out_dir.display()),
+                schema_path.to_string_lossy().as_ref(),
+            ])
+            .spawn()
+            .unwrap()
+            .wait()
+            .unwrap()
+            .success()
+    );
 
     let pb_file_c = target_dir.join("wazzi-executor.pb-c.c");
     let pb_file_h = target_dir.join("wazzi-executor.pb-c.h");

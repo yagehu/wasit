@@ -12,6 +12,7 @@ members = [
     "executor/pb/c",
     "executor/pb/rust",
     "executor/protobuf/build",
+    "executor/protobuf-c/build",
     "executor/protobuf-c/wasm",
     "fuzzer",
     "idxspace",
@@ -35,6 +36,7 @@ wazzi-dyn-spec.path = "dyn-spec"
 wazzi-executor.path = "executor"
 wazzi-executor-pb-c.path = "executor/pb/c"
 wazzi-executor-pb-rust.path = "executor/pb/rust"
+wazzi-executor-protobuf.path = "executor/protobuf/build"
 wazzi-executor-protobuf-c-wasm.path = "executor/protobuf-c/wasm"
 wazzi-fuzzer.path = "fuzzer"
 wazzi-runners.path = "runners"
