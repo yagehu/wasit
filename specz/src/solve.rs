@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use arbitrary::Unstructured;
 use eyre::Context as _;
 use idxspace::IndexSpace;
+use itertools::Itertools;
 use z3::ast::Ast;
 
 use crate::{
@@ -26,7 +27,6 @@ pub struct FunctionScope<'ctx, 'c, 'e, 's> {
 
 impl<'ctx, 'c, 'e, 's> FunctionScope<'ctx, 'c, 'e, 's> {
     pub fn new(
-        ctx: &'ctx z3::Context,
         spec: &'s Spec<'ctx>,
         resource_ctx: &'c Context,
         env: &'e Environment,
@@ -39,7 +39,7 @@ impl<'ctx, 'c, 'e, 's> FunctionScope<'ctx, 'c, 'e, 's> {
                 param.name.clone(),
                 spec.get_encoded_type_by_tref(&param.tref)
                     .unwrap()
-                    .declare_const(ctx),
+                    .declare_const(spec.ctx),
             );
         }
 
@@ -54,8 +54,7 @@ impl<'ctx, 'c, 'e, 's> FunctionScope<'ctx, 'c, 'e, 's> {
 
     pub fn solve_input_contract(
         &self,
-        spec: &Spec,
-        solver: &z3::Solver,
+        solver: &z3::Solver<'ctx>,
         u: &mut Unstructured,
     ) -> Result<Option<Vec<Value>>, eyre::Error> {
         let mut value_resource_id_map: HashMap<z3::ast::Dynamic, usize> = Default::default();
@@ -64,12 +63,18 @@ impl<'ctx, 'c, 'e, 's> FunctionScope<'ctx, 'c, 'e, 's> {
             let param_type = self.spec.get_encoded_type_by_tref(&param.tref).unwrap();
 
             if let Some(tdef) = param.tref.resource_type_def(self.spec) {
+                if tdef.attributes.is_none() {
+                    continue;
+                }
+
+                let attrs = tdef.attributes.as_ref().unwrap();
                 let resource_ids = self
                     .env
                     .resources_by_types
                     .get(&tdef.name)
                     .cloned()
                     .unwrap_or_default();
+
                 let clauses = resource_ids
                     .iter()
                     .map(|&resource_id| {
@@ -79,22 +84,39 @@ impl<'ctx, 'c, 'e, 's> FunctionScope<'ctx, 'c, 'e, 's> {
                         );
 
                         value_resource_id_map.insert(resource_value.clone(), resource_id);
-                        resource_value._eq(var)
-                    })
-                    .collect::<Vec<_>>();
 
-                solver.assert(&z3::ast::Bool::or(spec.ctx, clauses.as_slice()));
+                        let clauses = attrs
+                            .iter()
+                            .map(|(attr_name, _attr_tref)| {
+                                let (attr, _ty) =
+                                    param_type.attr_get(self.spec, var, attr_name).unwrap();
+
+                                attr._eq(
+                                    &param_type
+                                        .attr_get(self.spec, &resource_value, attr_name)
+                                        .unwrap()
+                                        .0,
+                                )
+                            })
+                            .collect_vec();
+
+                        z3::ast::Bool::and(self.spec.ctx, clauses.as_slice())
+                    })
+                    .collect_vec();
+
+                solver.assert(&z3::ast::Bool::or(self.spec.ctx, clauses.as_slice()));
             }
         }
 
         let input_contract = match &self.function.input_contract {
-            | Some(term) => self.term_to_constraint(spec.ctx, spec, term)?.0,
-            | None => z3::ast::Dynamic::from_ast(&z3::ast::Bool::from_bool(spec.ctx, true)),
+            | Some(term) => self.term_to_constraint(self.spec, term)?.0,
+            | None => z3::ast::Dynamic::from_ast(&z3::ast::Bool::from_bool(self.spec.ctx, true)),
         };
 
         solver.assert(
             &input_contract._eq(&z3::ast::Dynamic::from_ast(&z3::ast::Bool::from_bool(
-                spec.ctx, true,
+                self.spec.ctx,
+                true,
             ))),
         );
 
@@ -118,7 +140,7 @@ impl<'ctx, 'c, 'e, 's> FunctionScope<'ctx, 'c, 'e, 's> {
             nsolutions += 1;
             solutions.push(model);
             solver.assert(&z3::ast::Bool::or(
-                spec.ctx,
+                self.spec.ctx,
                 &clauses.iter().collect::<Vec<_>>(),
             ));
         }
@@ -132,23 +154,34 @@ impl<'ctx, 'c, 'e, 's> FunctionScope<'ctx, 'c, 'e, 's> {
         let mut resources: HashMap<String, HashMap<z3::ast::Dynamic, usize>> = Default::default();
         let mut solved_params = HashMap::new();
 
+        eprintln!("sol {:#?}", solution);
+
         for decl in solution {
-            let param_name = decl.name();
+            let ast_node = decl.apply(&[]);
+            let param_name = self
+                .variables
+                .iter()
+                .find(|&(_name, node)| node == &ast_node)
+                .unwrap()
+                .0;
             let param = self
                 .function
                 .params
                 .iter()
-                .find(|p| p.name == param_name)
+                .find(|p| &p.name == param_name)
                 .unwrap();
             let value = model.get_const_interp(&decl.apply(&[])).unwrap();
 
             if let Some(tdef) = param.tref.resource_type_def(self.spec) {
-                let resource_id = *value_resource_id_map.get(&value).unwrap();
+                if tdef.attributes.is_some() {
+                    println!("{:#?} ||| {:#?}", value, value_resource_id_map);
+                    let resource_id = *value_resource_id_map.get(&value).unwrap();
 
-                resources
-                    .entry(tdef.name.clone())
-                    .or_default()
-                    .insert(value.clone(), resource_id);
+                    resources
+                        .entry(tdef.name.clone())
+                        .or_default()
+                        .insert(value.clone(), resource_id);
+                }
             }
 
             solved_params.insert(param_name.to_string(), value);
@@ -163,28 +196,40 @@ impl<'ctx, 'c, 'e, 's> FunctionScope<'ctx, 'c, 'e, 's> {
             match solved_params.get(&param.name) {
                 | Some(solved_param) => {
                     if let Some(param_tdef) = param.tref.resource_type_def(self.spec) {
-                        // Param is a resource.
-                        let resource_idx = *resources
-                            .get(&param_tdef.name)
-                            .unwrap()
-                            .get(solved_param)
-                            .unwrap();
-                        let (resource_value, preopened) =
-                            self.ctx.resources.get(&resource_idx).unwrap();
+                        if param_tdef.attributes.is_some() {
+                            // Param is a resource.
+                            let resource_idx = *resources
+                                .get(&param_tdef.name)
+                                .unwrap()
+                                .get(solved_param)
+                                .unwrap();
+                            let (resource_value, preopened) =
+                                self.ctx.resources.get(&resource_idx).unwrap();
 
-                        if let Some(preopened_name) = preopened {
-                            if path_prefix.is_none() {
-                                path_prefix = Some(preopened_name.clone());
+                            if let Some(preopened_name) = preopened {
+                                if path_prefix.is_none() {
+                                    path_prefix = Some(preopened_name.clone());
+                                }
                             }
-                        }
 
-                        params.push(Value {
-                            wasi:     resource_value.clone(),
-                            resource: Some(resource_idx),
-                        });
+                            params.push(Value {
+                                wasi:     resource_value.clone(),
+                                resource: Some(resource_idx),
+                            });
+                        } else {
+                            params.push(Value {
+                                wasi:     self
+                                    .spec
+                                    .get_encoded_type_by_tref(&param.tref)
+                                    .unwrap()
+                                    .wasi_value(solved_param),
+                                resource: None,
+                            });
+                        }
                     } else {
                         params.push(Value {
-                            wasi:     spec
+                            wasi:     self
+                                .spec
                                 .get_encoded_type_by_tref(&param.tref)
                                 .unwrap()
                                 .wasi_value(solved_param),
@@ -198,7 +243,7 @@ impl<'ctx, 'c, 'e, 's> FunctionScope<'ctx, 'c, 'e, 's> {
                         | Some(s) => Some(s.as_slice()),
                         | None => None,
                     };
-                    let value = param.tref.arbitrary_value(spec, u, path_prefix)?;
+                    let value = param.tref.arbitrary_value(self.spec, u, path_prefix)?;
 
                     params.push(Value {
                         wasi:     value,
@@ -213,7 +258,6 @@ impl<'ctx, 'c, 'e, 's> FunctionScope<'ctx, 'c, 'e, 's> {
 
     fn term_to_constraint(
         &self,
-        ctx: &'ctx z3::Context,
         spec: &'s Spec<'ctx>,
         term: &Term,
     ) -> Result<(z3::ast::Dynamic, &EncodedType), eyre::Error> {
@@ -221,7 +265,7 @@ impl<'ctx, 'c, 'e, 's> FunctionScope<'ctx, 'c, 'e, 's> {
             | Term::Not(t) => (
                 z3::ast::Dynamic::from_ast(
                     &self
-                        .term_to_constraint(ctx, spec, &t.term)?
+                        .term_to_constraint(spec, &t.term)?
                         .0
                         .as_bool()
                         .unwrap()
@@ -234,7 +278,7 @@ impl<'ctx, 'c, 'e, 's> FunctionScope<'ctx, 'c, 'e, 's> {
                 let clauses = t
                     .clauses
                     .iter()
-                    .map(|clause| self.term_to_constraint(ctx, spec, clause))
+                    .map(|clause| self.term_to_constraint(spec, clause))
                     .collect::<Result<Vec<_>, _>>()?
                     .into_iter()
                     .map(|clause| clause.0.as_bool().unwrap())
@@ -242,7 +286,7 @@ impl<'ctx, 'c, 'e, 's> FunctionScope<'ctx, 'c, 'e, 's> {
 
                 (
                     z3::ast::Dynamic::from_ast(&z3::ast::Bool::and(
-                        ctx,
+                        spec.ctx,
                         clauses.iter().collect::<Vec<_>>().as_slice(),
                     )),
                     spec.get_encoded_type_by_tref(&TypeRef::Named("bool".to_string()))
@@ -253,7 +297,7 @@ impl<'ctx, 'c, 'e, 's> FunctionScope<'ctx, 'c, 'e, 's> {
                 let clauses = t
                     .clauses
                     .iter()
-                    .map(|clause| self.term_to_constraint(ctx, spec, clause))
+                    .map(|clause| self.term_to_constraint(spec, clause))
                     .collect::<Result<Vec<_>, _>>()?
                     .into_iter()
                     .map(|clause| clause.0.as_bool().unwrap())
@@ -261,7 +305,7 @@ impl<'ctx, 'c, 'e, 's> FunctionScope<'ctx, 'c, 'e, 's> {
 
                 (
                     z3::ast::Dynamic::from_ast(&z3::ast::Bool::or(
-                        ctx,
+                        spec.ctx,
                         clauses.iter().collect::<Vec<_>>().as_slice(),
                     )),
                     spec.get_encoded_type_by_tref(&TypeRef::Named("bool".to_string()))
@@ -269,7 +313,7 @@ impl<'ctx, 'c, 'e, 's> FunctionScope<'ctx, 'c, 'e, 's> {
                 )
             },
             | Term::AttrGet(t) => {
-                let (target, target_type) = self.term_to_constraint(ctx, spec, &t.target)?;
+                let (target, target_type) = self.term_to_constraint(spec, &t.target)?;
 
                 target_type.attr_get(spec, &target, &t.attr).unwrap()
             },
@@ -288,7 +332,7 @@ impl<'ctx, 'c, 'e, 's> FunctionScope<'ctx, 'c, 'e, 's> {
             },
             | Term::FlagsGet(t) => {
                 let (target, target_type) = self
-                    .term_to_constraint(ctx, spec, &t.target)
+                    .term_to_constraint(spec, &t.target)
                     .wrap_err("failed to translate flags get target to z3")?;
 
                 target_type.flags_get(spec, &target, &t.field)
@@ -298,31 +342,34 @@ impl<'ctx, 'c, 'e, 's> FunctionScope<'ctx, 'c, 'e, 's> {
                     .get_encoded_type_by_tref(&TypeRef::Named("int".to_string()))
                     .unwrap();
 
-                (ty.const_int_from_str(ctx, t.to_string().as_str()), ty)
+                (ty.const_int_from_str(spec.ctx, t.to_string().as_str()), ty)
             },
             | Term::IntAdd(t) => {
-                let (lhs, lhs_type) = self.term_to_constraint(ctx, spec, &t.lhs)?;
-                let (rhs, _rhs_type) = self.term_to_constraint(ctx, spec, &t.rhs)?;
+                let (lhs, lhs_type) = self.term_to_constraint(spec, &t.lhs)?;
+                let (rhs, rhs_type) = self.term_to_constraint(spec, &t.rhs)?;
+                let int_type = spec
+                    .get_encoded_type_by_tref(&TypeRef::Named("int".to_string()))
+                    .unwrap();
 
                 (
-                    lhs_type.int_add(ctx, &lhs, &rhs),
+                    lhs_type.int_add(spec.ctx, &lhs, rhs_type, &rhs, int_type),
                     spec.get_encoded_type_by_tref(&TypeRef::Named("int".to_string()))
                         .unwrap(),
                 )
             },
             | Term::IntLe(t) => {
-                let (lhs, lhs_type) = self.term_to_constraint(ctx, spec, &t.lhs)?;
-                let (rhs, rhs_type) = self.term_to_constraint(ctx, spec, &t.rhs)?;
-                eprintln!("lhs {:?} {:?}\nrhs {:?} {:?}", lhs, lhs_type, rhs, rhs_type);
+                let (lhs, lhs_type) = self.term_to_constraint(spec, &t.lhs)?;
+                let (rhs, rhs_type) = self.term_to_constraint(spec, &t.rhs)?;
+
                 (
-                    lhs_type.int_le(&lhs, &rhs),
+                    lhs_type.int_le(&lhs, rhs_type, &rhs),
                     spec.get_encoded_type_by_tref(&TypeRef::Named("int".to_string()))
                         .unwrap(),
                 )
             },
             | Term::ValueEq(t) => {
-                let (lhs, _) = self.term_to_constraint(ctx, spec, &t.lhs)?;
-                let (rhs, _) = self.term_to_constraint(ctx, spec, &t.rhs)?;
+                let (lhs, _) = self.term_to_constraint(spec, &t.lhs)?;
+                let (rhs, _) = self.term_to_constraint(spec, &t.rhs)?;
 
                 (
                     z3::ast::Dynamic::from_ast(&lhs._eq(&rhs)),
@@ -334,7 +381,7 @@ impl<'ctx, 'c, 'e, 's> FunctionScope<'ctx, 'c, 'e, 's> {
                 let (payload, _payload_type) = t
                     .payload
                     .as_ref()
-                    .map(|term| self.term_to_constraint(ctx, spec, &term))
+                    .map(|term| self.term_to_constraint(spec, &term))
                     .transpose()?
                     .unzip();
                 let encoded_type = spec
@@ -342,7 +389,7 @@ impl<'ctx, 'c, 'e, 's> FunctionScope<'ctx, 'c, 'e, 's> {
                     .unwrap();
 
                 (
-                    encoded_type.const_variant(ctx, &t.case, payload),
+                    encoded_type.const_variant(spec.ctx, &t.case, payload),
                     encoded_type,
                 )
             },

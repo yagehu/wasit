@@ -205,6 +205,32 @@ impl<'s> Fuzzer<'s> {
                 data
             },
         };
+        let z3_cfg = z3::Config::new();
+        let z3_ctx = z3::Context::new(&z3_cfg);
+        let mut spec = Spec::new(&z3_ctx);
+
+        witx::preview1(&z3_ctx, &mut spec).unwrap();
+
+        let fdflags = spec.get_type_def("fdflags").unwrap().wasi.flags().unwrap();
+        let filetype = spec
+            .get_type_def("filetype")
+            .unwrap()
+            .wasi
+            .variant()
+            .unwrap();
+        let resource_id = env.write().unwrap().new_resource(
+            "fd".to_owned(),
+            Resource {
+                attributes: HashMap::from([
+                    ("offset".to_owned(), WasiValue::U64(0)),
+                    ("flags".to_owned(), fdflags.value(HashSet::new())),
+                    (
+                        "type".to_owned(),
+                        filetype.value_from_name("directory", None).unwrap(),
+                    ),
+                ]),
+            },
+        );
 
         run_store
             .write_data(&data)
@@ -247,29 +273,6 @@ impl<'s> Fuzzer<'s> {
                                     .interfaces
                                     .get_by_key("wasi_snapshot_preview1")
                                     .unwrap();
-                                let fdflags =
-                                    spec.get_type_def("fdflags").unwrap().wasi.flags().unwrap();
-                                let filetype = spec
-                                    .get_type_def("filetype")
-                                    .unwrap()
-                                    .wasi
-                                    .variant()
-                                    .unwrap();
-                                let resource_id = env.write().unwrap().new_resource(
-                                    "fd".to_owned(),
-                                    Resource {
-                                        attributes: HashMap::from([
-                                            ("offset".to_owned(), WasiValue::U64(0)),
-                                            ("flags".to_owned(), fdflags.value(HashSet::new())),
-                                            (
-                                                "type".to_owned(),
-                                                filetype
-                                                    .value_from_name("directory", None)
-                                                    .unwrap(),
-                                            ),
-                                        ]),
-                                    },
-                                );
                                 let stderr = fs::OpenOptions::new()
                                     .write(true)
                                     .create_new(true)

@@ -27,7 +27,6 @@ tracing.workspace = true
 tracing-error.workspace = true
 tracing-subscriber.workspace = true
 z3.workspace = true
-# z3-sys.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]

@@ -4,6 +4,7 @@ use arbitrary::{Arbitrary, Unstructured};
 use idxspace::IndexSpace;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
+use z3::ast::Ast;
 
 use super::witx::{elang, slang};
 use crate::Resource;
@@ -132,7 +133,7 @@ impl<'ctx> Spec<'ctx> {
         let kind = match &tdef.attributes {
             | Some(attrs) => {
                 datatype_builder = datatype_builder.variant(
-                    "attrs",
+                    &name,
                     attrs
                         .iter()
                         .map(|(name, attr_tref)| {
@@ -407,7 +408,9 @@ impl<'ctx> EncodedType<'ctx> {
         &self,
         ctx: &'ctx z3::Context,
         lhs: &z3::ast::Dynamic<'ctx>,
+        rhs_type: &EncodedType<'ctx>,
         rhs: &z3::ast::Dynamic<'ctx>,
+        int_type: &EncodedType<'ctx>,
     ) -> z3::ast::Dynamic<'ctx> {
         let lhs = self
             .datatype
@@ -418,7 +421,7 @@ impl<'ctx> EncodedType<'ctx> {
             .first()
             .unwrap()
             .apply(&[lhs]);
-        let rhs = self
+        let rhs = rhs_type
             .datatype
             .variants
             .first()
@@ -428,15 +431,24 @@ impl<'ctx> EncodedType<'ctx> {
             .unwrap()
             .apply(&[rhs]);
 
-        z3::ast::Dynamic::from_ast(&z3::ast::Int::add(
-            ctx,
-            &[&lhs.as_int().unwrap(), &rhs.as_int().unwrap()],
-        ))
+        z3::ast::Dynamic::from_ast(
+            &int_type
+                .datatype
+                .variants
+                .first()
+                .unwrap()
+                .constructor
+                .apply(&[&z3::ast::Int::add(
+                    ctx,
+                    &[&lhs.as_int().unwrap(), &rhs.as_int().unwrap()],
+                )]),
+        )
     }
 
     pub fn int_le(
         &self,
         lhs: &z3::ast::Dynamic<'ctx>,
+        rhs_type: &EncodedType<'ctx>,
         rhs: &z3::ast::Dynamic<'ctx>,
     ) -> z3::ast::Dynamic<'ctx> {
         let lhs = self
@@ -448,8 +460,7 @@ impl<'ctx> EncodedType<'ctx> {
             .first()
             .unwrap()
             .apply(&[lhs]);
-        eprintln!("rhs --> {:?}", rhs);
-        let rhs = self
+        let rhs = rhs_type
             .datatype
             .variants
             .first()
@@ -581,7 +592,27 @@ impl<'ctx> EncodedType<'ctx> {
                     .unwrap(),
             ),
             | WasiType::Handle => todo!(),
-            | WasiType::Flags(_) => todo!(),
+            | WasiType::Flags(_flags) => {
+                let fields = self
+                    .datatype
+                    .variants
+                    .first()
+                    .unwrap()
+                    .accessors
+                    .iter()
+                    .map(|accessor| {
+                        accessor
+                            .apply(&[value])
+                            .simplify()
+                            .as_bool()
+                            .unwrap()
+                            .as_bool()
+                            .unwrap()
+                    })
+                    .collect_vec();
+
+                WasiValue::Flags(FlagsValue { fields })
+            },
             | WasiType::Variant(_) => todo!(),
             | WasiType::Record(_) => todo!(),
             | WasiType::String => todo!(),

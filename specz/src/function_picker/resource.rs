@@ -1,4 +1,5 @@
 use arbitrary::Unstructured;
+use eyre::Context as _;
 
 use crate::{
     function_picker::FunctionPicker,
@@ -62,6 +63,6 @@ impl FunctionPicker for ResourcePicker {
             }
         }
 
-        Ok(*u.choose(&candidates)?)
+        Ok(*u.choose(&candidates).wrap_err("failed to pick resource")?)
     }
 }

@@ -22,19 +22,17 @@ impl ParamsGenerator for StatefulParamsGenerator {
         spec: &Spec,
         function: &Function,
     ) -> Result<Vec<Value>, eyre::Error> {
-        let z3_cfg = z3::Config::new();
-        let z3_ctx = z3::Context::new(&z3_cfg);
-        let solver = z3::Solver::new(&z3_ctx);
+        let solver = z3::Solver::new(spec.ctx);
         let random_seed: u32 = u.arbitrary()?;
-        let mut solver_params = z3::Params::new(&z3_ctx);
+        let mut solver_params = z3::Params::new(spec.ctx);
 
         solver_params.set_bool("randomize", false);
         solver_params.set_u32("smt.random_seed", random_seed);
         solver.set_params(&solver_params);
 
-        let function_scope = FunctionScope::new(&z3_ctx, spec, ctx, env, function);
+        let function_scope = FunctionScope::new(spec, ctx, env, function);
         let params = function_scope
-            .solve_input_contract(spec, &solver, u)?
+            .solve_input_contract(&solver, u)?
             .wrap_err("no solution found")?;
 
         Ok(params)

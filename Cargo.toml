@@ -6,22 +6,16 @@ publish = false
 resolver = "2"
 members = [
     "compile-time",
-    # "dyn-fuzzer",
-    # "dyn-spec",
     "executor",
     "executor/pb/c",
     "executor/pb/rust",
     "executor/protobuf/build",
     "executor/protobuf-c/build",
     "executor/protobuf-c/wasm",
-    # "fuzzer",
     "idxspace",
     "runners",
-    # "spec",
-    # "spec/constraint",
     "specz",
     "store",
-    # "tmin",
     "wasi",
     "wasi/component-model",
     "wasi-sdk/build",
@@ -39,11 +33,8 @@ wazzi-executor-pb-rust.path = "executor/pb/rust"
 wazzi-executor-protobuf.path = "executor/protobuf/build"
 wazzi-executor-protobuf-c.path = "executor/protobuf-c/build"
 wazzi-executor-protobuf-c-wasm.path = "executor/protobuf-c/wasm"
-# wazzi-fuzzer.path = "fuzzer"
 wazzi-runners.path = "runners"
 wazzi-snapshot.path = "snapshot"
-# wazzi-spec.path = "spec"
-# wazzi-spec-constraint.path = "spec/constraint"
 wazzi-store.path = "store"
 wazzi-wasi.path = "wasi"
 wazzi-wasi-component-model.path = "wasi/component-model"
@@ -80,4 +71,3 @@ tracing-error = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 walkdir = "2"
 z3 = { git = "https://github.com/prove-rs/z3.rs.git" }
-# z3-sys = { git = "https://github.com/prove-rs/z3.rs.git" }
