@@ -1,3 +1,0 @@
-(module $wasi_snapshot_preview1
-  (typename $path string)
-)
