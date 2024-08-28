@@ -57,6 +57,7 @@ fn main() {
                 protobuf_install_dir.join("lib").display()
             ),
         )
+        .env("PROTOC", protobuf_install_dir.join("bin").join("protoc"))
         .env("CC", &wasi_sdk_bin_dir.join("clang"))
         .env("AR", &wasi_sdk_bin_dir.join("ar"))
         .env("NM", &wasi_sdk_bin_dir.join("nm"))

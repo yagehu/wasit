@@ -53,6 +53,7 @@ fn main() {
                 &format!("--c_out={}", out_dir.display()),
                 schema_path.to_string_lossy().as_ref(),
             ])
+            .arg(&format!("--plugin=protoc-gen-c={}", target_dir.join("protoc-c").join("bin").join("protoc-gen-c").display()))
             .spawn()
             .unwrap()
             .wait()

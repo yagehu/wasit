@@ -8,4 +8,6 @@ publish = false
 protobuf.workspace = true
 
 [build-dependencies]
+wazzi-compile-time.workspace = true
+wazzi-executor-protobuf.workspace = true
 protobuf-codegen = "*"

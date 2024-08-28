@@ -6,22 +6,22 @@ publish = false
 resolver = "2"
 members = [
     "compile-time",
-    "dyn-fuzzer",
-    "dyn-spec",
+    # "dyn-fuzzer",
+    # "dyn-spec",
     "executor",
     "executor/pb/c",
     "executor/pb/rust",
     "executor/protobuf/build",
     "executor/protobuf-c/build",
     "executor/protobuf-c/wasm",
-    "fuzzer",
+    # "fuzzer",
     "idxspace",
     "runners",
-    "spec",
-    "spec/constraint",
+    # "spec",
+    # "spec/constraint",
     "specz",
     "store",
-    "tmin",
+    # "tmin",
     "wasi",
     "wasi/component-model",
     "wasi-sdk/build",
@@ -37,12 +37,13 @@ wazzi-executor.path = "executor"
 wazzi-executor-pb-c.path = "executor/pb/c"
 wazzi-executor-pb-rust.path = "executor/pb/rust"
 wazzi-executor-protobuf.path = "executor/protobuf/build"
+wazzi-executor-protobuf-c.path = "executor/protobuf-c/build"
 wazzi-executor-protobuf-c-wasm.path = "executor/protobuf-c/wasm"
-wazzi-fuzzer.path = "fuzzer"
+# wazzi-fuzzer.path = "fuzzer"
 wazzi-runners.path = "runners"
 wazzi-snapshot.path = "snapshot"
-wazzi-spec.path = "spec"
-wazzi-spec-constraint.path = "spec/constraint"
+# wazzi-spec.path = "spec"
+# wazzi-spec-constraint.path = "spec/constraint"
 wazzi-store.path = "store"
 wazzi-wasi.path = "wasi"
 wazzi-wasi-component-model.path = "wasi/component-model"
@@ -78,23 +79,5 @@ tracing = "0.1"
 tracing-error = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 walkdir = "2"
-z3 = { git = "https://github.com/prove-rs/z3.rs.git", features = ["bundled"] }
-z3-sys = { git = "https://github.com/prove-rs/z3.rs.git" }
-
-[package]
-name = "wazzi"
-version = "0.1.0"
-edition.workspace = true
-
-[dependencies]
-wazzi-fuzzer.workspace = true
-wazzi-runners.workspace = true
-wazzi-store.workspace = true
-wazzi-wasi.workspace = true
-
-color-eyre.workspace = true
-clap = { version = "4", features = ["derive"] }
-serde_json.workspace = true
-tracing.workspace = true
-tracing-error.workspace = true
-tracing-subscriber.workspace = true
+z3 = { git = "https://github.com/prove-rs/z3.rs.git" }
+# z3-sys = { git = "https://github.com/prove-rs/z3.rs.git" }

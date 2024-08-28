@@ -41,6 +41,8 @@ fn main() {
         )
         .env("PROTOC", protobuf_install_dir.join("bin").join("protoc"))
         .env("LDFLAGS", "-framework CoreFoundation")
+        .arg("--prefix")
+        .arg(target_dir.join("protoc-c"))
         .spawn()
         .unwrap()
         .wait()
@@ -49,7 +51,7 @@ fn main() {
     assert!(status.success());
 
     let status = process::Command::new("make")
-        .arg("-j8")
+        .args(&["-j8", "install"])
         .spawn()
         .unwrap()
         .wait()
