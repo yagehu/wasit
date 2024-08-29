@@ -154,8 +154,6 @@ impl<'ctx, 'c, 'e, 's> FunctionScope<'ctx, 'c, 'e, 's> {
         let mut resources: HashMap<String, HashMap<z3::ast::Dynamic, usize>> = Default::default();
         let mut solved_params = HashMap::new();
 
-        eprintln!("sol {:#?}", solution);
-
         for decl in solution {
             let ast_node = decl.apply(&[]);
             let param_name = self
@@ -174,7 +172,6 @@ impl<'ctx, 'c, 'e, 's> FunctionScope<'ctx, 'c, 'e, 's> {
 
             if let Some(tdef) = param.tref.resource_type_def(self.spec) {
                 if tdef.attributes.is_some() {
-                    println!("{:#?} ||| {:#?}", value, value_resource_id_map);
                     let resource_id = *value_resource_id_map.get(&value).unwrap();
 
                     resources
