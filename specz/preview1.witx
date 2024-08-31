@@ -878,6 +878,12 @@
           (@flags.get (param $oflags) $excl)
         ))
 
+        ; When generating path segments, if we generate one corresponding to a
+        ; non-existent directory, the next segment shall not be `..`.
+        ; This excludes uninteresting path normalization differences between
+        ; Windows and Linux.
+        (@no-nonexistent-dir-backtrack $fd $path)
+
         (@not (@flags.get (param $fdflags) $dsync))
         (@not (@flags.get (param $fdflags) $rsync))
         (@not (@flags.get (param $fdflags) $sync))

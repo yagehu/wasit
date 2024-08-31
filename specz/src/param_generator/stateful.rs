@@ -31,9 +31,14 @@ impl ParamsGenerator for StatefulParamsGenerator {
         solver.set_params(&solver_params);
 
         let function_scope = FunctionScope::new(spec, ctx, env, function);
+
+        solver.push();
+
         let params = function_scope
-            .solve_input_contract(&solver, u)?
+            .solve_input_contract(u, &solver)?
             .wrap_err("no solution found")?;
+
+        solver.pop(1);
 
         Ok(params)
     }

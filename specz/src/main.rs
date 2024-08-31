@@ -288,7 +288,7 @@ impl<'s> Fuzzer<'s> {
                                 )
                                 .run(Arc::new(Mutex::new(stderr)))
                                 .unwrap();
-                                let mut ctx = Context::new();
+                                let mut ctx = Context::new(store.base.clone());
                                 let mut iteration = 0;
 
                                 ctx.resources.insert(

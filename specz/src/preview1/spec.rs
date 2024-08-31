@@ -11,16 +11,30 @@ use crate::Resource;
 
 #[derive(PartialEq, Eq, Debug)]
 pub struct Spec<'ctx> {
-    pub interfaces: IndexSpace<String, Interface>,
-    pub ctx:        &'ctx z3::Context,
+    pub interfaces:    IndexSpace<String, Interface>,
+    pub ctx:           &'ctx z3::Context,
+    pub encoded_types: HashMap<String, EncodedType<'ctx>>,
 
-    types:         IndexSpace<String, TypeDef>,
-    encoded_types: HashMap<String, EncodedType<'ctx>>,
+    types: IndexSpace<String, TypeDef>,
 }
 
 impl<'ctx> Spec<'ctx> {
     pub fn new(ctx: &'ctx z3::Context) -> Self {
         let encoded_types = [
+            (
+                "segment".to_string(),
+                EncodedType {
+                    kind:     EncodedTypeKind::Segment,
+                    name:     "segment".to_string(),
+                    datatype: z3::DatatypeBuilder::new(ctx, "segment")
+                        .variant("separator", vec![])
+                        .variant(
+                            "component",
+                            vec![("string", z3::DatatypeAccessor::Sort(z3::Sort::string(ctx)))],
+                        )
+                        .finish(),
+                },
+            ),
             (
                 "bool".to_string(),
                 EncodedType {
@@ -329,16 +343,17 @@ impl<'ctx> Spec<'ctx> {
 pub enum EncodedTypeKind {
     Bool,
     Int,
+    File,
+    Segment,
     Wasi(WasiType),
     Resource(BTreeMap<String, TypeRef>),
 }
 
 #[derive(Debug)]
 pub struct EncodedType<'ctx> {
-    pub kind: EncodedTypeKind,
-
-    name:     String,
-    datatype: z3::DatatypeSort<'ctx>,
+    pub kind:            EncodedTypeKind,
+    pub(crate) datatype: z3::DatatypeSort<'ctx>,
+    pub(crate) name:     String,
 }
 
 impl<'ctx> EncodedType<'ctx> {
@@ -379,6 +394,8 @@ impl<'ctx> EncodedType<'ctx> {
         let flags = match &self.kind {
             | EncodedTypeKind::Bool => panic!(),
             | EncodedTypeKind::Int => panic!(),
+            | EncodedTypeKind::File => panic!(),
+            | EncodedTypeKind::Segment => panic!(),
             | EncodedTypeKind::Resource(_) => todo!(),
             | EncodedTypeKind::Wasi(WasiType::Flags(flags)) => flags,
             | EncodedTypeKind::Wasi(_) => panic!(),
@@ -483,6 +500,8 @@ impl<'ctx> EncodedType<'ctx> {
                 .unwrap()
                 .constructor
                 .apply(&[&z3::ast::Int::from_str(ctx, s).unwrap()]),
+            | EncodedTypeKind::File => panic!(),
+            | EncodedTypeKind::Segment => panic!(),
             | EncodedTypeKind::Wasi(_) => todo!(),
             | EncodedTypeKind::Resource(_) => todo!(),
         }
@@ -521,6 +540,8 @@ impl<'ctx> EncodedType<'ctx> {
         match &self.kind {
             | EncodedTypeKind::Bool => todo!(),
             | EncodedTypeKind::Int => todo!(),
+            | EncodedTypeKind::File => todo!(),
+            | EncodedTypeKind::Segment => todo!(),
             | EncodedTypeKind::Resource(_) | EncodedTypeKind::Wasi(_) => {
                 z3::ast::Dynamic::fresh_const(ctx, &self.name, &self.datatype.sort)
             },

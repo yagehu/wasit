@@ -15,6 +15,8 @@ term =
   | param
   | value_eq
   | variant_const
+
+  | no_nonexistent_dir_backtrack
   }
 
 comment = @{ ";" ~ (!NEWLINE ~ ANY)* ~ NEWLINE }
@@ -39,3 +41,11 @@ param = { "(" ~ "param" ~ id ~ ")" }
 value_eq = { "(" ~ "@value.eq" ~ term ~ term ~ ")" }
 
 variant_const = { "(" ~ "@variant.const" ~ id ~ id ~ term? ~ ")" }
+
+no_nonexistent_dir_backtrack =
+  { "("
+  ~ "@no-nonexistent-dir-backtrack"
+  ~ id
+  ~ id
+  ~ ")"
+  }

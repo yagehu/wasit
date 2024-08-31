@@ -22,6 +22,8 @@ pub enum Term {
     ValueEq(Box<ValueEq>),
 
     VariantConst(Box<VariantConst>),
+
+    NoNonExistentDirBacktrack(Box<NoNonExistentDirBacktrack>),
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -79,6 +81,12 @@ pub struct VariantConst {
     pub ty:      String,
     pub case:    String,
     pub payload: Option<Term>,
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct NoNonExistentDirBacktrack {
+    pub fd_param:   String,
+    pub path_param: String,
 }
 
 #[derive(Parser)]
@@ -194,6 +202,28 @@ pub fn to_term(pair: Pair<'_, Rule>) -> Result<Term, eyre::Error> {
             };
 
             Term::VariantConst(Box::new(VariantConst { ty, case, payload }))
+        },
+        | Rule::no_nonexistent_dir_backtrack => {
+            let mut pairs = pair.into_inner();
+            let fd_param = pairs
+                .next()
+                .unwrap()
+                .as_str()
+                .strip_prefix('$')
+                .unwrap()
+                .to_string();
+            let path_param = pairs
+                .next()
+                .unwrap()
+                .as_str()
+                .strip_prefix('$')
+                .unwrap()
+                .to_string();
+
+            Term::NoNonExistentDirBacktrack(Box::new(NoNonExistentDirBacktrack {
+                fd_param,
+                path_param,
+            }))
         },
         | _ => panic!("{:?} {:?}", pair.as_rule(), pair.as_str()),
     })

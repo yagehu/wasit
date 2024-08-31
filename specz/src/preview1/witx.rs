@@ -12,6 +12,8 @@ use pest::{
 use pest_derive::Parser;
 
 use crate::preview1::spec::{
+    EncodedType,
+    EncodedTypeKind,
     FlagsType,
     Function,
     FunctionParam,
@@ -137,6 +139,43 @@ pub fn preview1<'ctx>(ctx: &'ctx z3::Context, spec: &mut Spec<'ctx>) -> Result<(
             | _ => panic!("{:?}", pair.as_rule()),
         }
     }
+
+    let filetype_type = spec
+        .get_encoded_type_by_tref(&TypeRef::Named("filetype".to_string()))
+        .unwrap();
+    let file_datatype = z3::DatatypeBuilder::new(ctx, "file")
+        .variant(
+            "file",
+            vec![(
+                "type",
+                z3::DatatypeAccessor::Sort(filetype_type.datatype.sort.clone()),
+            )],
+        )
+        .finish();
+    let file_sort = file_datatype.sort.clone();
+
+    spec.encoded_types.insert(
+        "file".to_string(),
+        EncodedType {
+            kind:     EncodedTypeKind::File,
+            name:     "file".to_string(),
+            datatype: file_datatype,
+        },
+    );
+    spec.encoded_types.insert(
+        "file--option".to_string(),
+        EncodedType {
+            kind:     EncodedTypeKind::File,
+            name:     "file--option".to_string(),
+            datatype: z3::DatatypeBuilder::new(ctx, "file--option")
+                .variant("none", vec![])
+                .variant(
+                    "some",
+                    vec![("some", z3::DatatypeAccessor::Sort(file_sort))],
+                )
+                .finish(),
+        },
+    );
 
     Ok(())
 }

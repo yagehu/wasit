@@ -36,7 +36,7 @@ impl FunctionPicker for SolverPicker {
 
             solver.push();
 
-            if scope.solve_input_contract(&solver, u)?.is_some() {
+            if scope.solve_input_contract(u, &solver)?.is_some() {
                 candidates.push(function);
             }
 
