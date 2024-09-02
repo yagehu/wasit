@@ -6,7 +6,7 @@ use pest::iterators::Pair;
 use pest_derive::Parser;
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub enum Term {
+pub(in crate::spec) enum Term {
     Not(Box<Not>),
     And(And),
     Or(Or),
@@ -27,73 +27,73 @@ pub enum Term {
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub struct Not {
-    pub term: Term,
+struct Not {
+    term: Term,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub struct And {
-    pub clauses: Vec<Term>,
+struct And {
+    clauses: Vec<Term>,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub struct Or {
-    pub clauses: Vec<Term>,
+struct Or {
+    clauses: Vec<Term>,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub struct AttrGet {
-    pub target: Term,
-    pub attr:   String,
+struct AttrGet {
+    target: Term,
+    attr:   String,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub struct Param {
-    pub name: String,
+struct Param {
+    name: String,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub struct FlagsGet {
-    pub target: Term,
-    pub field:  String,
+struct FlagsGet {
+    target: Term,
+    field:  String,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub struct IntAdd {
-    pub lhs: Term,
-    pub rhs: Term,
+struct IntAdd {
+    lhs: Term,
+    rhs: Term,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub struct IntLe {
-    pub lhs: Term,
-    pub rhs: Term,
+struct IntLe {
+    lhs: Term,
+    rhs: Term,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub struct ValueEq {
-    pub lhs: Term,
-    pub rhs: Term,
+struct ValueEq {
+    lhs: Term,
+    rhs: Term,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub struct VariantConst {
-    pub ty:      String,
-    pub case:    String,
-    pub payload: Option<Term>,
+struct VariantConst {
+    ty:      String,
+    case:    String,
+    payload: Option<Term>,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub struct NoNonExistentDirBacktrack {
-    pub fd_param:   String,
-    pub path_param: String,
+struct NoNonExistentDirBacktrack {
+    fd_param:   String,
+    path_param: String,
 }
 
 #[derive(Parser)]
-#[grammar = "preview1/witx/slang.pest"]
-pub struct Parser;
+#[grammar = "spec/witx/ilang.pest"]
+pub(super) struct Parser;
 
-pub fn to_term(pair: Pair<'_, Rule>) -> Result<Term, eyre::Error> {
+pub(super) fn to_term(pair: Pair<'_, Rule>) -> Result<Term, eyre::Error> {
     Ok(match pair.as_rule() {
         | Rule::not => Term::Not(Box::new(Not {
             term: to_term(pair.into_inner().next().unwrap())?,

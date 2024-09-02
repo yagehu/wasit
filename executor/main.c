@@ -77,6 +77,9 @@ static void set_ptr_value(void * ptr, const Value * value) {
                 case VALUE__BUILTIN__WHICH_U8:
                     * (uint8_t *) ptr = (uint8_t) value->builtin->u8;
                     break;
+                case VALUE__BUILTIN__WHICH_U16:
+                    * (uint32_t *) ptr = (uint16_t) value->builtin->u16;
+                    break;
                 case VALUE__BUILTIN__WHICH_U32:
                     * (uint32_t *) ptr = value->builtin->u32;
                     break;
@@ -266,6 +269,7 @@ static Value * value_new(const Value * v, const void * ptr) {
             switch (v->builtin->which_case) {
                 case VALUE__BUILTIN__WHICH_CHAR: value->builtin->char_ = * (uint32_t *) ptr; break;
                 case VALUE__BUILTIN__WHICH_U8: value->builtin->u8 = * (uint8_t *) ptr; break;
+                case VALUE__BUILTIN__WHICH_U16: value->builtin->u16 = * (uint16_t *) ptr; break;
                 case VALUE__BUILTIN__WHICH_U32: value->builtin->u32 = * (uint32_t *) ptr; break;
                 case VALUE__BUILTIN__WHICH_U64: value->builtin->u64 = * (uint64_t *) ptr; break;
                 case VALUE__BUILTIN__WHICH_S64: value->builtin->s64 = * (int64_t *) ptr; break;
@@ -546,6 +550,7 @@ static void * value_ptr_new(const Value * value) {
             switch (value->builtin->which_case) {
                 case VALUE__BUILTIN__WHICH_CHAR: ptr = calloc(1, sizeof(uint32_t)); break;
                 case VALUE__BUILTIN__WHICH_U8: ptr = calloc(1, sizeof(uint8_t)); break;
+                case VALUE__BUILTIN__WHICH_U16: ptr = calloc(1, sizeof(uint32_t)); break;
                 case VALUE__BUILTIN__WHICH_U32: ptr = calloc(1, sizeof(uint32_t)); break;
                 case VALUE__BUILTIN__WHICH_U64: ptr = calloc(1, sizeof(uint64_t)); break;
                 case VALUE__BUILTIN__WHICH_S64: ptr = calloc(1, sizeof(int64_t)); break;

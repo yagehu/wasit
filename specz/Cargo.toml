@@ -9,7 +9,6 @@ idxspace.workspace = true
 wazzi-executor-pb-rust.workspace = true
 wazzi-executor.workspace = true
 wazzi-runners.workspace = true
-wazzi-store.workspace = true
 
 arbitrary.workspace = true
 bimap.workspace = true

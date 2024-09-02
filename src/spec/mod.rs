@@ -1,0 +1,857 @@
+mod witx;
+
+use std::collections::{BTreeMap, HashSet};
+
+use arbitrary::Unstructured;
+use idxspace::IndexSpace;
+use serde::{Deserialize, Serialize};
+use witx::{ilang, olang};
+
+#[derive(Debug)]
+pub struct Spec<'ctx> {
+    pub(crate) types:      IndexSpace<String, TypeDef<'ctx>>,
+    pub(crate) interfaces: IndexSpace<String, Interface>,
+}
+
+impl<'ctx> Spec<'ctx> {
+    fn new(ctx: &'ctx z3::Context) -> Self {
+        let mut types: IndexSpace<String, TypeDef> = Default::default();
+
+        types.push(
+            "s64".to_string(),
+            TypeDef {
+                name:       "s64".to_string(),
+                wasi:       WasiType::S64,
+                attributes: None,
+                datatype:   z3::DatatypeBuilder::new(ctx, "s64")
+                    .variant(
+                        "s64",
+                        vec![("s64", z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))],
+                    )
+                    .finish(),
+            },
+        );
+        types.push(
+            "u8".to_string(),
+            TypeDef {
+                name:       "u8".to_string(),
+                wasi:       WasiType::U8,
+                attributes: None,
+                datatype:   z3::DatatypeBuilder::new(ctx, "u8")
+                    .variant(
+                        "u8",
+                        vec![("u8", z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))],
+                    )
+                    .finish(),
+            },
+        );
+        types.push(
+            "u32".to_string(),
+            TypeDef {
+                name:       "u32".to_string(),
+                wasi:       WasiType::U32,
+                attributes: None,
+                datatype:   z3::DatatypeBuilder::new(ctx, "u32")
+                    .variant(
+                        "u32",
+                        vec![("u32", z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))],
+                    )
+                    .finish(),
+            },
+        );
+        types.push(
+            "u64".to_string(),
+            TypeDef {
+                name:       "u64".to_string(),
+                wasi:       WasiType::U64,
+                attributes: None,
+                datatype:   z3::DatatypeBuilder::new(ctx, "u64")
+                    .variant(
+                        "u64",
+                        vec![("u64", z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))],
+                    )
+                    .finish(),
+            },
+        );
+
+        Self {
+            types,
+            interfaces: Default::default(),
+        }
+    }
+
+    pub fn preview1(ctx: &'ctx z3::Context) -> Result<Self, eyre::Error> {
+        witx::preview1(ctx)
+    }
+
+    fn insert_type_def(
+        &mut self,
+        ctx: &'ctx z3::Context,
+        name: String,
+        wasi: WasiType,
+        attributes: Option<BTreeMap<String, TypeRef>>,
+    ) {
+        let mut datatype_builder = z3::DatatypeBuilder::new(ctx, name.as_str());
+
+        match &attributes {
+            | Some(attrs) => {
+                datatype_builder = datatype_builder.variant(
+                    &name,
+                    attrs
+                        .iter()
+                        .map(|(name, attr_tref)| {
+                            let tdef = attr_tref.resolve(self);
+
+                            (
+                                name.as_str(),
+                                z3::DatatypeAccessor::Sort(tdef.datatype.sort.clone()),
+                            )
+                        })
+                        .collect(),
+                );
+            },
+            | None => {
+                datatype_builder = match &wasi {
+                    | WasiType::S64 => datatype_builder.variant(
+                        "s64",
+                        vec![("s64", z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))],
+                    ),
+                    | WasiType::U8 => datatype_builder.variant(
+                        "u8",
+                        vec![("u8", z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))],
+                    ),
+                    | WasiType::U16 => datatype_builder.variant(
+                        "u16",
+                        vec![("u16", z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))],
+                    ),
+                    | WasiType::U32 => datatype_builder.variant(
+                        "u32",
+                        vec![("u32", z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))],
+                    ),
+                    | WasiType::U64 => datatype_builder.variant(
+                        "u64",
+                        vec![("u64", z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))],
+                    ),
+                    | WasiType::Handle => datatype_builder.variant(
+                        "handle",
+                        vec![("handle", z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))],
+                    ),
+                    | WasiType::Flags(flags) => datatype_builder.variant(
+                        &name,
+                        flags
+                            .fields
+                            .iter()
+                            .map(|field| {
+                                (
+                                    field.as_str(),
+                                    z3::DatatypeAccessor::Sort(z3::Sort::bool(ctx)),
+                                )
+                            })
+                            .collect(),
+                    ),
+                    | WasiType::Variant(variant) => {
+                        for case in &variant.cases {
+                            let datatype_accessor =
+                                z3::DatatypeAccessor::Sort(match &case.payload {
+                                    | Some(tref) => tref.resolve(self).datatype.sort.clone(),
+                                    | None => z3::Sort::bool(ctx),
+                                });
+
+                            datatype_builder = datatype_builder
+                                .variant(&case.name, vec![("payload", datatype_accessor)]);
+                        }
+
+                        datatype_builder
+                    },
+                    | WasiType::Record(record) => datatype_builder.variant(
+                        "record",
+                        record
+                            .members
+                            .iter()
+                            .map(|member| -> Option<_> {
+                                Some((
+                                    member.name.as_str(),
+                                    z3::DatatypeAccessor::Sort(
+                                        member.tref.resolve(self).datatype.sort.clone(),
+                                    ),
+                                ))
+                            })
+                            .collect::<Option<_>>()
+                            .unwrap(),
+                    ),
+                    | WasiType::String => datatype_builder.variant(
+                        "string",
+                        vec![("string", z3::DatatypeAccessor::Sort(z3::Sort::string(ctx)))],
+                    ),
+                    | WasiType::List(list) => datatype_builder.variant(
+                        "list",
+                        vec![(
+                            "list",
+                            z3::DatatypeAccessor::Sort(z3::Sort::array(
+                                ctx,
+                                &z3::Sort::int(ctx),
+                                &list.item.resolve(self).datatype.sort,
+                            )),
+                        )],
+                    ),
+                };
+            },
+        }
+
+        self.types.push(
+            name.clone(),
+            TypeDef {
+                name,
+                wasi,
+                attributes,
+                datatype: datatype_builder.finish(),
+            },
+        );
+    }
+
+    pub fn get_wasi_type(&self, name: &str) -> Option<WasiType> {
+        let tdef = self.types.get_by_key(name)?;
+
+        Some(tdef.wasi.clone())
+    }
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub(crate) struct Interface {
+    pub(crate) functions: BTreeMap<String, Function>,
+}
+
+impl Interface {
+    fn new() -> Self {
+        Self {
+            functions: Default::default(),
+        }
+    }
+}
+
+impl Default for Interface {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct Function {
+    pub name:           String,
+    pub(crate) params:  Vec<FunctionParam>,
+    pub(crate) results: Vec<FunctionResult>,
+    r#return:           Option<()>,
+    input_contract:     Option<ilang::Term>,
+    effects:            olang::Program,
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub(crate) struct FunctionParam {
+    pub(crate) name: String,
+    pub(crate) tref: TypeRef,
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub(crate) struct FunctionResult {
+    name: String,
+    tref: TypeRef,
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub enum TypeRef {
+    Named(String),
+    Anonymous(WasiType),
+}
+
+impl TypeRef {
+    fn zero_value(&self, spec: &Spec) -> Option<WasiValue> {
+        Some(match &self.resolve(spec).wasi {
+            | WasiType::S64 => WasiValue::S64(0),
+            | WasiType::U8 => WasiValue::U8(0),
+            | WasiType::U16 => WasiValue::U16(0),
+            | WasiType::U32 => WasiValue::U32(0),
+            | WasiType::U64 => WasiValue::U64(0),
+            | WasiType::Handle => WasiValue::Handle(0),
+            | WasiType::Flags(flags) => WasiValue::Flags(FlagsValue {
+                fields: flags.fields.iter().map(|_| false).collect(),
+            }),
+            | WasiType::Variant(variant) => WasiValue::Variant(Box::new(VariantValue {
+                case_idx: 0,
+                payload:  variant
+                    .cases
+                    .first()
+                    .unwrap()
+                    .payload
+                    .as_ref()
+                    .map(|payload| payload.zero_value(spec))?,
+            })),
+            | WasiType::Record(record) => WasiValue::Record(RecordValue {
+                members: record
+                    .members
+                    .iter()
+                    .map(|member| member.tref.zero_value(spec))
+                    .collect::<Option<Vec<_>>>()?,
+            }),
+            | WasiType::String => WasiValue::String(Vec::new()),
+            | WasiType::List(_list) => WasiValue::List(ListValue { items: vec![] }),
+        })
+    }
+
+    fn alignment(&self, spec: &Spec) -> u32 {
+        self.resolve(spec).wasi.alignment(spec)
+    }
+
+    fn mem_size(&self, spec: &Spec) -> u32 {
+        self.resolve(spec).wasi.mem_size(spec)
+    }
+
+    pub(crate) fn resolve<'ctx, 'spec>(&self, spec: &'spec Spec<'ctx>) -> &'spec TypeDef<'ctx> {
+        match self {
+            | Self::Named(name) => spec.types.get_by_key(name).unwrap(),
+            | Self::Anonymous(wasi_type) => match wasi_type {
+                | WasiType::S64 => spec.types.get_by_key("s64").unwrap(),
+                | WasiType::U8 => spec.types.get_by_key("u8").unwrap(),
+                | WasiType::U16 => spec.types.get_by_key("u16").unwrap(),
+                | WasiType::U32 => spec.types.get_by_key("u32").unwrap(),
+                | WasiType::U64 => spec.types.get_by_key("u64").unwrap(),
+                | WasiType::Handle => spec.types.get_by_key("handle").unwrap(),
+                | _ => panic!("{:?}", wasi_type),
+            },
+        }
+    }
+
+    fn resolve_wasi<'ctx, 'spec>(&self, spec: &'spec Spec<'ctx>) -> WasiType {
+        match self {
+            | Self::Named(name) => spec.types.get_by_key(name).unwrap().wasi.clone(),
+            | Self::Anonymous(wasi_type) => wasi_type.to_owned(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct TypeDef<'ctx> {
+    name:                  String,
+    pub(crate) wasi:       WasiType,
+    pub(crate) attributes: Option<BTreeMap<String, TypeRef>>,
+    datatype:              z3::DatatypeSort<'ctx>,
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub enum WasiType {
+    S64,
+    U8,
+    U16,
+    U32,
+    U64,
+    Handle,
+    Flags(FlagsType),
+    Variant(VariantType),
+    Record(RecordType),
+    String,
+    List(Box<ListType>),
+}
+
+impl WasiType {
+    pub(crate) fn arbitrary_value(
+        &self,
+        spec: &Spec,
+        u: &mut Unstructured,
+    ) -> Result<WasiValue, arbitrary::Error> {
+        Ok(match self {
+            | WasiType::S64 => WasiValue::S64(u.arbitrary()?),
+            | WasiType::U8 => WasiValue::U8(u.arbitrary()?),
+            | WasiType::U16 => WasiValue::U16(u.arbitrary()?),
+            | WasiType::U32 => WasiValue::U32(u.arbitrary()?),
+            | WasiType::U64 => WasiValue::U64(u.arbitrary()?),
+            | WasiType::Handle => WasiValue::Handle(u.arbitrary()?),
+            | WasiType::Flags(flags) => WasiValue::Flags(FlagsValue {
+                fields: flags
+                    .fields
+                    .iter()
+                    .map(|_field| u.arbitrary())
+                    .collect::<Result<Vec<_>, _>>()?,
+            }),
+            | WasiType::Variant(variant) => {
+                let case_idx: usize = u.arbitrary()?;
+                let case = variant.cases.get(case_idx).unwrap();
+
+                WasiValue::Variant(Box::new(VariantValue {
+                    case_idx,
+                    payload: case
+                        .payload
+                        .as_ref()
+                        .map(|payload_type| {
+                            payload_type.resolve_wasi(spec).arbitrary_value(spec, u)
+                        })
+                        .transpose()?,
+                }))
+            },
+            | WasiType::Record(record) => WasiValue::Record(RecordValue {
+                members: record
+                    .members
+                    .iter()
+                    .map(|member| member.tref.resolve_wasi(spec).arbitrary_value(spec, u))
+                    .collect::<Result<Vec<_>, _>>()?,
+            }),
+            | WasiType::String => panic!(),
+            | WasiType::List(_) => panic!(),
+        })
+    }
+
+    pub fn flags(&self) -> Option<&FlagsType> {
+        match self {
+            | Self::Flags(flags) => Some(flags),
+            | _ => None,
+        }
+    }
+
+    pub fn variant(&self) -> Option<&VariantType> {
+        match self {
+            | Self::Variant(variant) => Some(variant),
+            | _ => None,
+        }
+    }
+
+    fn zero_value(&self) -> WasiValue {
+        match self {
+            | WasiType::S64 => WasiValue::S64(0),
+            | WasiType::U8 => WasiValue::U8(0),
+            | WasiType::U16 => WasiValue::U16(0),
+            | WasiType::U32 => WasiValue::U32(0),
+            | WasiType::U64 => WasiValue::U64(0),
+            | WasiType::Handle => WasiValue::Handle(0),
+            | WasiType::Flags(_) => todo!(),
+            | WasiType::Variant(_) => todo!(),
+            | WasiType::Record(_) => todo!(),
+            | WasiType::String => todo!(),
+            | WasiType::List(_) => todo!(),
+        }
+    }
+
+    fn alignment(&self, spec: &Spec) -> u32 {
+        match self {
+            | WasiType::U8 => 1,
+            | WasiType::U16 => 2,
+            | WasiType::U32 => 4,
+            | WasiType::S64 | WasiType::U64 => 8,
+            | WasiType::List(_) => 4,
+            | WasiType::Record(record) => record.alignment(spec),
+            | WasiType::Variant(variant) => variant.alignment(spec),
+            | WasiType::Handle => 4,
+            | WasiType::Flags(flags) => flags.repr.alignment(),
+            | WasiType::String => 4,
+        }
+    }
+
+    fn mem_size(&self, spec: &Spec) -> u32 {
+        match self {
+            | Self::U8 => 1,
+            | Self::U16 => 2,
+            | Self::U32 => 4,
+            | Self::S64 | Self::U64 => 8,
+            | Self::List(_) => 8,
+            | Self::Record(record) => record.mem_size(spec),
+            | Self::Variant(variant) => variant.mem_size(spec),
+            | Self::Handle => 4,
+            | Self::Flags(flags) => flags.repr.mem_size(),
+            | Self::String => todo!(),
+        }
+    }
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct FlagsType {
+    pub repr:   IntRepr,
+    pub fields: Vec<String>,
+}
+
+impl FlagsType {
+    pub fn value(&self, fields: HashSet<&str>) -> WasiValue {
+        WasiValue::Flags(FlagsValue {
+            fields: self
+                .fields
+                .iter()
+                .map(|field| fields.contains(field.as_str()))
+                .collect(),
+        })
+    }
+}
+
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+pub enum IntRepr {
+    U8,
+    U16,
+    U32,
+    U64,
+}
+
+impl IntRepr {
+    fn alignment(&self) -> u32 {
+        match self {
+            | IntRepr::U8 => 1,
+            | IntRepr::U16 => 2,
+            | IntRepr::U32 => 4,
+            | IntRepr::U64 => 8,
+        }
+    }
+
+    fn mem_size(&self) -> u32 {
+        match self {
+            | IntRepr::U8 => 1,
+            | IntRepr::U16 => 2,
+            | IntRepr::U32 => 4,
+            | IntRepr::U64 => 8,
+        }
+    }
+}
+
+impl From<IntRepr> for wazzi_executor_pb_rust::IntRepr {
+    fn from(value: IntRepr) -> Self {
+        match value {
+            | IntRepr::U8 => Self::U8,
+            | IntRepr::U16 => Self::U16,
+            | IntRepr::U32 => Self::U32,
+            | IntRepr::U64 => Self::U64,
+        }
+    }
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct VariantType {
+    pub tag_repr: IntRepr,
+    pub cases:    Vec<VariantCaseType>,
+}
+
+impl VariantType {
+    pub fn value_from_name(
+        &self,
+        case_name: &str,
+        payload: Option<WasiValue>,
+    ) -> Option<WasiValue> {
+        Some(WasiValue::Variant(Box::new(VariantValue {
+            case_idx: self
+                .cases
+                .iter()
+                .enumerate()
+                .find(|(_, case)| case.name == case_name)
+                .map(|(i, _)| i)?,
+            payload,
+        })))
+    }
+
+    fn alignment(&self, spec: &Spec) -> u32 {
+        self.tag_repr.alignment().max(self.max_case_alignment(spec))
+    }
+
+    fn mem_size(&self, spec: &Spec) -> u32 {
+        let mut size = self.tag_repr.mem_size();
+
+        size = align_to(size, self.max_case_alignment(spec));
+        size += self
+            .cases
+            .iter()
+            .filter_map(|case| case.payload.as_ref())
+            .map(|payload| payload.mem_size(spec))
+            .max()
+            .unwrap_or(0);
+
+        align_to(size, self.alignment(spec))
+    }
+
+    fn payload_offset(&self, spec: &Spec) -> u32 {
+        let size = self.tag_repr.mem_size();
+
+        align_to(size, self.max_case_alignment(spec))
+    }
+
+    fn max_case_alignment(&self, spec: &Spec) -> u32 {
+        self.cases
+            .iter()
+            .filter_map(|case| case.payload.as_ref())
+            .map(|payload| payload.alignment(spec))
+            .max()
+            .unwrap_or(1)
+    }
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct VariantCaseType {
+    pub name:    String,
+    pub payload: Option<TypeRef>,
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct RecordType {
+    pub members: Vec<RecordMemberType>,
+}
+
+impl RecordType {
+    fn alignment(&self, spec: &Spec) -> u32 {
+        self.members
+            .iter()
+            .map(|member| member.tref.alignment(spec))
+            .max()
+            .unwrap_or(1)
+    }
+
+    fn mem_size(&self, spec: &Spec) -> u32 {
+        let mut size: u32 = 0;
+        let alignment = self.alignment(spec);
+
+        for member in &self.members {
+            let alignment = member.tref.alignment(spec);
+
+            size = size.div_ceil(alignment) * alignment;
+            size += member.tref.mem_size(spec);
+        }
+
+        size.div_ceil(alignment) * alignment
+    }
+
+    fn member_layout(&self, spec: &Spec) -> Vec<RecordMemberLayout> {
+        let mut offset: u32 = 0;
+        let mut layout = Vec::with_capacity(self.members.len());
+
+        for member in &self.members {
+            let alignment = member.tref.alignment(spec);
+
+            offset = offset.div_ceil(alignment) * alignment;
+            layout.push(RecordMemberLayout { offset });
+            offset += member.tref.mem_size(spec);
+        }
+
+        layout
+    }
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct RecordMemberType {
+    pub name: String,
+    pub tref: TypeRef,
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct RecordMemberLayout {
+    pub offset: u32,
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct ListType {
+    pub item: TypeRef,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
+pub enum WasiValue {
+    Handle(u32),
+    S64(i64),
+    U8(u8),
+    U32(u32),
+    U16(u16),
+    U64(u64),
+    Record(RecordValue),
+    Flags(FlagsValue),
+    List(ListValue),
+    String(Vec<u8>),
+    Variant(Box<VariantValue>),
+}
+
+impl WasiValue {
+    fn into_pb(self, spec: &Spec, tref: &TypeRef) -> wazzi_executor_pb_rust::Value {
+        let which = match (&tref.resolve(spec).wasi, self) {
+            | (_, Self::Handle(handle)) => wazzi_executor_pb_rust::value::Which::Handle(handle),
+            | (_, Self::S64(i)) => wazzi_executor_pb_rust::value::Which::Builtin(
+                wazzi_executor_pb_rust::value::Builtin {
+                    which:          Some(wazzi_executor_pb_rust::value::builtin::Which::S64(i)),
+                    special_fields: Default::default(),
+                },
+            ),
+            | (_, Self::U8(i)) => wazzi_executor_pb_rust::value::Which::Builtin(
+                wazzi_executor_pb_rust::value::Builtin {
+                    which:          Some(wazzi_executor_pb_rust::value::builtin::Which::U8(i.into())),
+                    special_fields: Default::default(),
+                },
+            ),
+            | (_, Self::U16(i)) => wazzi_executor_pb_rust::value::Which::Builtin(
+                wazzi_executor_pb_rust::value::Builtin {
+                    which:          Some(wazzi_executor_pb_rust::value::builtin::Which::U16(i.into())),
+                    special_fields: Default::default(),
+                },
+            ),
+            | (_, Self::U32(i)) => wazzi_executor_pb_rust::value::Which::Builtin(
+                wazzi_executor_pb_rust::value::Builtin {
+                    which:          Some(wazzi_executor_pb_rust::value::builtin::Which::U32(i)),
+                    special_fields: Default::default(),
+                },
+            ),
+            | (_, Self::U64(i)) => wazzi_executor_pb_rust::value::Which::Builtin(
+                wazzi_executor_pb_rust::value::Builtin {
+                    which:          Some(wazzi_executor_pb_rust::value::builtin::Which::U64(i)),
+                    special_fields: Default::default(),
+                },
+            ),
+            | (WasiType::Record(record_type), Self::Record(record)) => {
+                wazzi_executor_pb_rust::value::Which::Record(wazzi_executor_pb_rust::value::Record {
+                    members: record
+                        .members
+                        .into_iter()
+                        .zip(record_type.members.iter())
+                        .zip(record_type.member_layout(spec))
+                        .map(|((value, member), member_layout)| {
+                            wazzi_executor_pb_rust::value::record::Member {
+                                name: member.name.clone(),
+                                value: Some(value.into_pb(spec, &member.tref)).into(),
+                                offset: member_layout.offset,
+                                special_fields: Default::default(),
+                            }
+                        })
+                        .collect(),
+                    size: record_type.mem_size(spec),
+                    special_fields: Default::default(),
+                })
+
+            },
+            | (WasiType::Flags(flags_type), Self::Flags(flags)) => {
+                wazzi_executor_pb_rust::value::Which::Bitflags(
+                    wazzi_executor_pb_rust::value::Bitflags {
+                        repr:           wazzi_executor_pb_rust::IntRepr::from(flags_type.repr)
+                            .into(),
+                        members:        flags_type
+                            .fields
+                            .iter()
+                            .zip(flags.fields)
+                            .map(|(field_name, field)| {
+                                wazzi_executor_pb_rust::value::bitflags::Member {
+                                    name:           field_name.to_owned(),
+                                    value:          field,
+                                    special_fields: Default::default(),
+                                }
+                            })
+                            .collect(),
+                        special_fields: Default::default(),
+                    },
+                )
+            },
+            | (WasiType::List(list_type), Self::List(list)) => {
+                let items = list.items.into_iter().map(|item| {
+                    item.into_pb(spec, &list_type.item)
+                }).collect();
+
+                wazzi_executor_pb_rust::value::Which::Array(
+                    wazzi_executor_pb_rust::value::Array {
+                        items,
+                        item_size: list_type.item.mem_size(spec),
+                        special_fields: Default::default()
+                    }
+                )
+            },
+            | (_, Self::String(string)) => wazzi_executor_pb_rust::value::Which::String(string),
+            | (WasiType::Variant(variant_type), Self::Variant(variant)) => {
+                wazzi_executor_pb_rust::value::Which::Variant(Box::new(
+                    wazzi_executor_pb_rust::value::Variant {
+                        case_idx:       variant.case_idx as u64,
+                        size:           variant_type.mem_size(spec),
+                        tag_repr:       wazzi_executor_pb_rust::IntRepr::from(
+                            variant_type.tag_repr,
+                        )
+                        .into(),
+                        payload_offset: variant_type.payload_offset(spec),
+                        payload_option: Some(
+                            match &variant_type.cases.get(variant.case_idx).unwrap().payload {
+                                | Some(payload) => wazzi_executor_pb_rust::value::variant::Payload_option::PayloadSome(
+                                    Box::new(variant.payload.unwrap().into_pb(spec, &payload))
+                                ),
+                                | None => wazzi_executor_pb_rust::value::variant::Payload_option::PayloadNone(Default::default()),
+                            },
+                        ),
+                        special_fields: Default::default(),
+                    },
+                ))
+            },
+            | (_, Self::Record(_)) | (_, Self::Flags(_)) | (_, Self::List(_)) | (_, Self::Variant(_)) => unreachable!(),
+        };
+
+        wazzi_executor_pb_rust::Value {
+            which:          Some(which),
+            special_fields: Default::default(),
+        }
+    }
+
+    fn from_pb(spec: &Spec, wasi_type: &WasiType, value: wazzi_executor_pb_rust::Value) -> Self {
+        match (wasi_type, value.which.unwrap()) {
+            | (_, wazzi_executor_pb_rust::value::Which::Handle(handle)) => Self::Handle(handle),
+            | (_, wazzi_executor_pb_rust::value::Which::Builtin(builtin)) => {
+                match builtin.which.unwrap() {
+                    | wazzi_executor_pb_rust::value::builtin::Which::Char(_) => todo!(),
+                    | wazzi_executor_pb_rust::value::builtin::Which::U8(_) => todo!(),
+                    | wazzi_executor_pb_rust::value::builtin::Which::U32(i) => Self::U32(i),
+                    | wazzi_executor_pb_rust::value::builtin::Which::U64(i) => Self::U64(i),
+                    | wazzi_executor_pb_rust::value::builtin::Which::S64(i) => Self::S64(i),
+                    | _ => todo!(),
+                }
+            },
+            | (_, wazzi_executor_pb_rust::value::Which::Bitflags(flags)) => {
+                Self::Flags(FlagsValue {
+                    fields: flags
+                        .members
+                        .into_iter()
+                        .map(|member| member.value)
+                        .collect(),
+                })
+            },
+            | (_, wazzi_executor_pb_rust::value::Which::String(string)) => Self::String(string),
+            | (
+                WasiType::Variant(variant_type),
+                wazzi_executor_pb_rust::value::Which::Variant(variant),
+            ) => Self::Variant(Box::new(VariantValue {
+                case_idx: variant.case_idx as usize,
+                payload:  match variant.payload_option.unwrap() {
+                    | wazzi_executor_pb_rust::value::variant::Payload_option::PayloadSome(p) => {
+                        Some(Self::from_pb(
+                            spec,
+                            &variant_type
+                                .cases
+                                .get(variant.case_idx as usize)
+                                .unwrap()
+                                .payload
+                                .as_ref()
+                                .unwrap()
+                                .resolve(spec)
+                                .wasi,
+                            *p,
+                        ))
+                    },
+                    | wazzi_executor_pb_rust::value::variant::Payload_option::PayloadNone(_) => {
+                        None
+                    },
+                    | _ => todo!(),
+                },
+            })),
+            | _ => unreachable!(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
+pub struct RecordValue {
+    pub members: Vec<WasiValue>,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
+pub struct FlagsValue {
+    pub fields: Vec<bool>,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
+pub struct ListValue {
+    pub items: Vec<WasiValue>,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
+pub struct VariantValue {
+    pub case_idx: usize,
+    pub payload:  Option<WasiValue>,
+}
+
+fn align_to(ptr: u32, alignment: u32) -> u32 {
+    ptr.div_ceil(alignment) * alignment
+}

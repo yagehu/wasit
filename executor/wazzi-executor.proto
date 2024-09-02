@@ -46,6 +46,7 @@ message Value {
         oneof which {
             uint32 char = 1;
             uint32 u8 = 2;
+            uint32 u16 = 3;
             uint32 u32 = 4;
             uint64 u64 = 5;
             sint64 s64 = 9;

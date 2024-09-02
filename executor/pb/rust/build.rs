@@ -1,10 +1,10 @@
-use std::{env, path::PathBuf};
+use std::env;
 
 use wazzi_compile_time::root;
 
 fn main() {
     let root = root();
-    let schema_dir = PathBuf::from("..").join("..").canonicalize().unwrap();
+    let schema_dir = root.join("executor");
     let schema_file = schema_dir
         .join("wazzi-executor.proto")
         .canonicalize()
