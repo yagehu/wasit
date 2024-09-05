@@ -110,8 +110,10 @@ expr =
   }
 
 keyword =
-  { "i64.const"
+  { "field"
+  | "i64.const"
   | "param"
+  | "record"
   | "result"
   }
 

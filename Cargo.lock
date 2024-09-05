@@ -1524,6 +1524,7 @@ dependencies = [
  "wazzi-executor",
  "wazzi-executor-pb-rust",
  "wazzi-runners",
+ "wazzi-store",
  "z3",
 ]
 
@@ -1593,6 +1594,16 @@ version = "0.1.0"
 dependencies = [
  "eyre",
  "tera",
+ "tracing",
+]
+
+[[package]]
+name = "wazzi-store"
+version = "0.1.0"
+dependencies = [
+ "eyre",
+ "serde",
+ "serde_json",
  "tracing",
 ]
 

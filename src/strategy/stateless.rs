@@ -2,9 +2,8 @@ use arbitrary::Unstructured;
 
 use super::CallStrategy;
 use crate::{
-    spec::{Function, Spec},
+    spec::{Function, Spec, WasiValue},
     Environment,
-    ValueMeta,
 };
 
 pub struct StatelessStrategy<'u, 'data, 'env> {
@@ -32,7 +31,7 @@ impl CallStrategy for StatelessStrategy<'_, '_, '_> {
                 for param in function.params.iter() {
                     let tdef = param.tref.resolve(spec);
 
-                    if tdef.attributes.is_none() {
+                    if tdef.state.is_none() {
                         continue;
                     }
 
@@ -63,20 +62,19 @@ impl CallStrategy for StatelessStrategy<'_, '_, '_> {
         &mut self,
         spec: &Spec,
         function: &Function,
-    ) -> Result<Vec<ValueMeta>, eyre::Error> {
+    ) -> Result<Vec<WasiValue>, eyre::Error> {
         let mut params = Vec::with_capacity(function.params.len());
 
         for param in function.params.iter() {
             let tdef = param.tref.resolve(spec);
 
-            match tdef.attributes {
+            match &tdef.state {
                 | None => {
-                    params.push(ValueMeta {
-                        wasi:     tdef.wasi.arbitrary_value(spec, self.u)?,
-                        resource: None,
-                    });
+                    params.push(tdef.wasi.arbitrary_value(spec, self.u)?);
                 },
-                | Some(_) => todo!(),
+                | Some(_state_type) => {
+                    let resources = self.env.resources_by_types.get(&tdef.name).unwrap();
+                },
             }
         }
 

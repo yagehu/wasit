@@ -24,7 +24,8 @@ use tracing_error::ErrorLayer;
 use tracing_subscriber::{layer::SubscriberExt as _, EnvFilter};
 use walkdir::WalkDir;
 use wazzi::{
-    spec::{Spec, WasiValue},
+    spec::{Spec, VariantValue, WasiType, WasiValue},
+    Call,
     CallStrategy,
     Environment,
     Resource,
@@ -164,8 +165,7 @@ impl<'s> Fuzzer<'s> {
             .store
             .new_run()
             .wrap_err("failed to init new run store")?;
-        let env = Environment::new();
-        let env = Arc::new(RwLock::new(env));
+        let env = Arc::new(RwLock::new(Environment::new()));
         let data = match data {
             | Some(d) => d,
             | None => {
@@ -179,20 +179,53 @@ impl<'s> Fuzzer<'s> {
         let z3_cfg = z3::Config::new();
         let z3_ctx = z3::Context::new(&z3_cfg);
         let spec = Spec::preview1(&z3_ctx).wrap_err("failed to init spec")?;
-        let fdflags = spec.get_wasi_type("fdflags").unwrap().flags().unwrap();
-        let filetype = spec.get_wasi_type("filetype").unwrap().variant().unwrap();
+        let fd = spec.get_type("fd").unwrap();
+        let mut fd_state = fd.zero_value(&spec);
+
+        match (&fd, &mut fd_state) {
+            | (WasiType::Record(record), WasiValue::Record(record_value)) => {
+                let (type_member_idx, type_member) = record
+                    .members
+                    .iter()
+                    .enumerate()
+                    .find(|(_, member)| member.name == "type")
+                    .unwrap();
+                let tdef = type_member.tref.resolve(&spec);
+                let directory_case_idx = match &tdef.wasi {
+                    | WasiType::Variant(variant) => {
+                        variant
+                            .cases
+                            .iter()
+                            .enumerate()
+                            .find(|(_, case)| case.name == "directory")
+                            .unwrap()
+                            .0
+                    },
+                    | _ => panic!("unexpected type for fd state type attribute"),
+                };
+
+                record_value.members[type_member_idx] = WasiValue::Variant(Box::new(VariantValue {
+                    case_idx: directory_case_idx,
+                    payload:  None,
+                }))
+            },
+            | _ => panic!("unexpected type for fd state {:?}", fd),
+        }
+
+        let filetype = spec.get_type("filetype").unwrap().variant().unwrap();
         let resource_id = env.write().unwrap().new_resource(
             "fd".to_string(),
-            Resource {
-                attributes: BTreeMap::from([
-                    ("offset".to_string(), WasiValue::U64(0)),
-                    ("flags".to_string(), fdflags.value(HashSet::new())),
-                    (
-                        "type".to_string(),
-                        filetype.value_from_name("directory", None).unwrap(),
-                    ),
-                ]),
-            },
+            Resource { state: fd_state },
+            // Resource {
+            //     attributes: BTreeMap::from([
+            //         ("offset".to_string(), WasiValue::U64(0)),
+            //         ("flags".to_string(), fdflags.value(HashSet::new())),
+            //         (
+            //             "type".to_string(),
+            //             filetype.value_from_name("directory", None).unwrap(),
+            //         ),
+            //     ]),
+            // },
         );
 
         run_store
@@ -222,9 +255,7 @@ impl<'s> Fuzzer<'s> {
                             let pause_pair = pause_pair.clone();
                             let resume_pair = resume_pair.clone();
                             let n_live_threads = n_live_threads.clone();
-                            let strategy = self
-                                .strategy
-                                .into_call_strategy(&mut u, &env.read().unwrap());
+                            let strategy = self.strategy;
 
                             move || -> Result<(), FuzzError> {
                                 let z3_cfg = z3::Config::new();
@@ -245,13 +276,9 @@ impl<'s> Fuzzer<'s> {
                                 )
                                 .run(Arc::new(Mutex::new(stderr)))
                                 .unwrap();
-                                let mut ctx = Context::new(store.base.clone());
                                 let mut iteration = 0;
-
-                                ctx.resources.insert(
-                                    resource_id,
-                                    (WasiValue::Handle(runtime.base_dir_fd()), prefix),
-                                );
+                                let env = env.read().unwrap();
+                                let mut strategy = strategy.into_call_strategy(&mut u, &env);
 
                                 loop {
                                     let (resume_mu, resume_cond) = &*resume_pair;
@@ -270,10 +297,6 @@ impl<'s> Fuzzer<'s> {
                                         return Err(FuzzError::DiffFound);
                                     }
 
-                                    if u.is_empty() {
-                                        panic!("data exhausted");
-                                    }
-
                                     let function = strategy.select_function(&spec)?;
 
                                     tracing::info!(
@@ -284,14 +307,12 @@ impl<'s> Fuzzer<'s> {
                                     );
                                     iteration += 1;
 
-                                    let (ok, _results) = match env.read().unwrap().call(
-                                        &mut u,
-                                        &mut ctx,
+                                    let results = match env.call(
                                         &spec,
-                                        &executor,
                                         store.trace_mut(),
                                         function,
-                                        &*params_generator,
+                                        strategy.as_mut(),
+                                        &executor,
                                     ) {
                                         | Ok(x) => x,
                                         | Err(err) => {
@@ -320,48 +341,7 @@ impl<'s> Fuzzer<'s> {
                                         pause_state.0 = 0;
                                         pause_state.1 = pause_state.1.wrapping_add(1);
                                         pause_cond.notify_all();
-
-                                        let result_resources = if ok {
-                                            function
-                                                .results
-                                                .iter()
-                                                .filter_map(|result| {
-                                                    result.tref.resource_type_def(&spec).map(
-                                                        |tdef| {
-                                                            (
-                                                                result.name.clone(),
-                                                                env.write().unwrap().new_resource(
-                                                                    tdef.name.clone(),
-                                                                    Resource {
-                                                                        attributes: tdef
-                                                                            .attributes
-                                                                            .as_ref()
-                                                                            .unwrap()
-                                                                            .iter()
-                                                                            .map(|(name, tref)| {
-                                                                                (
-                                                                                    name.clone(),
-                                                                                    tref.wasi_type(
-                                                                                        &spec,
-                                                                                    )
-                                                                                    .zero_value(
-                                                                                        &spec,
-                                                                                    ),
-                                                                                )
-                                                                            })
-                                                                            .collect(),
-                                                                    },
-                                                                ),
-                                                            )
-                                                        },
-                                                    )
-                                                })
-                                                .collect::<HashMap<_, _>>()
-                                        } else {
-                                            HashMap::new()
-                                        };
-
-                                        tx.send((function, ok, result_resources)).unwrap();
+                                        tx.send((function, results)).unwrap();
                                     }
 
                                     drop(
@@ -383,7 +363,11 @@ impl<'s> Fuzzer<'s> {
                 .name("wazzi-differ".to_string())
                 .spawn_scoped(scope, {
                     move || -> Result<(), FuzzError> {
-                        while let Ok((function, ok, result_resources)) = rx.recv() {
+                        let z3_cfg = z3::Config::new();
+                        let z3_ctx = z3::Context::new(&z3_cfg);
+                        let spec = Spec::preview1(&z3_ctx)?;
+
+                        while let Ok((function, results)) = rx.recv() {
                             let runtimes = run_store
                                 .runtimes::<Call>()
                                 .wrap_err("failed to resume runtimes")?
@@ -474,11 +458,10 @@ impl<'s> Fuzzer<'s> {
                                 }
                             }
 
-                            if ok {
+                            if let Some(results) = results {
                                 env.write()
                                     .unwrap()
-                                    .execute_function_effects(&function, result_resources)
-                                    .unwrap();
+                                    .execute_function_effects(&spec, &function, &results);
                             }
 
                             let (resume_mu, resume_cond) = &*resume_pair;

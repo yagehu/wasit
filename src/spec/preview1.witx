@@ -324,9 +324,13 @@
 
 ;;; A file descriptor handle.
 (typename $fd (handle)
-  (@attribute $offset $filesize)
-  (@attribute $flags $fdflags)
-  (@attribute $type $filetype)
+  (@state
+    (record
+      (field $offset $filesize)
+      (field $flags $fdflags)
+      (field $type $filetype)
+    )
+  )
 )
 
 (typename $byte u8)

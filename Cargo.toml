@@ -8,6 +8,7 @@ publish.workspace = true
 wazzi-executor.workspace = true
 wazzi-executor-pb-rust.workspace = true
 wazzi-runners.workspace = true
+wazzi-store.workspace = true
 
 arbitrary.workspace = true
 clap = { version = "4", features = ["derive"] }
@@ -43,6 +44,7 @@ members = [
     "executor/protobuf-c/wasm",
     "idxspace",
     "runners",
+    "store",
     "wasi-sdk/build",
 ]
 
@@ -58,7 +60,7 @@ wazzi-executor-protobuf.path = "executor/protobuf/build"
 wazzi-executor-protobuf-c.path = "executor/protobuf-c/build"
 wazzi-executor-protobuf-c-wasm.path = "executor/protobuf-c/wasm"
 wazzi-runners.path = "runners"
-wazzi-snapshot.path = "snapshot"
+wazzi-store.path = "store"
 
 arbitrary = "1"
 bimap = "0.6"

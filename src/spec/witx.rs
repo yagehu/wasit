@@ -1,8 +1,6 @@
 pub(super) mod ilang;
 pub(super) mod olang;
 
-use std::collections::BTreeMap;
-
 use eyre::{eyre as err, Context as _, ContextCompat as _};
 use olang::Program;
 use pest::{
@@ -54,7 +52,6 @@ pub(super) fn preview1<'ctx>(ctx: &'ctx z3::Context) -> Result<Spec, eyre::Error
                     | Rule::id => id.as_str().strip_prefix('$').unwrap(),
                     | _ => return Err(err!("expected typename id")),
                 };
-                let annotation_pairs = pairs.collect::<Vec<_>>();
 
                 match tref.as_rule() {
                     | Rule::type_ref => {
@@ -69,46 +66,34 @@ pub(super) fn preview1<'ctx>(ctx: &'ctx z3::Context) -> Result<Spec, eyre::Error
                             | Rule::r#type => {
                                 let wasi = preview1_wasi_type(&spec, pair)
                                     .wrap_err("failed to handle type pair")?;
-                                let attributes = if !annotation_pairs.is_empty() {
-                                    let mut attributes = BTreeMap::new();
+                                let mut state = None;
 
-                                    for pair in annotation_pairs {
-                                        match pair.as_rule() {
-                                            | Rule::annotation_expr => {
-                                                let mut pairs = pair.into_inner();
-                                                let annot = pairs.next().unwrap();
+                                while let Some(pair) = pairs.next() {
+                                    match pair.as_rule() {
+                                        | Rule::annotation_expr => {
+                                            let mut pairs = pair.into_inner();
+                                            let annot = pairs.next().unwrap();
 
-                                                if annot.as_str().strip_prefix('@').unwrap()
-                                                    == "attribute"
-                                                {
-                                                    let name = pairs
-                                                        .next()
-                                                        .unwrap()
-                                                        .as_str()
-                                                        .strip_prefix('$')
-                                                        .unwrap();
-                                                    let tref = preview1_tref(
-                                                        &spec,
-                                                        pairs.next().unwrap(),
-                                                    )?;
+                                            if annot.as_str().strip_prefix('@').unwrap() != "state"
+                                            {
+                                                continue;
+                                            }
 
-                                                    attributes.insert(name.to_owned(), tref);
+                                            let type_pair = pairs.next().unwrap();
+                                            let mut pairs =
+                                                Parser::parse(Rule::r#type, type_pair.as_str())?;
+                                            let state_type =
+                                                preview1_wasi_type(&spec, pairs.next().unwrap())?;
 
-                                                    continue;
-                                                }
+                                            state = Some(state_type);
 
-                                                panic!("not attribute annotation")
-                                            },
-                                            | _ => panic!("not annotation"),
-                                        }
+                                            break;
+                                        },
+                                        | _ => panic!("only annotation expected"),
                                     }
+                                }
 
-                                    Some(attributes)
-                                } else {
-                                    None
-                                };
-
-                                spec.insert_type_def(ctx, name.to_string(), wasi, attributes);
+                                spec.insert_type_def(ctx, name.to_string(), wasi, state);
                             },
                             | _ => unreachable!(),
                         }
