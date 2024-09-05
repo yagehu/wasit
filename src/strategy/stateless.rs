@@ -58,6 +58,7 @@ impl CallStrategy for StatelessStrategy<'_, '_, '_> {
         Ok(self.u.choose(pool.as_slice())?)
     }
 
+    #[tracing::instrument(skip(self, spec))]
     fn prepare_arguments(
         &mut self,
         spec: &Spec,

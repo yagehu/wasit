@@ -368,7 +368,7 @@ impl WasiType {
                     .collect::<Result<Vec<_>, _>>()?,
             }),
             | WasiType::Variant(variant) => {
-                let case_idx: usize = u.arbitrary()?;
+                let case_idx: usize = u.choose_index(variant.cases.len())?;
                 let case = variant.cases.get(case_idx).unwrap();
 
                 WasiValue::Variant(Box::new(VariantValue {
