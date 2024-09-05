@@ -30,17 +30,30 @@ fn main() {
     env::set_current_dir(&out_dir).unwrap();
 
     let protobuf_install_dir = target_dir.join("protobuf");
-    let status = process::Command::new(upstream_dir.join("configure").canonicalize().unwrap())
+    let mut command = process::Command::new(upstream_dir.join("configure").canonicalize().unwrap());
+
+    command
         .env(
             "protobuf_CFLAGS",
             format!("-I{}", protobuf_install_dir.join("include").display()),
         )
         .env(
             "PKG_CONFIG_PATH",
-            protobuf_install_dir.join("lib").join("pkgconfig"),
-        )
+            format!(
+                "{}:{}",
+                protobuf_install_dir.join("lib").join("pkgconfig").display(),
+                protobuf_install_dir
+                    .join("lib64")
+                    .join("pkgconfig")
+                    .display(),
+            ),
+        );
+
+    #[cfg(target_os = "macos")]
+    command.env("LDFLAGS", "-framework CoreFoundation");
+
+    let status = command
         .env("PROTOC", protobuf_install_dir.join("bin").join("protoc"))
-        .env("LDFLAGS", "-framework CoreFoundation")
         .arg("--prefix")
         .arg(target_dir.join("protoc-c"))
         .spawn()
