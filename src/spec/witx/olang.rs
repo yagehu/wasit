@@ -4,24 +4,24 @@ use pest_derive::Parser;
 use crate::spec::{Spec, VariantValue, WasiValue};
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub(super) enum Stmt {
-    AttrSet(AttrSet),
+pub enum Stmt {
+    RecordFieldSet(RecordFieldSet),
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-struct AttrSet {
-    resource: String,
-    attr:     String,
-    value:    Expr,
+pub struct RecordFieldSet {
+    pub result: String,
+    pub field:  String,
+    pub value:  Expr,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub(in crate::spec) struct Program {
-    pub(super) stmts: Vec<Stmt>,
+pub struct Program {
+    pub stmts: Vec<Stmt>,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-enum Expr {
+pub enum Expr {
     WasiValue(WasiValue),
 }
 
@@ -31,7 +31,7 @@ pub(super) struct Parser;
 
 pub(super) fn to_stmt(spec: &Spec, pair: Pair<'_, Rule>) -> Result<Stmt, eyre::Error> {
     Ok(match pair.as_rule() {
-        | Rule::attr_set => {
+        | Rule::record_field_set => {
             let mut pairs = pair.into_inner();
             let resource = pairs
                 .next()
@@ -40,7 +40,7 @@ pub(super) fn to_stmt(spec: &Spec, pair: Pair<'_, Rule>) -> Result<Stmt, eyre::E
                 .strip_prefix('$')
                 .unwrap()
                 .to_owned();
-            let attr = pairs
+            let field = pairs
                 .next()
                 .unwrap()
                 .as_str()
@@ -49,9 +49,9 @@ pub(super) fn to_stmt(spec: &Spec, pair: Pair<'_, Rule>) -> Result<Stmt, eyre::E
                 .to_owned();
             let value = to_expr(spec, pairs.next().unwrap())?;
 
-            Stmt::AttrSet(AttrSet {
-                resource,
-                attr,
+            Stmt::RecordFieldSet(RecordFieldSet {
+                result: resource,
+                field,
                 value,
             })
         },
@@ -61,8 +61,8 @@ pub(super) fn to_stmt(spec: &Spec, pair: Pair<'_, Rule>) -> Result<Stmt, eyre::E
 
 fn to_expr(spec: &Spec, pair: Pair<'_, Rule>) -> Result<Expr, eyre::Error> {
     Ok(match pair.as_rule() {
-        | Rule::s64_const => Expr::WasiValue(WasiValue::S64(
-            pair.into_inner().next().unwrap().as_str().parse::<i64>()?,
+        | Rule::u64_const => Expr::WasiValue(WasiValue::U64(
+            pair.into_inner().next().unwrap().as_str().parse::<u64>()?,
         )),
         | Rule::variant_const => {
             let mut pairs = pair.into_inner();

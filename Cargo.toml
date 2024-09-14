@@ -28,6 +28,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 walkdir = "2"
 z3 = { git = "https://github.com/prove-rs/z3.rs.git" }
 
+[build-dependencies]
+
 [workspace.package]
 edition = "2021"
 publish = false

@@ -280,7 +280,7 @@ impl<'s> Fuzzer<'s> {
                                     .wrap_err("failed to open stderr file")?;
                                 let (executor, prefix) = ExecutorRunner::new(
                                     runtime.as_ref(),
-                                    PathBuf::from("target/debug/wazzi-executor-pb.wasm")
+                                    PathBuf::from("target/debug/wazzi-executor.wasm")
                                         .canonicalize()
                                         .unwrap(),
                                     store.path.clone(),

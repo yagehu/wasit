@@ -1536,13 +1536,10 @@ version = "0.1.0"
 name = "wazzi-executor"
 version = "0.1.0"
 dependencies = [
- "eyre",
  "protobuf",
- "tracing",
+ "wasi",
  "wazzi-executor-pb-c",
  "wazzi-executor-pb-rust",
- "wazzi-executor-protobuf-c-wasm",
- "wazzi-runners",
 ]
 
 [[package]]
@@ -1593,8 +1590,10 @@ name = "wazzi-runners"
 version = "0.1.0"
 dependencies = [
  "eyre",
+ "protobuf",
  "tera",
  "tracing",
+ "wazzi-executor-pb-rust",
 ]
 
 [[package]]

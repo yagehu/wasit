@@ -1,3 +1,6 @@
+extern crate wazzi_executor_pb_rust as pb;
+
+pub mod normalization;
 pub mod spec;
 
 mod strategy;
@@ -9,10 +12,87 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use eyre::eyre as err;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
-use spec::{Function, Spec, TypeDef, WasiType, WasiValue};
-use wazzi_executor::RunningExecutor;
+use spec::{witx::olang, Function, RecordValue, Spec, TypeDef, WasiType, WasiValue};
 use wazzi_executor_pb_rust::WasiFunc;
+use wazzi_runners::RunningExecutor;
 use wazzi_store::TraceStore;
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct EnvironmentInitializer {
+    preopens: Vec<(String, WasiValue)>,
+}
+
+pub fn apply_env_initializers(
+    spec: &Spec,
+    initializers: &[EnvironmentInitializer],
+) -> (Environment, Vec<RuntimeContext>) {
+    let mut resources: Vec<Resource> = Default::default();
+    let mut fds: BTreeSet<usize> = Default::default();
+    let fd_tdef = spec.types.get_by_key("fd").unwrap();
+    let fd_type = fd_tdef.state.as_ref().unwrap().record().unwrap();
+    let mut preopen_state_members: Vec<WasiValue> = Default::default();
+    let mut ctxs: Vec<RuntimeContext> = vec![RuntimeContext::new(); initializers.len()];
+
+    for member in &fd_type.members {
+        preopen_state_members.push(match member.name.as_str() {
+            | "offset" => WasiValue::U64(0),
+            | "flags" => member
+                .tref
+                .resolve(spec)
+                .wasi
+                .flags()
+                .unwrap()
+                .value([].into_iter().collect()),
+            | "type" => member
+                .tref
+                .resolve(spec)
+                .wasi
+                .variant()
+                .unwrap()
+                .value_from_name("directory", None)
+                .unwrap(),
+            | _ => member.tref.resolve(spec).wasi.zero_value(spec),
+        });
+    }
+
+    let mut preopens_ids: Option<HashMap<&str, usize>> = None;
+
+    for (i, initializer) in initializers.iter().enumerate() {
+        let mut preopen_ids_: HashMap<&str, usize> = Default::default();
+
+        for (preopen_name, preopen_value) in &initializer.preopens {
+            let resource_id = match &preopens_ids {
+                | None => {
+                    resources.push(Resource {
+                        state: WasiValue::Record(RecordValue {
+                            members: preopen_state_members.clone(),
+                        }),
+                    });
+                    fds.insert(resources.len() - 1);
+                    preopen_ids_.insert(&preopen_name, resources.len() - 1);
+                    resources.len() - 1
+                },
+                | Some(preopens_ids) => *preopens_ids.get(preopen_name.as_str()).unwrap(),
+            };
+
+            ctxs[i]
+                .resources
+                .insert(resource_id, preopen_value.to_owned());
+        }
+
+        if preopens_ids.is_none() {
+            preopens_ids = Some(preopen_ids_);
+        }
+    }
+
+    (
+        Environment {
+            resources,
+            resources_by_types: [("fd".to_string(), fds)].into_iter().collect(),
+        },
+        ctxs,
+    )
+}
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Environment {
@@ -115,17 +195,47 @@ impl Environment {
         &mut self,
         spec: &Spec,
         function: &Function,
-        results: &[WasiValue],
+        results: Vec<(String, WasiValue)>,
     ) {
-        for (result, result_value) in function.results.iter().zip(results) {
-            self.register_result_value_resource_recursively(
+        let mut resources: HashMap<&str, usize> = Default::default();
+
+        for (result, (name, result_value)) in function.results.iter().zip(results.iter()) {
+            if let Some(id) = self.register_result_value_resource_recursively(
                 spec,
                 result.tref.resolve(spec),
                 result_value,
-            );
+            ) {
+                resources.insert(name, id);
+            }
         }
 
-        todo!()
+        for stmt in &function.effects.stmts {
+            match stmt {
+                | olang::Stmt::RecordFieldSet(record_field_set) => {
+                    let value = match &record_field_set.value {
+                        | olang::Expr::WasiValue(value) => value.clone(),
+                    };
+                    let result = function
+                        .results
+                        .iter()
+                        .find(|result| result.name == record_field_set.result)
+                        .unwrap();
+                    let tdef = result.tref.resolve(spec);
+                    let id = *resources.get(record_field_set.result.as_str()).unwrap();
+                    let resource = self.resources.get_mut(id).unwrap();
+                    let record_type = tdef.state.as_ref().unwrap().record().unwrap();
+                    let (i, _field_type) = record_type
+                        .members
+                        .iter()
+                        .enumerate()
+                        .find(|(_i, member)| member.name == record_field_set.field)
+                        .unwrap();
+                    let record = resource.state.record_mut().unwrap();
+
+                    *record.members.get_mut(i).unwrap() = value;
+                },
+            }
+        }
     }
 
     fn register_result_value_resource_recursively(
@@ -133,7 +243,7 @@ impl Environment {
         spec: &Spec,
         tdef: &TypeDef,
         value: &WasiValue,
-    ) {
+    ) -> Option<usize> {
         // First, register structural members.
         match (&tdef.wasi, value) {
             | (WasiType::Handle, _)
@@ -182,12 +292,14 @@ impl Environment {
         }
 
         if let Some(state) = &tdef.state {
-            self.new_resource(
+            Some(self.new_resource(
                 tdef.name.clone(),
                 Resource {
                     state: state.zero_value(spec),
                 },
-            );
+            ))
+        } else {
+            None
         }
     }
 }

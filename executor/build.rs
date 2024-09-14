@@ -4,7 +4,7 @@ fn main() {
     let src_dir = PathBuf::from(".").canonicalize().unwrap();
 
     println!(
-        "cargo:rerun-if-changed={}",
+        "cargo::rerun-if-changed={}",
         src_dir.join("main.c").display()
     );
 
@@ -52,15 +52,15 @@ fn main() {
         .arg("-L")
         .arg(&target_dir)
         .arg("-o")
-        .arg(out_dir.join("wazzi-executor-pb.wasm"))
+        .arg(out_dir.join("wazzi-executor.wasm"))
         .spawn()
         .unwrap();
 
     assert!(child.wait().unwrap().success());
 
     fs::copy(
-        out_dir.join("wazzi-executor-pb.wasm"),
-        target_dir.join("wazzi-executor-pb.wasm"),
+        out_dir.join("wazzi-executor.wasm"),
+        target_dir.join("wazzi-executor.wasm"),
     )
     .unwrap();
 }

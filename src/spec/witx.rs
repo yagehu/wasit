@@ -1,5 +1,5 @@
-pub(super) mod ilang;
-pub(super) mod olang;
+pub mod ilang;
+pub mod olang;
 
 use eyre::{eyre as err, Context as _, ContextCompat as _};
 use olang::Program;

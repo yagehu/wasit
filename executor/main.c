@@ -1099,8 +1099,6 @@ static void handle_call(Request__Call * call) {
             params[0] = value_ptr_free(call->params[0], p0_fd_ptr);
 
             break;
-
-            break;
         }
         case WASI_FUNC__FD_READ: {
             void * p0_fd_ptr = value_ptr_new(call->params[0]);

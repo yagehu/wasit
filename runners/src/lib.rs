@@ -1,219 +1,244 @@
+extern crate wazzi_executor_pb_rust as pb;
+
 use std::{
     ffi::OsString,
     fmt,
     fs,
+    io,
+    ops::DerefMut as _,
     path::{Path, PathBuf},
     process,
+    sync::{Arc, Mutex},
+    thread,
 };
 
 use eyre::Context;
+use protobuf::Message as _;
 use tera::Tera;
 
-pub trait WasiRunner: fmt::Debug + Send + Sync {
-    fn base_dir_fd(&self) -> u32;
-    fn prepare_command(
-        &self,
-        wasm_path: PathBuf,
-        working_dir: &Path,
-        base_dir: Option<PathBuf>,
-    ) -> (process::Command, Option<Vec<u8>>);
+#[derive(Clone, Debug)]
+pub struct RunningExecutor {
+    child:              Arc<Mutex<process::Child>>,
+    stdin:              Arc<Mutex<process::ChildStdin>>,
+    stdout:             Arc<Mutex<process::ChildStdout>>,
+    stderr_copy_handle: Arc<Mutex<Option<thread::JoinHandle<u64>>>>,
+}
 
+impl RunningExecutor {
+    pub fn from_wasi_runner<W>(
+        wasi_runner: &dyn WasiRunner,
+        executor_bin: &Path,
+        working_dir: &Path,
+        stderr_logger: Arc<Mutex<W>>,
+        preopens: Vec<MappedDir>,
+    ) -> Result<Self, eyre::Error>
+    where
+        W: io::Write + Send + 'static,
+    {
+        let mut child = wasi_runner
+            .run(executor_bin, working_dir, preopens)
+            .wrap_err(format!("failed to run executor {}", executor_bin.display()))?;
+        let mut stderr = child.stderr.take().unwrap();
+        let stderr_copy_handle = thread::spawn(move || {
+            io::copy(&mut stderr, stderr_logger.lock().unwrap().deref_mut()).unwrap()
+        });
+        let stdin = child.stdin.take().unwrap();
+        let stdout = child.stdout.take().unwrap();
+
+        Ok(Self {
+            child:              Arc::new(Mutex::new(child)),
+            stdin:              Arc::new(Mutex::new(stdin)),
+            stdout:             Arc::new(Mutex::new(stdout)),
+            stderr_copy_handle: Arc::new(Mutex::new(Some(stderr_copy_handle))),
+        })
+    }
+
+    fn kill(&self) {
+        self.child.lock().unwrap().kill().unwrap();
+        self.stderr_copy_handle
+            .lock()
+            .unwrap()
+            .take()
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    fn pid(&self) -> u32 {
+        self.child.lock().unwrap().id()
+    }
+
+    pub fn call(&self, call: pb::request::Call) -> Result<pb::response::Call, protobuf::Error> {
+        let mut stdin = self.stdin.lock().unwrap();
+        let mut stdout = self.stdout.lock().unwrap();
+        let mut os = protobuf::CodedOutputStream::new(stdin.deref_mut());
+        let mut is = protobuf::CodedInputStream::new(stdout.deref_mut());
+        let mut request = pb::Request::new();
+
+        request.set_call(call);
+
+        let message_size = request.compute_size();
+
+        os.write_raw_bytes(&message_size.to_le_bytes()).unwrap();
+        request.write_to(&mut os)?;
+        drop(os);
+
+        let msg_size = is.read_fixed64()?;
+        let raw_bytes = is.read_raw_bytes(msg_size as u32)?;
+
+        Ok(pb::Response::parse_from_bytes(&raw_bytes)?.take_call())
+    }
+}
+
+pub trait WasiRunner: fmt::Debug + Send + Sync {
     fn run(
         &self,
-        wasm_path: PathBuf,
+        wasm_path: &Path,
         working_dir: &Path,
-        base_dir: Option<PathBuf>,
-    ) -> Result<(process::Child, Option<Vec<u8>>), eyre::Error> {
-        let (mut command, prefix) = self.prepare_command(wasm_path, working_dir, base_dir);
-        let child = command
-            .spawn()
-            .wrap_err(format!("failed to spawn command {:?}", command))?;
-
-        Ok((child, prefix))
-    }
+        preopens: Vec<MappedDir>,
+    ) -> Result<process::Child, eyre::Error>;
 }
 
-#[derive(Clone, Debug)]
-pub struct Node<'p> {
-    path: &'p Path,
-}
+// #[derive(Clone, Debug)]
+// pub struct Node<'p> {
+//     path: &'p Path,
+// }
 
-impl<'p> Node<'p> {
-    pub fn new(path: &'p Path) -> Self {
-        Self { path }
-    }
-}
+// impl<'p> Node<'p> {
+//     pub fn new(path: &'p Path) -> Self {
+//         Self { path }
+//     }
+// }
 
-impl WasiRunner for Node<'_> {
-    fn base_dir_fd(&self) -> u32 {
-        3
-    }
+// impl WasiRunner for Node<'_> {
+//     fn base_dir_fd(&self) -> u32 {
+//         3
+//     }
 
-    fn prepare_command(
-        &self,
-        wasm_path: PathBuf,
-        working_dir: &Path,
-        base_dir: Option<PathBuf>,
-    ) -> (process::Command, Option<Vec<u8>>) {
-        static GLUE_TMPL: &str = include_str!("run.js.tera.tmpl");
+//     fn prepare_command(
+//         &self,
+//         wasm_path: PathBuf,
+//         working_dir: &Path,
+//         base_dir: Option<PathBuf>,
+//     ) -> (process::Command, Option<Vec<u8>>) {
+//         static GLUE_TMPL: &str = include_str!("run.js.tera.tmpl");
 
-        let mut tmpl_ctx = tera::Context::new();
+//         let mut tmpl_ctx = tera::Context::new();
 
-        tmpl_ctx.insert("executor", &wasm_path.canonicalize().unwrap());
+//         tmpl_ctx.insert("executor", &wasm_path.canonicalize().unwrap());
 
-        if let Some(base_dir) = base_dir {
-            tmpl_ctx.insert("execroot", &base_dir.canonicalize().unwrap());
-        }
+//         if let Some(base_dir) = base_dir {
+//             tmpl_ctx.insert("execroot", &base_dir.canonicalize().unwrap());
+//         }
 
-        let glue = Tera::one_off(GLUE_TMPL, &tmpl_ctx, false).unwrap();
-        let glue_path = working_dir.join("glue.js");
+//         let glue = Tera::one_off(GLUE_TMPL, &tmpl_ctx, false).unwrap();
+//         let glue_path = working_dir.join("glue.js");
 
-        fs::write(&glue_path, glue).unwrap();
+//         fs::write(&glue_path, glue).unwrap();
 
-        let mut command = process::Command::new(self.path);
+//         let mut command = process::Command::new(self.path);
 
-        command.arg(glue_path);
-        command.stdin(process::Stdio::piped());
-        command.stdout(process::Stdio::piped());
-        command.stderr(process::Stdio::piped());
-        command.current_dir(working_dir);
+//         command.arg(glue_path);
+//         command.stdin(process::Stdio::piped());
+//         command.stdout(process::Stdio::piped());
+//         command.stderr(process::Stdio::piped());
+//         command.current_dir(working_dir);
 
-        (command, None)
-    }
-}
+//         (command, None)
+//     }
+// }
 
-#[derive(Clone, Debug)]
-pub struct Wasmedge<'p> {
-    path: &'p Path,
-}
+// #[derive(Clone, Debug)]
+// pub struct Wasmedge<'p> {
+//     path: &'p Path,
+// }
 
-impl<'p> Wasmedge<'p> {
-    pub fn new(path: &'p Path) -> Self {
-        Self { path }
-    }
+// impl<'p> Wasmedge<'p> {
+//     pub fn new(path: &'p Path) -> Self {
+//         Self { path }
+//     }
 
-    fn mount_base_dir(&self, dir: Option<PathBuf>) -> Vec<OsString> {
-        match dir {
-            | Some(dir) => vec!["--dir".into(), dir.into()],
-            | None => Vec::new(),
-        }
-    }
-}
+//     fn mount_base_dir(&self, dir: Option<PathBuf>) -> Vec<OsString> {
+//         match dir {
+//             | Some(dir) => vec!["--dir".into(), dir.into()],
+//             | None => Vec::new(),
+//         }
+//     }
+// }
 
-impl WasiRunner for Wasmedge<'_> {
-    fn base_dir_fd(&self) -> u32 {
-        3
-    }
+// impl WasiRunner for Wasmedge<'_> {
+//     fn base_dir_fd(&self) -> u32 {
+//         3
+//     }
 
-    fn prepare_command(
-        &self,
-        wasm_path: PathBuf,
-        working_dir: &Path,
-        base_dir: Option<PathBuf>,
-    ) -> (process::Command, Option<Vec<u8>>) {
-        let mut command = process::Command::new(self.path);
-        let mut args = vec![OsString::from("run")];
+//     fn prepare_command(
+//         &self,
+//         wasm_path: PathBuf,
+//         working_dir: &Path,
+//         base_dir: Option<PathBuf>,
+//     ) -> (process::Command, Option<Vec<u8>>) {
+//         let mut command = process::Command::new(self.path);
+//         let mut args = vec![OsString::from("run")];
 
-        args.extend(self.mount_base_dir(base_dir));
-        args.push(wasm_path.into());
+//         args.extend(self.mount_base_dir(base_dir));
+//         args.push(wasm_path.into());
 
-        command.args(args);
-        command.stdin(process::Stdio::piped());
-        command.stdout(process::Stdio::piped());
-        command.stderr(process::Stdio::piped());
-        command.current_dir(working_dir);
+//         command.args(args);
+//         command.stdin(process::Stdio::piped());
+//         command.stdout(process::Stdio::piped());
+//         command.stderr(process::Stdio::piped());
+//         command.current_dir(working_dir);
 
-        (command, None)
-    }
-}
+//         (command, None)
+//     }
+// }
 
 #[derive(Clone, Debug)]
 pub struct Wasmer<'p> {
-    path: &'p Path,
+    pub path: &'p Path,
+}
+
+impl Default for Wasmer<'_> {
+    fn default() -> Self {
+        Self::new(Path::new("wasmer"))
+    }
 }
 
 impl<'p> Wasmer<'p> {
     pub fn new(path: &'p Path) -> Self {
         Self { path }
     }
-
-    fn mount_base_dir(&self, dir: Option<PathBuf>) -> Vec<OsString> {
-        match dir {
-            | Some(dir) => vec!["--mapdir".into(), format!("/base:{}", dir.display()).into()],
-            | None => Vec::new(),
-        }
-    }
 }
 
 impl WasiRunner for Wasmer<'_> {
-    fn base_dir_fd(&self) -> u32 {
-        4
-    }
-
-    fn prepare_command(
+    fn run(
         &self,
-        wasm_path: PathBuf,
+        wasm_path: &Path,
         working_dir: &Path,
-        base_dir: Option<PathBuf>,
-    ) -> (process::Command, Option<Vec<u8>>) {
+        preopens: Vec<MappedDir>,
+    ) -> Result<process::Child, eyre::Error> {
         let mut command = process::Command::new(self.path);
-        let mut args = vec![OsString::from("run")];
 
-        args.extend(self.mount_base_dir(base_dir.clone()));
-        args.push(wasm_path.into());
+        command.arg("run");
 
-        command.args(args);
-        command.stdin(process::Stdio::piped());
-        command.stdout(process::Stdio::piped());
-        command.stderr(process::Stdio::piped());
-        command.current_dir(working_dir);
+        for dir in preopens {
+            let mut mapdir = OsString::new();
 
-        (command, base_dir.map(|_p| "base".as_bytes().to_vec()))
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct Wasmtime<'p> {
-    path: &'p Path,
-}
-
-impl<'p> Wasmtime<'p> {
-    pub fn new(path: &'p Path) -> Self {
-        Self { path }
-    }
-
-    fn mount_base_dir(&self, dir: Option<PathBuf>) -> Vec<OsString> {
-        match dir {
-            | Some(dir) => vec!["--dir".into(), dir.into()],
-            | None => Vec::new(),
+            mapdir.push("/");
+            mapdir.push(&dir.name);
+            mapdir.push(":");
+            mapdir.push(&dir.host_path);
+            command.arg("--mapdir").arg(mapdir);
         }
-    }
-}
 
-impl WasiRunner for Wasmtime<'_> {
-    fn base_dir_fd(&self) -> u32 {
-        3
-    }
-
-    fn prepare_command(
-        &self,
-        wasm_path: PathBuf,
-        working_dir: &Path,
-        base_dir: Option<PathBuf>,
-    ) -> (process::Command, Option<Vec<u8>>) {
-        let mut command = process::Command::new(self.path);
-        let mut args = vec![OsString::from("run")];
-
-        args.extend(self.mount_base_dir(base_dir));
-        args.push(wasm_path.into());
-
-        command.args(args);
-        command.stdin(process::Stdio::piped());
-        command.stdout(process::Stdio::piped());
-        command.stderr(process::Stdio::piped());
-        command.current_dir(working_dir);
-
-        (command, None)
+        command
+            .arg(wasm_path)
+            .current_dir(working_dir)
+            .stdin(process::Stdio::piped())
+            .stdout(process::Stdio::piped())
+            .stderr(process::Stdio::piped())
+            .spawn()
+            .wrap_err("failed to spawn command")
     }
 }
 
@@ -226,82 +251,82 @@ impl<'p> Wamr<'p> {
     pub fn new(path: &'p Path) -> Self {
         Self { path }
     }
-
-    fn mount_base_dir(&self, dir: Option<PathBuf>) -> Vec<OsString> {
-        match dir {
-            | Some(dir) => vec![OsString::from(format!("--dir={}", dir.display()))],
-            | None => Vec::new(),
-        }
-    }
 }
 
 impl WasiRunner for Wamr<'_> {
-    fn base_dir_fd(&self) -> u32 {
-        3
-    }
-
-    fn prepare_command(
+    fn run(
         &self,
-        wasm_path: PathBuf,
+        wasm_path: &Path,
         working_dir: &Path,
-        base_dir: Option<PathBuf>,
-    ) -> (process::Command, Option<Vec<u8>>) {
+        preopens: Vec<MappedDir>,
+    ) -> Result<process::Child, eyre::Error> {
         let mut command = process::Command::new(self.path);
-        let mut args = vec![];
 
-        args.extend(self.mount_base_dir(base_dir));
-        args.push(wasm_path.into());
+        for dir in preopens {
+            let mut dir_arg = OsString::new();
 
-        command.arg("--stack-size=1000000");
-        command.args(args);
-        command.stdin(process::Stdio::piped());
-        command.stdout(process::Stdio::piped());
-        command.stderr(process::Stdio::piped());
-        command.current_dir(working_dir);
-
-        (command, None)
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct Wazero<'p> {
-    path: &'p Path,
-}
-
-impl<'p> Wazero<'p> {
-    pub fn new(path: &'p Path) -> Self {
-        Self { path }
-    }
-
-    fn mount_base_dir(&self, dir: Option<PathBuf>) -> Vec<OsString> {
-        match dir {
-            | Some(dir) => vec![OsString::from("-mount"), dir.into()],
-            | None => Vec::new(),
+            dir_arg.push("--dir=");
+            dir_arg.push(&dir.host_path);
+            command.arg(dir_arg);
         }
+
+        command
+            .arg("--stack-size=1000000")
+            .arg(wasm_path)
+            .stdin(process::Stdio::piped())
+            .stdout(process::Stdio::piped())
+            .stderr(process::Stdio::piped())
+            .current_dir(working_dir)
+            .spawn()
+            .wrap_err("failed to spawn command")
     }
 }
 
-impl WasiRunner for Wazero<'_> {
-    fn base_dir_fd(&self) -> u32 {
-        3
-    }
+// #[derive(Clone, Debug)]
+// pub struct Wazero<'p> {
+//     path: &'p Path,
+// }
 
-    fn prepare_command(
-        &self,
-        wasm_path: PathBuf,
-        working_dir: &Path,
-        base_dir: Option<PathBuf>,
-    ) -> (process::Command, Option<Vec<u8>>) {
-        let mut command = process::Command::new(self.path);
+// impl<'p> Wazero<'p> {
+//     pub fn new(path: &'p Path) -> Self {
+//         Self { path }
+//     }
 
-        command.arg("run");
-        command.args(self.mount_base_dir(base_dir));
-        command.arg(wasm_path);
-        command.stdin(process::Stdio::piped());
-        command.stdout(process::Stdio::piped());
-        command.stderr(process::Stdio::piped());
-        command.current_dir(working_dir);
+//     fn mount_base_dir(&self, dir: Option<PathBuf>) -> Vec<OsString> {
+//         match dir {
+//             | Some(dir) => vec![OsString::from("-mount"), dir.into()],
+//             | None => Vec::new(),
+//         }
+//     }
+// }
 
-        (command, None)
-    }
+// impl WasiRunner for Wazero<'_> {
+//     fn base_dir_fd(&self) -> u32 {
+//         3
+//     }
+
+//     fn prepare_command(
+//         &self,
+//         wasm_path: PathBuf,
+//         working_dir: &Path,
+//         base_dir: Option<PathBuf>,
+//     ) -> (process::Command, Option<Vec<u8>>) {
+//         let mut command = process::Command::new(self.path);
+
+//         command.arg("run");
+//         command.args(self.mount_base_dir(base_dir));
+//         command.arg(wasm_path);
+//         command.stdin(process::Stdio::piped());
+//         command.stdout(process::Stdio::piped());
+//         command.stderr(process::Stdio::piped());
+//         command.current_dir(working_dir);
+
+//         (command, None)
+//     }
+// }
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct MappedDir {
+    pub name:      String,
+    pub host_path: PathBuf,
 }

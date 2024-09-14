@@ -1,4 +1,4 @@
-mod witx;
+pub mod witx;
 
 use std::collections::{BTreeMap, HashSet};
 
@@ -236,9 +236,9 @@ pub struct Function {
     pub name:       String,
     pub params:     Vec<FunctionParam>,
     pub results:    Vec<FunctionResult>,
+    pub effects:    olang::Program,
     r#return:       Option<()>,
     input_contract: Option<ilang::Term>,
-    effects:        olang::Program,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -389,8 +389,26 @@ impl WasiType {
                     .map(|member| member.tref.resolve_wasi(spec).arbitrary_value(spec, u))
                     .collect::<Result<Vec<_>, _>>()?,
             }),
-            | WasiType::String => panic!(),
-            | WasiType::List(_) => panic!(),
+            | WasiType::String => {
+                let n = u.choose_index(16)?;
+                let mut bytes = Vec::with_capacity(n);
+
+                for _ in 0..n {
+                    bytes.push(*u.choose(&[b'.', b'/', b'a'])?);
+                }
+
+                WasiValue::String(bytes)
+            },
+            | WasiType::List(list) => {
+                let n = u.choose_index(16)?;
+                let mut items = Vec::with_capacity(n);
+
+                for _ in 0..n {
+                    items.push(list.item.resolve_wasi(spec).arbitrary_value(spec, u)?);
+                }
+
+                WasiValue::List(ListValue { items })
+            },
         })
     }
 
@@ -404,6 +422,13 @@ impl WasiType {
     pub fn variant(&self) -> Option<&VariantType> {
         match self {
             | Self::Variant(variant) => Some(variant),
+            | _ => None,
+        }
+    }
+
+    pub fn record(&self) -> Option<&RecordType> {
+        match self {
+            | Self::Record(record) => Some(record),
             | _ => None,
         }
     }
@@ -636,6 +661,20 @@ pub enum WasiValue {
 }
 
 impl WasiValue {
+    pub fn handle(&self) -> Option<u32> {
+        match self {
+            | &WasiValue::Handle(handle) => Some(handle),
+            | _ => None,
+        }
+    }
+
+    pub fn record_mut(&mut self) -> Option<&mut RecordValue> {
+        match self {
+            | WasiValue::Record(record) => Some(record),
+            | _ => None,
+        }
+    }
+
     pub fn into_pb(self, spec: &Spec, tref: &TypeRef) -> wazzi_executor_pb_rust::Value {
         let which = match (&tref.resolve(spec).wasi, self) {
             | (_, Self::Handle(handle)) => wazzi_executor_pb_rust::value::Which::Handle(handle),

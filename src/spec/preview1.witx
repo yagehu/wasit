@@ -954,8 +954,8 @@
       )
     )
     (@effects
-      (@attr.set (result $expected) $offset (@s64.const 0))
-      (@attr.set (result $expected) $type (@variant.const $filetype $regular_file))
+      (@record.field.set (result $expected) $offset (@u64.const 0))
+      (@record.field.set (result $expected) $type (@variant.const $filetype $regular_file))
     )
   )
 

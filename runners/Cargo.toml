@@ -5,7 +5,10 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+wazzi-executor-pb-rust.workspace = true
+
 eyre.workspace = true
+protobuf.workspace = true
 tera.workspace = true
 tracing.workspace = true
 

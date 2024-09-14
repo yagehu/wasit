@@ -1,23 +1,31 @@
 use arbitrary::Unstructured;
+use eyre::Context;
+use itertools::Itertools;
 
 use super::CallStrategy;
 use crate::{
     spec::{Function, Spec, WasiValue},
     Environment,
+    RuntimeContext,
 };
 
-pub struct StatelessStrategy<'u, 'data, 'env> {
+pub struct StatelessStrategy<'u, 'data, 'env, 'ctx> {
     u:   &'u mut Unstructured<'data>,
     env: &'env Environment,
+    ctx: &'ctx RuntimeContext,
 }
 
-impl<'u, 'data, 'env> StatelessStrategy<'u, 'data, 'env> {
-    pub fn new(u: &'u mut Unstructured<'data>, env: &'env Environment) -> Self {
-        Self { u, env }
+impl<'u, 'data, 'env, 'ctx> StatelessStrategy<'u, 'data, 'env, 'ctx> {
+    pub fn new(
+        u: &'u mut Unstructured<'data>,
+        env: &'env Environment,
+        ctx: &'ctx RuntimeContext,
+    ) -> Self {
+        Self { u, env, ctx }
     }
 }
 
-impl CallStrategy for StatelessStrategy<'_, '_, '_> {
+impl CallStrategy for StatelessStrategy<'_, '_, '_, '_> {
     fn select_function<'spec>(
         &mut self,
         spec: &'spec Spec,
@@ -55,7 +63,10 @@ impl CallStrategy for StatelessStrategy<'_, '_, '_> {
             }
         }
 
-        Ok(self.u.choose(pool.as_slice())?)
+        Ok(self
+            .u
+            .choose(pool.as_slice())
+            .wrap_err("failed to choose a function")?)
     }
 
     #[tracing::instrument(skip(self, spec))]
@@ -74,7 +85,21 @@ impl CallStrategy for StatelessStrategy<'_, '_, '_> {
                     params.push(tdef.wasi.arbitrary_value(spec, self.u)?);
                 },
                 | Some(_state_type) => {
-                    let resources = self.env.resources_by_types.get(&tdef.name).unwrap();
+                    let resources = self
+                        .env
+                        .resources_by_types
+                        .get(&tdef.name)
+                        .unwrap()
+                        .iter()
+                        .cloned()
+                        .collect_vec();
+                    let resource_id = *self
+                        .u
+                        .choose(&resources)
+                        .wrap_err("failed to choose a resource")?;
+                    let resource = self.ctx.resources.get(&resource_id).unwrap();
+
+                    params.push(resource.to_owned());
                 },
             }
         }
@@ -94,9 +119,11 @@ mod tests {
         let data = vec![];
         let mut u = Unstructured::new(&data);
         let env = Environment::new();
+        let ctx = RuntimeContext::new();
         let mut strat = StatelessStrategy {
             u:   &mut u,
             env: &env,
+            ctx: &ctx,
         };
         let strat: &mut dyn CallStrategy = &mut strat;
         let cfg = z3::Config::new();

@@ -1,17 +1,17 @@
+cargo-features = ["per-package-target"]
+
 [package]
 name = "wazzi-executor"
 version = "0.1.0"
 edition.workspace = true
 publish.workspace = true
+# forced-target = "wasm32-wasip1"
 
 [dependencies]
 wazzi-executor-pb-rust.workspace = true
-wazzi-runners.workspace = true
 
-eyre.workspace = true
 protobuf.workspace = true
-tracing.workspace = true
+wasi = "0.11"
 
 [build-dependencies]
 wazzi-executor-pb-c.workspace = true
-wazzi-executor-protobuf-c-wasm.workspace = true

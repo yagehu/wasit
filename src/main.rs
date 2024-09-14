@@ -1,8 +1,11 @@
+#![feature(trait_upcasting)]
+
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
     fs,
     io,
+    panic,
     path::{Path, PathBuf},
+    process,
     sync::{
         atomic::{self, AtomicBool, AtomicUsize},
         mpsc,
@@ -24,15 +27,17 @@ use tracing_error::ErrorLayer;
 use tracing_subscriber::{layer::SubscriberExt as _, EnvFilter};
 use walkdir::WalkDir;
 use wazzi::{
-    spec::{Spec, VariantValue, WasiType, WasiValue},
+    apply_env_initializers,
+    normalization::InitializeState,
+    spec::Spec,
     Call,
     CallStrategy,
     Environment,
-    Resource,
+    EnvironmentInitializer,
+    RuntimeContext,
     StatelessStrategy,
 };
-use wazzi_executor::ExecutorRunner;
-use wazzi_runners::{Node, Wamr, WasiRunner, Wasmedge, Wasmer, Wasmtime, Wazero};
+use wazzi_runners::{MappedDir, RunningExecutor, Wasmer};
 use wazzi_store::FuzzStore;
 
 #[derive(Parser, Debug)]
@@ -57,9 +62,10 @@ impl Strategy {
         self,
         u: &'a mut Unstructured,
         env: &'a Environment,
+        ctx: &'a RuntimeContext,
     ) -> Box<dyn CallStrategy + 'a> {
         match self {
-            | Strategy::Stateless => Box::new(StatelessStrategy::new(u, env)),
+            | Strategy::Stateless => Box::new(StatelessStrategy::new(u, env, ctx)),
         }
     }
 }
@@ -84,21 +90,28 @@ fn main() -> Result<(), eyre::Error> {
     )
     .wrap_err("failed to configure tracing")?;
 
+    let orig_hook = panic::take_hook();
+
+    panic::set_hook(Box::new(move |panic_info| {
+        // invoke the default handler and exit the process
+        orig_hook(panic_info);
+        process::exit(1);
+    }));
+
     let cmd = Cmd::parse();
     let mut store = FuzzStore::new(Path::new("abc")).wrap_err("failed to init fuzz store")?;
     let mut fuzzer = Fuzzer::new(
         cmd.strategy,
         &mut store,
         [
+            // (
+            //     "wamr",
+            //     Box::new(Wamr::new(Path::new("iwasm"))) as Box<dyn InitializeState>,
+            // ),
             (
-                "node",
-                Box::new(Node::new(Path::new("node"))) as Box<dyn WasiRunner>,
+                "wasmer",
+                Box::new(Wasmer::default()) as Box<dyn InitializeState>,
             ),
-            ("wamr", Box::new(Wamr::new(Path::new("iwasm")))),
-            ("wasmedge", Box::new(Wasmedge::new(Path::new("wasmedge")))),
-            ("wasmer", Box::new(Wasmer::new(Path::new("wasmer")))),
-            ("wasmtime", Box::new(Wasmtime::new(Path::new("wasmtime")))),
-            ("wazero", Box::new(Wazero::new(Path::new("wazero")))),
         ],
     );
     let data = cmd
@@ -117,14 +130,14 @@ fn main() -> Result<(), eyre::Error> {
 struct Fuzzer<'s> {
     strategy: Strategy,
     store:    &'s mut FuzzStore,
-    runtimes: Vec<(&'static str, Box<dyn WasiRunner>)>,
+    runtimes: Vec<(&'static str, Box<dyn InitializeState>)>,
 }
 
 impl<'s> Fuzzer<'s> {
     pub fn new(
         strategy: Strategy,
         store: &'s mut FuzzStore,
-        runtimes: impl IntoIterator<Item = (&'static str, Box<dyn WasiRunner>)>,
+        runtimes: impl IntoIterator<Item = (&'static str, Box<dyn InitializeState>)>,
     ) -> Self {
         Self {
             strategy,
@@ -165,7 +178,6 @@ impl<'s> Fuzzer<'s> {
             .store
             .new_run()
             .wrap_err("failed to init new run store")?;
-        let env = Arc::new(RwLock::new(Environment::new()));
         let data = match data {
             | Some(d) => d,
             | None => {
@@ -179,54 +191,47 @@ impl<'s> Fuzzer<'s> {
         let z3_cfg = z3::Config::new();
         let z3_ctx = z3::Context::new(&z3_cfg);
         let spec = Spec::preview1(&z3_ctx).wrap_err("failed to init spec")?;
-        let fd = spec.get_type("fd").unwrap();
-        let mut fd_state = fd.zero_value(&spec);
+        let mut initializers: Vec<EnvironmentInitializer> = Default::default();
+        let mut runtimes: Vec<_> = Default::default();
 
-        match (&fd, &mut fd_state) {
-            | (WasiType::Record(record), WasiValue::Record(record_value)) => {
-                let (type_member_idx, type_member) = record
-                    .members
-                    .iter()
-                    .enumerate()
-                    .find(|(_, member)| member.name == "type")
-                    .unwrap();
-                let tdef = type_member.tref.resolve(&spec);
-                let directory_case_idx = match &tdef.wasi {
-                    | WasiType::Variant(variant) => {
-                        variant
-                            .cases
-                            .iter()
-                            .enumerate()
-                            .find(|(_, case)| case.name == "directory")
-                            .unwrap()
-                            .0
-                    },
-                    | _ => panic!("unexpected type for fd state type attribute"),
-                };
+        for (runtime_name, runtime) in &self.runtimes {
+            let store = run_store
+                .new_runtime(runtime_name.to_string(), "-")
+                .wrap_err("failed to init runtime store")?;
+            let stderr = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(store.path.join("stderr"))
+                .wrap_err("failed to open stderr file")?;
+            let executor = RunningExecutor::from_wasi_runner(
+                runtime.as_ref(),
+                PathBuf::from("target/debug/wazzi-executor.wasm")
+                    .canonicalize()
+                    .unwrap()
+                    .as_ref(),
+                &store.path,
+                Arc::new(Mutex::new(stderr)),
+                vec![MappedDir {
+                    name:      "base".to_string(),
+                    host_path: store.base.clone(),
+                }],
+            )
+            .unwrap();
+            let initializer = runtime.initialize_state(
+                &spec,
+                &executor,
+                vec![MappedDir {
+                    name:      "base".to_string(),
+                    host_path: store.base.clone(),
+                }],
+            )?;
 
-                record_value.members[type_member_idx] = WasiValue::Variant(Box::new(VariantValue {
-                    case_idx: directory_case_idx,
-                    payload:  None,
-                }))
-            },
-            | _ => panic!("unexpected type for fd state {:?}", fd),
+            initializers.push(initializer);
+            runtimes.push((runtime_name.to_string(), store, executor));
         }
 
-        let filetype = spec.get_type("filetype").unwrap().variant().unwrap();
-        let resource_id = env.write().unwrap().new_resource(
-            "fd".to_string(),
-            Resource { state: fd_state },
-            // Resource {
-            //     attributes: BTreeMap::from([
-            //         ("offset".to_string(), WasiValue::U64(0)),
-            //         ("flags".to_string(), fdflags.value(HashSet::new())),
-            //         (
-            //             "type".to_string(),
-            //             filetype.value_from_name("directory", None).unwrap(),
-            //         ),
-            //     ]),
-            // },
-        );
+        let (env, ctxs) = apply_env_initializers(&spec, &initializers);
+        let env = Arc::new(RwLock::new(env));
 
         run_store
             .write_data(&data)
@@ -240,16 +245,13 @@ impl<'s> Fuzzer<'s> {
             let n_live_threads = Arc::new(AtomicUsize::new(self.runtimes.len()));
             let mut runtime_threads = Vec::with_capacity(self.runtimes.len());
 
-            for (runtime_name, runtime) in &self.runtimes {
+            for ((runtime_name, mut store, executor), ctx) in runtimes.into_iter().zip(ctxs) {
                 runtime_threads.push(
                     thread::Builder::new()
                         .name(runtime_name.to_string())
                         .spawn_scoped(scope, {
                             let mut u = Unstructured::new(&data);
                             let env = env.clone();
-                            let mut store = run_store
-                                .new_runtime(runtime_name.to_string(), "-")
-                                .wrap_err("failed to init runtime store")?;
                             let tx = tx.clone();
                             let cancel = cancel.clone();
                             let pause_pair = pause_pair.clone();
@@ -261,24 +263,7 @@ impl<'s> Fuzzer<'s> {
                                 let z3_cfg = z3::Config::new();
                                 let z3_ctx = z3::Context::new(&z3_cfg);
                                 let spec = Spec::preview1(&z3_ctx)?;
-                                let stderr = fs::OpenOptions::new()
-                                    .write(true)
-                                    .create_new(true)
-                                    .open(store.path.join("stderr"))
-                                    .wrap_err("failed to open stderr file")?;
-                                let (executor, prefix) = ExecutorRunner::new(
-                                    runtime.as_ref(),
-                                    PathBuf::from("target/debug/wazzi-executor-pb.wasm")
-                                        .canonicalize()
-                                        .unwrap(),
-                                    store.path.clone(),
-                                    Some(store.base.clone()),
-                                )
-                                .run(Arc::new(Mutex::new(stderr)))
-                                .unwrap();
                                 let mut iteration = 0;
-                                let env = env.read().unwrap();
-                                let mut strategy = strategy.into_call_strategy(&mut u, &env);
 
                                 loop {
                                     let (resume_mu, resume_cond) = &*resume_pair;
@@ -297,6 +282,9 @@ impl<'s> Fuzzer<'s> {
                                         return Err(FuzzError::DiffFound);
                                     }
 
+                                    let env = env.read().unwrap();
+                                    let mut strategy =
+                                        strategy.into_call_strategy(&mut u, &env, &ctx);
                                     let function = strategy.select_function(&spec)?;
 
                                     tracing::info!(
@@ -326,8 +314,11 @@ impl<'s> Fuzzer<'s> {
                                             return Err(FuzzError::Unknown(err));
                                         },
                                     };
-                                    let function = function.clone();
 
+                                    drop(strategy);
+                                    drop(env);
+
+                                    let function = function.clone();
                                     let (pause_mu, pause_cond) = &*pause_pair;
                                     let mut pause_state = pause_mu.lock().unwrap();
                                     let pause_gen = pause_state.1;
@@ -459,9 +450,18 @@ impl<'s> Fuzzer<'s> {
                             }
 
                             if let Some(results) = results {
+                                let results = function
+                                    .results
+                                    .iter()
+                                    .zip(results)
+                                    .map(|(result, result_value)| {
+                                        (result.name.clone(), result_value)
+                                    })
+                                    .collect_vec();
+
                                 env.write()
                                     .unwrap()
-                                    .execute_function_effects(&spec, &function, &results);
+                                    .execute_function_effects(&spec, &function, results);
                             }
 
                             let (resume_mu, resume_cond) = &*resume_pair;
