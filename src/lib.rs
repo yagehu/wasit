@@ -129,7 +129,7 @@ impl Environment {
         function: &Function,
         strategy: &mut dyn CallStrategy,
         executor: &RunningExecutor,
-    ) -> Result<Option<Vec<WasiValue>>, eyre::Error> {
+    ) -> Result<(Vec<WasiValue>, Option<Vec<WasiValue>>), eyre::Error> {
         let params = strategy.prepare_arguments(spec, function)?;
 
         store.begin_call(&Call {
@@ -188,13 +188,14 @@ impl Environment {
             results: results.clone(),
         })?;
 
-        Ok(results)
+        Ok((params, results))
     }
 
     pub fn execute_function_effects(
         &mut self,
         spec: &Spec,
         function: &Function,
+        params: &[WasiValue],
         results: Vec<(String, WasiValue)>,
     ) {
         let mut resources: HashMap<&str, usize> = Default::default();
@@ -213,6 +214,16 @@ impl Environment {
             match stmt {
                 | olang::Stmt::RecordFieldSet(record_field_set) => {
                     let value = match &record_field_set.value {
+                        | olang::Expr::Param(param_name) => {
+                            let (i, _param) = function
+                                .params
+                                .iter()
+                                .enumerate()
+                                .find(|(_i, param)| &param.name == param_name)
+                                .unwrap();
+
+                            params[i].clone()
+                        },
                         | olang::Expr::WasiValue(value) => value.clone(),
                     };
                     let result = function
@@ -235,6 +246,72 @@ impl Environment {
                     *record.members.get_mut(i).unwrap() = value;
                 },
             }
+        }
+    }
+
+    pub fn add_resources_to_ctx_recursively(
+        &self,
+        spec: &Spec,
+        ctx: &mut RuntimeContext,
+        tdef: &TypeDef,
+        value: &WasiValue,
+        next_idx: &mut usize,
+    ) {
+        match (&tdef.wasi, value) {
+            | (WasiType::Handle, _)
+            | (WasiType::S64, _)
+            | (WasiType::U8, _)
+            | (WasiType::U16, _)
+            | (WasiType::U32, _)
+            | (WasiType::U64, _) => (),
+            | (WasiType::Record(record), WasiValue::Record(record_value)) => {
+                for (member, member_value) in record.members.iter().zip(record_value.members.iter())
+                {
+                    self.add_resources_to_ctx_recursively(
+                        spec,
+                        ctx,
+                        member.tref.resolve(spec),
+                        member_value,
+                        next_idx,
+                    );
+                }
+            },
+            | (WasiType::Record(_), _) => panic!(),
+            | (WasiType::Flags(_), _) => (),
+            | (WasiType::List(list), WasiValue::List(list_value)) => {
+                for item in &list_value.items {
+                    self.add_resources_to_ctx_recursively(
+                        spec,
+                        ctx,
+                        list.item.resolve(spec),
+                        item,
+                        next_idx,
+                    );
+                }
+            },
+            | (WasiType::List(_), _) => panic!(),
+            | (WasiType::String, _) => (),
+            | (WasiType::Variant(variant), WasiValue::Variant(variant_value)) => {
+                let case = &variant.cases[variant_value.case_idx];
+
+                if let (Some(payload), Some(payload_value)) =
+                    (&case.payload, &variant_value.payload)
+                {
+                    self.add_resources_to_ctx_recursively(
+                        spec,
+                        ctx,
+                        payload.resolve(spec),
+                        payload_value,
+                        next_idx,
+                    );
+                }
+            },
+            | (WasiType::Variant(_), _) => panic!(),
+        }
+
+        if let Some(_state) = &tdef.state {
+            ctx.resources.insert(*next_idx, value.to_owned());
+            *next_idx += 1;
         }
     }
 
@@ -292,12 +369,14 @@ impl Environment {
         }
 
         if let Some(state) = &tdef.state {
-            Some(self.new_resource(
+            let resource_id = self.new_resource(
                 tdef.name.clone(),
                 Resource {
                     state: state.zero_value(spec),
                 },
-            ))
+            );
+
+            Some(resource_id)
         } else {
             None
         }

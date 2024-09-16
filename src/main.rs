@@ -245,7 +245,7 @@ impl<'s> Fuzzer<'s> {
             let n_live_threads = Arc::new(AtomicUsize::new(self.runtimes.len()));
             let mut runtime_threads = Vec::with_capacity(self.runtimes.len());
 
-            for ((runtime_name, mut store, executor), ctx) in runtimes.into_iter().zip(ctxs) {
+            for ((runtime_name, mut store, executor), mut ctx) in runtimes.into_iter().zip(ctxs) {
                 runtime_threads.push(
                     thread::Builder::new()
                         .name(runtime_name.to_string())
@@ -295,7 +295,7 @@ impl<'s> Fuzzer<'s> {
                                     );
                                     iteration += 1;
 
-                                    let results = match env.call(
+                                    let (params, results) = match env.call(
                                         &spec,
                                         store.trace_mut(),
                                         function,
@@ -314,8 +314,24 @@ impl<'s> Fuzzer<'s> {
                                             return Err(FuzzError::Unknown(err));
                                         },
                                     };
+                                    let mut next_resource_id = env.next_resource_id();
 
                                     drop(strategy);
+
+                                    if let Some(results) = &results {
+                                        for (result_value, result) in
+                                            results.into_iter().zip(function.results.iter())
+                                        {
+                                            env.add_resources_to_ctx_recursively(
+                                                &spec,
+                                                &mut ctx,
+                                                result.tref.resolve(&spec),
+                                                &result_value,
+                                                &mut next_resource_id,
+                                            );
+                                        }
+                                    }
+
                                     drop(env);
 
                                     let function = function.clone();
@@ -332,7 +348,7 @@ impl<'s> Fuzzer<'s> {
                                         pause_state.0 = 0;
                                         pause_state.1 = pause_state.1.wrapping_add(1);
                                         pause_cond.notify_all();
-                                        tx.send((function, results)).unwrap();
+                                        tx.send((function, params, results)).unwrap();
                                     }
 
                                     drop(
@@ -358,7 +374,7 @@ impl<'s> Fuzzer<'s> {
                         let z3_ctx = z3::Context::new(&z3_cfg);
                         let spec = Spec::preview1(&z3_ctx)?;
 
-                        while let Ok((function, results)) = rx.recv() {
+                        while let Ok((function, params, results)) = rx.recv() {
                             let runtimes = run_store
                                 .runtimes::<Call>()
                                 .wrap_err("failed to resume runtimes")?
@@ -461,7 +477,7 @@ impl<'s> Fuzzer<'s> {
 
                                 env.write()
                                     .unwrap()
-                                    .execute_function_effects(&spec, &function, results);
+                                    .execute_function_effects(&spec, &function, &params, results);
                             }
 
                             let (resume_mu, resume_cond) = &*resume_pair;
