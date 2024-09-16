@@ -30,7 +30,7 @@ use super::{
 #[grammar = "spec/witx.pest"]
 struct Parser;
 
-pub(super) fn preview1<'ctx>(ctx: &'ctx z3::Context) -> Result<Spec, eyre::Error> {
+pub(super) fn preview1<'ctx>(ctx: &'ctx z3::Context) -> Result<Spec<'ctx>, eyre::Error> {
     const DOC: &str = include_str!("preview1.witx");
 
     let mut spec = Spec::new(ctx);

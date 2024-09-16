@@ -98,7 +98,7 @@ impl RunStore {
 
     pub fn runtimes<'a, T: Serialize + DeserializeOwned + 'a>(
         &'a self,
-    ) -> Result<impl Iterator<Item = RuntimeStore<T>> + '_, io::Error> {
+    ) -> Result<impl Iterator<Item = RuntimeStore<T>> + 'a, io::Error> {
         Ok(self
             .runtimes
             .iter()

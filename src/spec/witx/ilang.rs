@@ -27,64 +27,64 @@ pub(in crate::spec) enum Term {
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-struct Not {
+pub(in crate::spec) struct Not {
     term: Term,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-struct And {
+pub(in crate::spec) struct And {
     clauses: Vec<Term>,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-struct Or {
+pub(in crate::spec) struct Or {
     clauses: Vec<Term>,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-struct AttrGet {
+pub(in crate::spec) struct AttrGet {
     target: Term,
     attr:   String,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-struct Param {
+pub(in crate::spec) struct Param {
     name: String,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-struct FlagsGet {
+pub(in crate::spec) struct FlagsGet {
     target: Term,
     field:  String,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-struct IntAdd {
+pub(in crate::spec) struct IntAdd {
     lhs: Term,
     rhs: Term,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-struct IntLe {
+pub(in crate::spec) struct IntLe {
     lhs: Term,
     rhs: Term,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-struct ValueEq {
+pub(in crate::spec) struct ValueEq {
     lhs: Term,
     rhs: Term,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-struct VariantConst {
+pub(in crate::spec) struct VariantConst {
     ty:      String,
     case:    String,
     payload: Option<Term>,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-struct NoNonExistentDirBacktrack {
+pub(in crate::spec) struct NoNonExistentDirBacktrack {
     fd_param:   String,
     path_param: String,
 }
