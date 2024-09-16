@@ -35,6 +35,7 @@ use wazzi::{
     Environment,
     EnvironmentInitializer,
     RuntimeContext,
+    StatefulStrategy,
     StatelessStrategy,
 };
 use wazzi_runners::{MappedDir, RunningExecutor, Wamr, Wasmer};
@@ -45,7 +46,7 @@ struct Cmd {
     #[arg(long)]
     data: Option<PathBuf>,
 
-    #[arg(long, value_enum, default_value_t = Strategy::Stateless)]
+    #[arg(long, value_enum, default_value_t = Strategy::Stateful)]
     strategy: Strategy,
 
     #[arg(long)]
@@ -54,6 +55,7 @@ struct Cmd {
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
 enum Strategy {
+    Stateful,
     Stateless,
 }
 
@@ -65,6 +67,7 @@ impl Strategy {
         ctx: &'a RuntimeContext,
     ) -> Box<dyn CallStrategy + 'a> {
         match self {
+            | Strategy::Stateful => Box::new(StatefulStrategy::new(u, env, ctx)),
             | Strategy::Stateless => Box::new(StatelessStrategy::new(u, env, ctx)),
         }
     }

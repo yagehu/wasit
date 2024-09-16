@@ -1,5 +1,7 @@
+mod stateful;
 mod stateless;
 
+pub use stateful::StatefulStrategy;
 pub use stateless::StatelessStrategy;
 
 use crate::spec::{Function, Spec, WasiValue};

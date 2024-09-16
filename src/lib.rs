@@ -5,7 +5,7 @@ pub mod spec;
 
 mod strategy;
 
-pub use strategy::{CallStrategy, StatelessStrategy};
+pub use strategy::{CallStrategy, StatefulStrategy, StatelessStrategy};
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
