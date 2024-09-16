@@ -661,6 +661,13 @@ pub enum WasiValue {
 }
 
 impl WasiValue {
+    pub fn r#u32(&self) -> Option<u32> {
+        match self {
+            | &WasiValue::U32(i) => Some(i),
+            | _ => None,
+        }
+    }
+
     pub fn handle(&self) -> Option<u32> {
         match self {
             | &WasiValue::Handle(handle) => Some(handle),
@@ -668,9 +675,30 @@ impl WasiValue {
         }
     }
 
+    pub fn record(&self) -> Option<&RecordValue> {
+        match self {
+            | WasiValue::Record(record) => Some(record),
+            | _ => None,
+        }
+    }
+
     pub fn record_mut(&mut self) -> Option<&mut RecordValue> {
         match self {
             | WasiValue::Record(record) => Some(record),
+            | _ => None,
+        }
+    }
+
+    pub fn string(&self) -> Option<&[u8]> {
+        match self {
+            | WasiValue::String(b) => Some(b),
+            | _ => None,
+        }
+    }
+
+    pub fn variant(&self) -> Option<&VariantValue> {
+        match self {
+            | WasiValue::Variant(variant) => Some(variant),
             | _ => None,
         }
     }
@@ -820,6 +848,32 @@ impl WasiValue {
                 })
             },
             | (_, wazzi_executor_pb_rust::value::Which::String(string)) => Self::String(string),
+            | (WasiType::String, wazzi_executor_pb_rust::value::Which::Array(array)) => {
+                Self::String(
+                    array
+                        .items
+                        .iter()
+                        .map(|item| item.builtin().u8() as u8)
+                        .collect(),
+                )
+            },
+            | (
+                WasiType::Record(record),
+                wazzi_executor_pb_rust::value::Which::Record(record_value),
+            ) => Self::Record(RecordValue {
+                members: record
+                    .members
+                    .iter()
+                    .zip(record_value.members)
+                    .map(|(member, member_value)| {
+                        WasiValue::from_pb(
+                            member_value.value.unwrap(),
+                            spec,
+                            member.tref.resolve(spec),
+                        )
+                    })
+                    .collect(),
+            }),
             | (
                 WasiType::Variant(variant_type),
                 wazzi_executor_pb_rust::value::Which::Variant(variant),
@@ -843,7 +897,7 @@ impl WasiValue {
 
                 Self::Variant(Box::new(VariantValue { case_idx, payload }))
             },
-            | _ => unreachable!(),
+            | _ => unreachable!("{:#?}", tdef),
         }
     }
 }

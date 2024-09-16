@@ -37,7 +37,7 @@ use wazzi::{
     RuntimeContext,
     StatelessStrategy,
 };
-use wazzi_runners::{MappedDir, RunningExecutor, Wasmer};
+use wazzi_runners::{MappedDir, RunningExecutor, Wamr, Wasmer};
 use wazzi_store::FuzzStore;
 
 #[derive(Parser, Debug)]
@@ -104,10 +104,10 @@ fn main() -> Result<(), eyre::Error> {
         cmd.strategy,
         &mut store,
         [
-            // (
-            //     "wamr",
-            //     Box::new(Wamr::new(Path::new("iwasm"))) as Box<dyn InitializeState>,
-            // ),
+            (
+                "wamr",
+                Box::new(Wamr::default()) as Box<dyn InitializeState>,
+            ),
             (
                 "wasmer",
                 Box::new(Wasmer::default()) as Box<dyn InitializeState>,

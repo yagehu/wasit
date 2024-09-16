@@ -247,6 +247,12 @@ pub struct Wamr<'p> {
     path: &'p Path,
 }
 
+impl Default for Wamr<'_> {
+    fn default() -> Self {
+        Self::new(Path::new("iwasm"))
+    }
+}
+
 impl<'p> Wamr<'p> {
     pub fn new(path: &'p Path) -> Self {
         Self { path }
