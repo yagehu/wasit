@@ -1,4 +1,5 @@
 use arbitrary::Unstructured;
+use idxspace::IndexSpace;
 
 use super::CallStrategy;
 use crate::{
@@ -39,3 +40,14 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
         todo!()
     }
 }
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+struct State {
+    preopens: IndexSpace<usize, PreopenFs>,
+}
+
+impl State {
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+struct PreopenFs {}

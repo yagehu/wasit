@@ -3,8 +3,11 @@ extern crate wazzi_executor_pb_rust as pb;
 pub mod normalization;
 pub mod spec;
 
+mod resource;
 mod strategy;
 
+pub use resource::ResourceIdx;
+use resource::{Resource, Resources};
 pub use strategy::{CallStrategy, StatefulStrategy, StatelessStrategy};
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -26,8 +29,8 @@ pub fn apply_env_initializers(
     spec: &Spec,
     initializers: &[EnvironmentInitializer],
 ) -> (Environment, Vec<RuntimeContext>) {
-    let mut resources: Vec<Resource> = Default::default();
-    let mut fds: BTreeSet<usize> = Default::default();
+    let mut resources: Resources = Default::default();
+    let mut fds: BTreeSet<ResourceIdx> = Default::default();
     let fd_tdef = spec.types.get_by_key("fd").unwrap();
     let fd_type = fd_tdef.state.as_ref().unwrap().record().unwrap();
     let mut preopen_state_members: Vec<WasiValue> = Default::default();
@@ -55,22 +58,24 @@ pub fn apply_env_initializers(
         });
     }
 
-    let mut preopens_ids: Option<HashMap<&str, usize>> = None;
+    let mut preopens_ids: Option<HashMap<&str, ResourceIdx>> = None;
 
     for (i, initializer) in initializers.iter().enumerate() {
-        let mut preopen_ids_: HashMap<&str, usize> = Default::default();
+        let mut preopen_ids_: HashMap<&str, ResourceIdx> = Default::default();
 
         for (preopen_name, preopen_value) in &initializer.preopens {
             let resource_id = match &preopens_ids {
                 | None => {
-                    resources.push(Resource {
+                    let resource_idx = resources.push(Resource {
                         state: WasiValue::Record(RecordValue {
                             members: preopen_state_members.clone(),
                         }),
                     });
-                    fds.insert(resources.len() - 1);
-                    preopen_ids_.insert(&preopen_name, resources.len() - 1);
-                    resources.len() - 1
+
+                    fds.insert(resource_idx);
+                    preopen_ids_.insert(&preopen_name, resource_idx);
+
+                    resource_idx
                 },
                 | Some(preopens_ids) => *preopens_ids.get(preopen_name.as_str()).unwrap(),
             };
@@ -96,8 +101,8 @@ pub fn apply_env_initializers(
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Environment {
-    resources:          Vec<Resource>,
-    resources_by_types: HashMap<String, BTreeSet<usize>>,
+    resources:          Resources,
+    resources_by_types: HashMap<String, BTreeSet<ResourceIdx>>,
 }
 
 impl Environment {
@@ -108,18 +113,15 @@ impl Environment {
         }
     }
 
-    pub fn next_resource_id(&self) -> usize {
-        self.resources.len()
-    }
+    pub fn new_resource(&mut self, r#type: String, resource: Resource) -> ResourceIdx {
+        let resource_idx = self.resources.push(resource);
 
-    pub fn new_resource(&mut self, r#type: String, resource: Resource) -> usize {
-        self.resources.push(resource);
         self.resources_by_types
             .entry(r#type)
             .or_default()
-            .insert(self.resources.len() - 1);
+            .insert(resource_idx);
 
-        self.resources.len() - 1
+        resource_idx
     }
 
     pub fn call(
@@ -198,7 +200,7 @@ impl Environment {
         params: &[WasiValue],
         results: Vec<(String, WasiValue)>,
     ) {
-        let mut resources: HashMap<&str, usize> = Default::default();
+        let mut resources: HashMap<&str, ResourceIdx> = Default::default();
 
         for (result, (name, result_value)) in function.results.iter().zip(results.iter()) {
             if let Some(id) = self.register_result_value_resource_recursively(
@@ -250,12 +252,11 @@ impl Environment {
     }
 
     pub fn add_resources_to_ctx_recursively(
-        &self,
+        &mut self,
         spec: &Spec,
         ctx: &mut RuntimeContext,
         tdef: &TypeDef,
         value: &WasiValue,
-        next_idx: &mut usize,
     ) {
         match (&tdef.wasi, value) {
             | (WasiType::Handle, _)
@@ -272,7 +273,6 @@ impl Environment {
                         ctx,
                         member.tref.resolve(spec),
                         member_value,
-                        next_idx,
                     );
                 }
             },
@@ -280,13 +280,7 @@ impl Environment {
             | (WasiType::Flags(_), _) => (),
             | (WasiType::List(list), WasiValue::List(list_value)) => {
                 for item in &list_value.items {
-                    self.add_resources_to_ctx_recursively(
-                        spec,
-                        ctx,
-                        list.item.resolve(spec),
-                        item,
-                        next_idx,
-                    );
+                    self.add_resources_to_ctx_recursively(spec, ctx, list.item.resolve(spec), item);
                 }
             },
             | (WasiType::List(_), _) => panic!(),
@@ -302,16 +296,21 @@ impl Environment {
                         ctx,
                         payload.resolve(spec),
                         payload_value,
-                        next_idx,
                     );
                 }
             },
             | (WasiType::Variant(_), _) => panic!(),
         }
 
-        if let Some(_state) = &tdef.state {
-            ctx.resources.insert(*next_idx, value.to_owned());
-            *next_idx += 1;
+        if let Some(state) = &tdef.state {
+            let resource_id = self.new_resource(
+                tdef.name.clone(),
+                Resource {
+                    state: state.zero_value(spec),
+                },
+            );
+
+            ctx.resources.insert(resource_id, value.to_owned());
         }
     }
 
@@ -320,7 +319,7 @@ impl Environment {
         spec: &Spec,
         tdef: &TypeDef,
         value: &WasiValue,
-    ) -> Option<usize> {
+    ) -> Option<ResourceIdx> {
         // First, register structural members.
         match (&tdef.wasi, value) {
             | (WasiType::Handle, _)
@@ -383,11 +382,6 @@ impl Environment {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug)]
-pub struct Resource {
-    pub state: WasiValue,
-}
-
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 pub struct Call {
     pub function: String,
@@ -398,7 +392,7 @@ pub struct Call {
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct RuntimeContext {
-    pub resources: BTreeMap<usize, WasiValue>,
+    pub resources: BTreeMap<ResourceIdx, WasiValue>,
 }
 
 impl RuntimeContext {

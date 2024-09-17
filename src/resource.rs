@@ -1,0 +1,34 @@
+use crate::spec::WasiValue;
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct Resource {
+    pub state: WasiValue,
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct Resources(Vec<Resource>);
+
+impl Resources {
+    pub fn new() -> Self {
+        Self(Default::default())
+    }
+
+    pub fn push(&mut self, resource: Resource) -> ResourceIdx {
+        self.0.push(resource);
+
+        ResourceIdx(self.0.len() - 1)
+    }
+
+    pub fn get_mut(&mut self, i: ResourceIdx) -> Option<&mut Resource> {
+        self.0.get_mut(i.0)
+    }
+}
+
+impl Default for Resources {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
+pub struct ResourceIdx(usize);

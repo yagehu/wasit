@@ -3,6 +3,7 @@
 use std::{
     fs,
     io,
+    ops::Deref,
     panic,
     path::{Path, PathBuf},
     process,
@@ -46,7 +47,7 @@ struct Cmd {
     #[arg(long)]
     data: Option<PathBuf>,
 
-    #[arg(long, value_enum, default_value_t = Strategy::Stateful)]
+    #[arg(long, value_enum, default_value_t = Strategy::Stateless)]
     strategy: Strategy,
 
     #[arg(long)]
@@ -289,6 +290,7 @@ impl<'s> Fuzzer<'s> {
                                     let mut strategy =
                                         strategy.into_call_strategy(&mut u, &env, &ctx);
                                     let function = strategy.select_function(&spec)?;
+                                    let mut env_prev_iter = env.deref().clone();
 
                                     tracing::info!(
                                         epoch = epoch,
@@ -317,7 +319,6 @@ impl<'s> Fuzzer<'s> {
                                             return Err(FuzzError::Unknown(err));
                                         },
                                     };
-                                    let mut next_resource_id = env.next_resource_id();
 
                                     drop(strategy);
 
@@ -325,12 +326,11 @@ impl<'s> Fuzzer<'s> {
                                         for (result_value, result) in
                                             results.into_iter().zip(function.results.iter())
                                         {
-                                            env.add_resources_to_ctx_recursively(
+                                            env_prev_iter.add_resources_to_ctx_recursively(
                                                 &spec,
                                                 &mut ctx,
                                                 result.tref.resolve(&spec),
                                                 &result_value,
-                                                &mut next_resource_id,
                                             );
                                         }
                                     }
