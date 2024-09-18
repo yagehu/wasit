@@ -1516,6 +1516,7 @@ dependencies = [
  "pest_derive",
  "rand",
  "serde",
+ "tempfile",
  "thiserror",
  "tracing",
  "tracing-error",
@@ -1526,6 +1527,7 @@ dependencies = [
  "wazzi-runners",
  "wazzi-store",
  "z3",
+ "z3-sys",
 ]
 
 [[package]]

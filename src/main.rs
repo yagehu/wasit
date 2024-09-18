@@ -47,7 +47,7 @@ struct Cmd {
     #[arg(long)]
     data: Option<PathBuf>,
 
-    #[arg(long, value_enum, default_value_t = Strategy::Stateless)]
+    #[arg(long, value_enum, default_value_t = Strategy::Stateful)]
     strategy: Strategy,
 
     #[arg(long)]
@@ -66,9 +66,10 @@ impl Strategy {
         u: &'a mut Unstructured,
         env: &'a Environment,
         ctx: &'a RuntimeContext,
+        z3_ctx: &'a z3::Context,
     ) -> Box<dyn CallStrategy + 'a> {
         match self {
-            | Strategy::Stateful => Box::new(StatefulStrategy::new(u, env, ctx)),
+            | Strategy::Stateful => Box::new(StatefulStrategy::new(u, env, ctx, z3_ctx)),
             | Strategy::Stateless => Box::new(StatelessStrategy::new(u, env, ctx)),
         }
     }
@@ -288,7 +289,7 @@ impl<'s> Fuzzer<'s> {
 
                                     let env = env.read().unwrap();
                                     let mut strategy =
-                                        strategy.into_call_strategy(&mut u, &env, &ctx);
+                                        strategy.into_call_strategy(&mut u, &env, &ctx, &z3_ctx);
                                     let function = strategy.select_function(&spec)?;
                                     let mut env_prev_iter = env.deref().clone();
 

@@ -31,4 +31,4 @@ impl Default for Resources {
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
-pub struct ResourceIdx(usize);
+pub struct ResourceIdx(pub(crate) usize);
