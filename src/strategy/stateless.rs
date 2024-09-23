@@ -6,6 +6,7 @@ use super::CallStrategy;
 use crate::{
     spec::{Function, Spec, WasiValue},
     Environment,
+    ResourceIdx,
     RuntimeContext,
 };
 
@@ -74,7 +75,7 @@ impl CallStrategy for StatelessStrategy<'_, '_, '_, '_> {
         &mut self,
         spec: &Spec,
         function: &Function,
-    ) -> Result<Vec<WasiValue>, eyre::Error> {
+    ) -> Result<Vec<(WasiValue, Option<ResourceIdx>)>, eyre::Error> {
         let mut params = Vec::with_capacity(function.params.len());
 
         for param in function.params.iter() {
@@ -82,7 +83,7 @@ impl CallStrategy for StatelessStrategy<'_, '_, '_, '_> {
 
             match &tdef.state {
                 | None => {
-                    params.push(tdef.wasi.arbitrary_value(spec, self.u)?);
+                    params.push((tdef.wasi.arbitrary_value(spec, self.u)?, None));
                 },
                 | Some(_state_type) => {
                     let resources = self
@@ -99,7 +100,7 @@ impl CallStrategy for StatelessStrategy<'_, '_, '_, '_> {
                         .wrap_err("failed to choose a resource")?;
                     let resource = self.ctx.resources.get(&resource_id).unwrap();
 
-                    params.push(resource.to_owned());
+                    params.push((resource.to_owned(), Some(resource_id)));
                 },
             }
         }

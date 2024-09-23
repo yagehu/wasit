@@ -31,6 +31,10 @@ where
         Iter::new(self)
     }
 
+    pub fn len(&self) -> usize {
+        self.list.len()
+    }
+
     pub fn get_by_key<Q>(&self, k: &Q) -> Option<&V>
     where
         K: Borrow<Q>,

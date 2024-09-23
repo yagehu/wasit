@@ -645,7 +645,7 @@ pub struct ListType {
     pub item: TypeRef,
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
+#[derive(Serialize, Deserialize, Hash, PartialEq, Eq, Clone, Debug)]
 pub enum WasiValue {
     Handle(u32),
     S64(i64),
@@ -661,9 +661,16 @@ pub enum WasiValue {
 }
 
 impl WasiValue {
-    pub fn r#u32(&self) -> Option<u32> {
+    pub fn u32(&self) -> Option<u32> {
         match self {
             | &WasiValue::U32(i) => Some(i),
+            | _ => None,
+        }
+    }
+
+    pub fn u64(&self) -> Option<u64> {
+        match self {
+            | &WasiValue::U64(i) => Some(i),
             | _ => None,
         }
     }
@@ -902,22 +909,22 @@ impl WasiValue {
     }
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
+#[derive(Serialize, Deserialize, Hash, PartialEq, Eq, Clone, Debug)]
 pub struct RecordValue {
     pub members: Vec<WasiValue>,
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
+#[derive(Serialize, Deserialize, Hash, PartialEq, Eq, Clone, Debug)]
 pub struct FlagsValue {
     pub fields: Vec<bool>,
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
+#[derive(Serialize, Deserialize, Hash, PartialEq, Eq, Clone, Debug)]
 pub struct ListValue {
     pub items: Vec<WasiValue>,
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
+#[derive(Serialize, Deserialize, Hash, PartialEq, Eq, Clone, Debug)]
 pub struct VariantValue {
     pub case_idx: usize,
     pub payload:  Option<WasiValue>,

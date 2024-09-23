@@ -4,7 +4,10 @@ mod stateless;
 pub use stateful::StatefulStrategy;
 pub use stateless::StatelessStrategy;
 
-use crate::spec::{Function, Spec, WasiValue};
+use crate::{
+    spec::{Function, Spec, WasiValue},
+    ResourceIdx,
+};
 
 pub trait CallStrategy {
     fn select_function<'spec>(&mut self, spec: &'spec Spec)
@@ -14,5 +17,5 @@ pub trait CallStrategy {
         &mut self,
         spec: &Spec,
         function: &Function,
-    ) -> Result<Vec<WasiValue>, eyre::Error>;
+    ) -> Result<Vec<(WasiValue, Option<ResourceIdx>)>, eyre::Error>;
 }

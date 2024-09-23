@@ -5,6 +5,8 @@
 ;; This is a `witx` file. See [here](https://github.com/WebAssembly/WASI/blob/main/legacy/tools/witx-docs.md)
 ;; for an explanation of what that means.
 
+(typename $resource-id u64)
+
 (typename $path string)
 
 (typename $size u32)
@@ -329,6 +331,8 @@
       (field $offset $filesize)
       (field $flags $fdflags)
       (field $type $filetype)
+      (field $path $path)
+      (field $parent $resource-id)
     )
   )
 )
@@ -957,6 +961,8 @@
       (@record.field.set (result $expected) $offset (@u64.const 0))
       (@record.field.set (result $expected) $flags (param $fdflags))
       (@record.field.set (result $expected) $type (@variant.const $filetype $regular_file))
+      (@record.field.set (result $expected) $path (param $path))
+      (@record.field.set (result $expected) $parent (@resource-id $fd))
     )
   )
 

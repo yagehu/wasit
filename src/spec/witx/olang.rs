@@ -23,6 +23,7 @@ pub struct Program {
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum Expr {
     Param(String),
+    ResourceId(String),
     WasiValue(WasiValue),
 }
 
@@ -63,6 +64,15 @@ pub(super) fn to_stmt(spec: &Spec, pair: Pair<'_, Rule>) -> Result<Stmt, eyre::E
 fn to_expr(spec: &Spec, pair: Pair<'_, Rule>) -> Result<Expr, eyre::Error> {
     Ok(match pair.as_rule() {
         | Rule::param => Expr::Param(
+            pair.into_inner()
+                .next()
+                .unwrap()
+                .as_str()
+                .strip_prefix('$')
+                .unwrap()
+                .to_string(),
+        ),
+        | Rule::resource_id => Expr::ResourceId(
             pair.into_inner()
                 .next()
                 .unwrap()

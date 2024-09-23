@@ -34,6 +34,7 @@ pub fn apply_env_initializers(
     let fd_tdef = spec.types.get_by_key("fd").unwrap();
     let fd_type = fd_tdef.state.as_ref().unwrap().record().unwrap();
     let mut preopen_state_members: Vec<WasiValue> = Default::default();
+    let mut reverse_resource_index_fd = HashMap::new();
     let mut ctxs: Vec<RuntimeContext> = vec![RuntimeContext::new(); initializers.len()];
 
     for member in &fd_type.members {
@@ -66,12 +67,14 @@ pub fn apply_env_initializers(
         for (preopen_name, preopen_value) in &initializer.preopens {
             let resource_id = match &preopens_ids {
                 | None => {
+                    let state = WasiValue::Record(RecordValue {
+                        members: preopen_state_members.clone(),
+                    });
                     let resource_idx = resources.push(Resource {
-                        state: WasiValue::Record(RecordValue {
-                            members: preopen_state_members.clone(),
-                        }),
+                        state: state.clone(),
                     });
 
+                    reverse_resource_index_fd.insert(state, resource_idx);
                     fds.insert(resource_idx);
                     preopen_ids_.insert(&preopen_name, resource_idx);
 
@@ -93,7 +96,11 @@ pub fn apply_env_initializers(
     (
         Environment {
             resources,
-            resources_by_types: [("fd".to_string(), fds)].into_iter().collect(),
+            resources_by_types: [("fd".to_string(), fds.clone())].into_iter().collect(),
+            resources_types: fds.into_iter().map(|fd| (fd, "fd".to_string())).collect(),
+            reverse_resource_index: [("fd".to_string(), reverse_resource_index_fd)]
+                .into_iter()
+                .collect(),
         },
         ctxs,
     )
@@ -101,21 +108,31 @@ pub fn apply_env_initializers(
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Environment {
-    resources:          Resources,
-    resources_by_types: HashMap<String, BTreeSet<ResourceIdx>>,
+    resources:              Resources,
+    resources_by_types:     HashMap<String, BTreeSet<ResourceIdx>>,
+    resources_types:        HashMap<ResourceIdx, String>,
+    reverse_resource_index: HashMap<String, HashMap<WasiValue, ResourceIdx>>,
 }
 
 impl Environment {
     pub fn new() -> Self {
         Self {
-            resources:          Default::default(),
-            resources_by_types: Default::default(),
+            resources:              Default::default(),
+            resources_by_types:     Default::default(),
+            resources_types:        Default::default(),
+            reverse_resource_index: Default::default(),
         }
     }
 
     pub fn new_resource(&mut self, r#type: String, resource: Resource) -> ResourceIdx {
+        let state = resource.state.clone();
         let resource_idx = self.resources.push(resource);
 
+        self.reverse_resource_index
+            .entry(r#type.clone())
+            .or_default()
+            .insert(state, resource_idx);
+        self.resources_types.insert(resource_idx, r#type.clone());
         self.resources_by_types
             .entry(r#type)
             .or_default()
@@ -131,13 +148,19 @@ impl Environment {
         function: &Function,
         strategy: &mut dyn CallStrategy,
         executor: &RunningExecutor,
-    ) -> Result<(Vec<WasiValue>, Option<Vec<WasiValue>>), eyre::Error> {
+    ) -> Result<
+        (
+            Vec<(WasiValue, Option<ResourceIdx>)>,
+            Option<Vec<WasiValue>>,
+        ),
+        eyre::Error,
+    > {
         let params = strategy.prepare_arguments(spec, function)?;
 
         store.begin_call(&Call {
             function: function.name.clone(),
             errno:    None,
-            params:   params.clone(),
+            params:   params.clone().into_iter().map(|p| p.0).collect_vec(),
             results:  None,
         })?;
 
@@ -149,7 +172,7 @@ impl Environment {
                 .params
                 .iter()
                 .zip(params.clone())
-                .map(|(param, value)| value.into_pb(spec, &param.tref))
+                .map(|(param, (value, _idx))| value.into_pb(spec, &param.tref))
                 .collect(),
             results:        function
                 .results
@@ -186,7 +209,7 @@ impl Environment {
         store.end_call(&Call {
             function: function.name.clone(),
             errno,
-            params: params.clone(),
+            params: params.clone().into_iter().map(|p| p.0).collect_vec(),
             results: results.clone(),
         })?;
 
@@ -197,7 +220,7 @@ impl Environment {
         &mut self,
         spec: &Spec,
         function: &Function,
-        params: &[WasiValue],
+        params: &[(WasiValue, Option<ResourceIdx>)],
         results: Vec<(String, WasiValue)>,
     ) {
         let mut resources: HashMap<&str, ResourceIdx> = Default::default();
@@ -224,7 +247,17 @@ impl Environment {
                                 .find(|(_i, param)| &param.name == param_name)
                                 .unwrap();
 
-                            params[i].clone()
+                            params[i].0.clone()
+                        },
+                        | olang::Expr::ResourceId(param_name) => {
+                            let (i, _param) = function
+                                .params
+                                .iter()
+                                .enumerate()
+                                .find(|(_i, param)| &param.name == param_name)
+                                .unwrap();
+
+                            WasiValue::U64(params[i].1.unwrap().0 as u64)
                         },
                         | olang::Expr::WasiValue(value) => value.clone(),
                     };
