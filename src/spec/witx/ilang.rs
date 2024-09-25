@@ -6,12 +6,12 @@ use pest::iterators::Pair;
 use pest_derive::Parser;
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub(in crate::spec) enum Term {
+pub(crate) enum Term {
     Not(Box<Not>),
     And(And),
     Or(Or),
 
-    AttrGet(Box<AttrGet>),
+    RecordFieldGet(Box<RecordFieldGet>),
     Param(Param),
 
     FlagsGet(Box<FlagsGet>),
@@ -27,66 +27,66 @@ pub(in crate::spec) enum Term {
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub(in crate::spec) struct Not {
-    term: Term,
+pub(crate) struct Not {
+    pub(crate) term: Term,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub(in crate::spec) struct And {
-    clauses: Vec<Term>,
+pub(crate) struct And {
+    pub(crate) clauses: Vec<Term>,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub(in crate::spec) struct Or {
-    clauses: Vec<Term>,
+pub(crate) struct Or {
+    pub(crate) clauses: Vec<Term>,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub(in crate::spec) struct AttrGet {
-    target: Term,
-    attr:   String,
+pub(crate) struct RecordFieldGet {
+    pub(crate) target: Term,
+    pub(crate) member: String,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub(in crate::spec) struct Param {
-    name: String,
+pub(crate) struct Param {
+    pub(crate) name: String,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub(in crate::spec) struct FlagsGet {
-    target: Term,
-    field:  String,
+pub(crate) struct FlagsGet {
+    pub(crate) target: Term,
+    pub(crate) field:  String,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub(in crate::spec) struct IntAdd {
-    lhs: Term,
-    rhs: Term,
+pub(crate) struct IntAdd {
+    pub(crate) lhs: Term,
+    pub(crate) rhs: Term,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub(in crate::spec) struct IntLe {
-    lhs: Term,
-    rhs: Term,
+pub(crate) struct IntLe {
+    pub(crate) lhs: Term,
+    pub(crate) rhs: Term,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub(in crate::spec) struct ValueEq {
-    lhs: Term,
-    rhs: Term,
+pub(crate) struct ValueEq {
+    pub(crate) lhs: Term,
+    pub(crate) rhs: Term,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub(in crate::spec) struct VariantConst {
-    ty:      String,
-    case:    String,
-    payload: Option<Term>,
+pub(crate) struct VariantConst {
+    pub(crate) ty:      String,
+    pub(crate) case:    String,
+    pub(crate) payload: Option<Term>,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub(in crate::spec) struct NoNonExistentDirBacktrack {
-    fd_param:   String,
-    path_param: String,
+pub(crate) struct NoNonExistentDirBacktrack {
+    pub(crate) fd_param:   String,
+    pub(crate) path_param: String,
 }
 
 #[derive(Parser)]
@@ -116,10 +116,10 @@ pub(super) fn to_term(pair: Pair<'_, Rule>) -> Result<Term, eyre::Error> {
                 .map(|p| to_term(p))
                 .collect::<Result<_, _>>()?,
         }),
-        | Rule::attr_get => {
+        | Rule::record_field_get => {
             let mut pairs = pair.into_inner();
-            let target =
-                to_term(pairs.next().unwrap()).wrap_err("failed to handle @attr.get target")?;
+            let target = to_term(pairs.next().unwrap())
+                .wrap_err("failed to handle @record.field.get target")?;
             let attr = pairs
                 .next()
                 .unwrap()
@@ -128,7 +128,10 @@ pub(super) fn to_term(pair: Pair<'_, Rule>) -> Result<Term, eyre::Error> {
                 .unwrap()
                 .to_owned();
 
-            Term::AttrGet(Box::new(AttrGet { target, attr }))
+            Term::RecordFieldGet(Box::new(RecordFieldGet {
+                target,
+                member: attr,
+            }))
         },
         | Rule::param => Term::Param(Param {
             name: pair

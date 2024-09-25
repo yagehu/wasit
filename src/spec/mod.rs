@@ -18,6 +18,26 @@ impl Spec {
         let mut types: IndexSpace<String, TypeDef> = Default::default();
 
         types.push(
+            "bool".to_string(),
+            TypeDef {
+                name:  "bool".to_string(),
+                wasi:  WasiType::Variant(VariantType {
+                    tag_repr: IntRepr::U8,
+                    cases:    vec![
+                        VariantCaseType {
+                            name:    "true".to_string(),
+                            payload: None,
+                        },
+                        VariantCaseType {
+                            name:    "false".to_string(),
+                            payload: None,
+                        },
+                    ],
+                }),
+                state: None,
+            },
+        );
+        types.push(
             "s64".to_string(),
             TypeDef {
                 name:  "s64".to_string(),
@@ -95,12 +115,12 @@ impl Default for Interface {
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Function {
-    pub name:       String,
-    pub params:     Vec<FunctionParam>,
-    pub results:    Vec<FunctionResult>,
-    pub effects:    olang::Program,
-    r#return:       Option<()>,
-    input_contract: Option<ilang::Term>,
+    pub name:                  String,
+    pub params:                Vec<FunctionParam>,
+    pub results:               Vec<FunctionResult>,
+    pub effects:               olang::Program,
+    pub r#return:              Option<()>,
+    pub(crate) input_contract: Option<ilang::Term>,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]

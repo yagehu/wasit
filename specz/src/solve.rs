@@ -319,7 +319,7 @@ impl<'ctx> FunctionConstraintTranslationScope<'ctx> {
     ) -> Result<(z3::ast::Dynamic, &EncodedType), eyre::Error> {
         Ok(match term {
             | Term::Not(t) => (
-                z3::ast::Dynamic::from_ast(
+                z3::ast::dynamic::from_ast(
                     &self
                         .term_to_constraint(spec, &t.term)?
                         .0
@@ -327,7 +327,7 @@ impl<'ctx> FunctionConstraintTranslationScope<'ctx> {
                         .unwrap()
                         .not(),
                 ),
-                spec.get_encoded_type_by_tref(&TypeRef::Named("bool".to_string()))
+                spec.get_encoded_type_by_tref(&typeref::named("bool".to_string()))
                     .unwrap(),
             ),
             | Term::And(t) => {

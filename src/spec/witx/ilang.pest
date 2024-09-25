@@ -7,7 +7,7 @@ term =
   | not
   | and
   | or
-  | attr_get
+  | record_field_get
   | flags_get
   | int_add
   | int_le
@@ -29,7 +29,7 @@ id = @{ "$" ~ (ASCII_ALPHANUMERIC | "." | "-" | "_")+ }
 
 num_lit = @{ ASCII_DIGIT+ }
 
-attr_get = { "(" ~ "@attr.get" ~ term ~ id ~ ")" }
+record_field_get = { "(" ~ "@record.field.get" ~ term ~ id ~ ")" }
 
 flags_get = { "(" ~ "@flags.get" ~ term ~ id ~ ")" }
 

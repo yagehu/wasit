@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     fs,
     io,
     path::{Path, PathBuf},
@@ -14,7 +14,17 @@ use z3::ast::Ast;
 
 use super::CallStrategy;
 use crate::{
-    spec::{FlagsValue, Function, RecordValue, Spec, TypeDef, VariantValue, WasiType, WasiValue},
+    spec::{
+        witx::ilang::Term,
+        FlagsValue,
+        Function,
+        RecordValue,
+        Spec,
+        TypeDef,
+        VariantValue,
+        WasiType,
+        WasiValue,
+    },
     Environment,
     ResourceIdx,
     RuntimeContext,
@@ -162,13 +172,13 @@ impl State {
                 .params
                 .iter()
                 .map(|param| (&param.name, param.tref.resolve(spec)))
-                .filter_map(|(param_name, tdef)| {
-                    tdef.state.as_ref().map(|_state| param_name.clone())
-                })
-                .map(|name| {
-                    let datatype = types.resources.get(&name).unwrap();
+                .map(|(param_name, tdef)| {
+                    let datatype = types.resources.get(&tdef.name).unwrap();
 
-                    (name, z3::ast::Dynamic::fresh_const(ctx, "", &datatype.sort))
+                    (
+                        param_name.to_owned(),
+                        z3::ast::Dynamic::fresh_const(ctx, "", &datatype.sort),
+                    )
                 })
                 .collect(),
         }
@@ -490,7 +500,11 @@ impl State {
                 .find(|param| &param.name == param_name)
                 .unwrap();
             let param_tdef = param.tref.resolve(spec);
-            let resource_idxs = env.resources_by_types.get(&param_tdef.name).unwrap();
+            let empty = BTreeSet::new();
+            let resource_idxs = match env.resources_by_types.get(&param_tdef.name) {
+                | Some(idxs) => idxs,
+                | None => &empty,
+            };
 
             clauses.push(z3::ast::Bool::or(
                 ctx,
@@ -506,7 +520,221 @@ impl State {
             ));
         }
 
+        // Input contract
+        if let Some(input_contract) = function.input_contract.as_ref() {
+            clauses.push(
+                self.term_to_z3_ast(ctx, spec, types, decls, input_contract, function)
+                    .0
+                    .as_bool()
+                    .unwrap(),
+            );
+        }
+
         z3::ast::Bool::and(ctx, &clauses)
+    }
+
+    fn term_to_z3_ast<'ctx, 'spec>(
+        &self,
+        ctx: &'ctx z3::Context,
+        spec: &'spec Spec,
+        types: &'ctx StateTypes<'ctx>,
+        decls: &'ctx StateDecls<'ctx>,
+        term: &Term,
+        function: &Function,
+    ) -> (z3::ast::Dynamic<'ctx>, &'spec TypeDef) {
+        match term {
+            | Term::Not(t) => {
+                let (term, tdef) = self.term_to_z3_ast(ctx, spec, types, decls, &t.term, function);
+
+                (
+                    z3::ast::Dynamic::from_ast(&term.as_bool().unwrap().not()),
+                    tdef,
+                )
+            },
+            | Term::And(t) => (
+                z3::ast::Dynamic::from_ast(&z3::ast::Bool::and(
+                    ctx,
+                    t.clauses
+                        .iter()
+                        .map(|clause| {
+                            self.term_to_z3_ast(ctx, spec, types, decls, clause, function)
+                                .0
+                                .as_bool()
+                                .unwrap()
+                        })
+                        .collect_vec()
+                        .as_slice(),
+                )),
+                spec.types.get_by_key("bool").unwrap(),
+            ),
+            | Term::Or(t) => (
+                z3::ast::Dynamic::from_ast(&z3::ast::Bool::or(
+                    ctx,
+                    t.clauses
+                        .iter()
+                        .map(|clause| {
+                            self.term_to_z3_ast(ctx, spec, types, decls, clause, function)
+                                .0
+                                .as_bool()
+                                .unwrap()
+                        })
+                        .collect_vec()
+                        .as_slice(),
+                )),
+                spec.types.get_by_key("bool").unwrap(),
+            ),
+            | Term::RecordFieldGet(t) => {
+                let (target, target_tdef) =
+                    self.term_to_z3_ast(ctx, spec, types, decls, &t.target, function);
+                let target_datatype = types.resources.get(&target_tdef.name).unwrap();
+                let wasi_type = match &target_tdef.state {
+                    | Some(state) => state,
+                    | None => &target_tdef.wasi,
+                };
+                let record_type = wasi_type.record().unwrap();
+                let (i, member) = record_type
+                    .members
+                    .iter()
+                    .enumerate()
+                    .find(|(_i, member)| member.name == t.member)
+                    .unwrap();
+
+                (
+                    target_datatype.variants[0].accessors[i].apply(&[&target]),
+                    member.tref.resolve(spec),
+                )
+            },
+            | Term::Param(t) => {
+                let param = decls.params.get(&t.name).unwrap();
+                let tdef = function
+                    .params
+                    .iter()
+                    .find(|p| p.name == t.name)
+                    .unwrap()
+                    .tref
+                    .resolve(spec);
+
+                (param.clone(), tdef)
+            },
+            | Term::FlagsGet(t) => {
+                let (target, target_tdef) =
+                    self.term_to_z3_ast(ctx, spec, types, decls, &t.target, function);
+                let target_datatype = types.resources.get(&target_tdef.name).unwrap();
+                let wasi_type = match &target_tdef.state {
+                    | Some(state) => state,
+                    | None => &target_tdef.wasi,
+                };
+                let flags_type = wasi_type.flags().unwrap();
+                let (i, _name) = flags_type
+                    .fields
+                    .iter()
+                    .enumerate()
+                    .find(|(_i, name)| *name == &t.field)
+                    .unwrap();
+
+                (
+                    target_datatype.variants[0].accessors[i].apply(&[&target]),
+                    spec.types.get_by_key("bool").unwrap(),
+                )
+            },
+            | Term::IntConst(t) => (
+                types.resources.get("s64").unwrap().variants[0]
+                    .constructor
+                    .apply(&[&z3::ast::Int::from_big_int(ctx, t)]),
+                spec.types.get_by_key("s64").unwrap(),
+            ),
+            | Term::IntAdd(t) => {
+                let (lhs, lhs_tdef) =
+                    self.term_to_z3_ast(ctx, spec, types, decls, &t.lhs, function);
+                let (rhs, rhs_tdef) =
+                    self.term_to_z3_ast(ctx, spec, types, decls, &t.rhs, function);
+
+                (
+                    types.resources.get("s64").unwrap().variants[0]
+                        .constructor
+                        .apply(&[&z3::ast::Int::add(
+                            ctx,
+                            &[
+                                &types.resources.get(&lhs_tdef.name).unwrap().variants[0].accessors
+                                    [0]
+                                .apply(&[&lhs])
+                                .as_int()
+                                .unwrap(),
+                                &types.resources.get(&rhs_tdef.name).unwrap().variants[0].accessors
+                                    [0]
+                                .apply(&[&rhs])
+                                .as_int()
+                                .unwrap(),
+                            ],
+                        )]),
+                    spec.types.get_by_key("s64").unwrap(),
+                )
+            },
+            | Term::IntLe(t) => {
+                let (lhs, lhs_tdef) =
+                    self.term_to_z3_ast(ctx, spec, types, decls, &t.lhs, function);
+                let (rhs, rhs_tdef) =
+                    self.term_to_z3_ast(ctx, spec, types, decls, &t.rhs, function);
+
+                (
+                    z3::ast::Dynamic::from_ast(
+                        &types.resources.get(&lhs_tdef.name).unwrap().variants[0].accessors[0]
+                            .apply(&[&lhs])
+                            .as_int()
+                            .unwrap()
+                            .le(&types.resources.get(&rhs_tdef.name).unwrap().variants[0]
+                                .accessors[0]
+                                .apply(&[&rhs])
+                                .as_int()
+                                .unwrap()),
+                    ),
+                    spec.types.get_by_key("bool").unwrap(),
+                )
+            },
+            | Term::ValueEq(t) => {
+                let (lhs, _lhs_tdef) =
+                    self.term_to_z3_ast(ctx, spec, types, decls, &t.lhs, function);
+                let (rhs, _rhs_tdef) =
+                    self.term_to_z3_ast(ctx, spec, types, decls, &t.rhs, function);
+
+                (
+                    z3::ast::Dynamic::from_ast(&lhs._eq(&rhs)),
+                    spec.types.get_by_key("bool").unwrap(),
+                )
+            },
+            | Term::VariantConst(t) => {
+                let datatype = types.resources.get(&t.ty).unwrap();
+                let variant_tdef = spec.types.get_by_key(&t.ty).unwrap();
+                let variant_type = variant_tdef.wasi.variant().unwrap();
+                let (i, _case) = variant_type
+                    .cases
+                    .iter()
+                    .enumerate()
+                    .find(|(_i, case)| case.name == t.case)
+                    .unwrap();
+                let payload = match &t.payload {
+                    | Some(payload_term) => {
+                        let (payload, _payload_tdef) =
+                            self.term_to_z3_ast(ctx, spec, types, decls, payload_term, function);
+
+                        vec![payload]
+                    },
+                    | None => vec![],
+                };
+
+                (
+                    datatype.variants[i].constructor.apply(
+                        payload
+                            .iter()
+                            .map(|p| p as &dyn z3::ast::Ast)
+                            .collect_vec()
+                            .as_slice(),
+                    ),
+                    variant_tdef,
+                )
+            },
+            | Term::NoNonExistentDirBacktrack(t) => todo!(),
+        }
     }
 
     fn decode_to_wasi_value(
