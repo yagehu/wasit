@@ -1366,26 +1366,6 @@ struct PathString {
     nsegments:  usize,
 }
 
-impl PathString {
-    // fn declare<'ctx>(
-    //     &self,
-    //     ctx: &'ctx z3::Context,
-    //     state: &State<'ctx>,
-    // ) -> EncodedPathString<'ctx> {
-    //     let mut segments = Vec::with_capacity(self.nsegments);
-
-    //     for _i in 0..self.nsegments {
-    //         segments.push(z3::ast::Dynamic::fresh_const(
-    //             ctx,
-    //             &format!("segment--{}--", self.param_name),
-    //             &state.z3_segment_type.sort,
-    //         ));
-    //     }
-
-    //     EncodedPathString { segments }
-    // }
-}
-
 #[derive(Debug)]
 struct PathStringEncoding<'ctx> {
     segments: Vec<z3::ast::Dynamic<'ctx>>,
