@@ -127,9 +127,7 @@ mod tests {
             ctx: &ctx,
         };
         let strat: &mut dyn CallStrategy = &mut strat;
-        let cfg = z3::Config::new();
-        let ctx = z3::Context::new(&cfg);
-        let spec = Spec::preview1(&ctx).unwrap();
+        let spec = Spec::preview1().unwrap();
 
         assert!(strat.select_function(&spec).is_err());
     }

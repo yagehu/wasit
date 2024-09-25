@@ -46,6 +46,10 @@ impl State {
         self.preopens.push(idx, preopen);
     }
 
+    fn push_path(&mut self, param_name: String, path: PathString) {
+        self.paths.insert(param_name, path);
+    }
+
     fn push_resource(&mut self, idx: ResourceIdx, tdef: &TypeDef, value: WasiValue) {
         if tdef.name == "fd" {
             let node_idx = self.fds_graph.add_node(idx);
@@ -89,9 +93,11 @@ impl State {
 
     fn declare<'ctx>(
         &self,
+        spec: &Spec,
         ctx: &'ctx z3::Context,
         types: &StateTypes<'ctx>,
         env: &Environment,
+        function: &Function,
     ) -> StateDecls<'ctx> {
         let mut preopens = BTreeMap::default();
         let mut resources = BTreeMap::new();
@@ -127,15 +133,44 @@ impl State {
             children: z3::FuncDecl::new(
                 ctx,
                 "children",
-                &[
-                    &types.file.sort,
-                    &z3::Sort::string(ctx),
-                    &types.segment.sort,
-                ],
+                &[&types.file.sort, &z3::Sort::string(ctx), &types.file.sort],
                 &z3::Sort::bool(ctx),
             ),
             preopens,
             resources,
+            paths: self
+                .paths
+                .iter()
+                .map(|(param_name, path)| {
+                    (
+                        param_name.to_owned(),
+                        PathStringEncoding {
+                            segments: (0..path.nsegments)
+                                .map(|_i| {
+                                    z3::ast::Dynamic::fresh_const(
+                                        ctx,
+                                        "segment-",
+                                        &types.segment.sort,
+                                    )
+                                })
+                                .collect_vec(),
+                        },
+                    )
+                })
+                .collect(),
+            params: function
+                .params
+                .iter()
+                .map(|param| (&param.name, param.tref.resolve(spec)))
+                .filter_map(|(param_name, tdef)| {
+                    tdef.state.as_ref().map(|_state| param_name.clone())
+                })
+                .map(|name| {
+                    let datatype = types.resources.get(&name).unwrap();
+
+                    (name, z3::ast::Dynamic::fresh_const(ctx, "", &datatype.sort))
+                })
+                .collect(),
         }
     }
 
@@ -143,9 +178,10 @@ impl State {
         &self,
         ctx: &'ctx z3::Context,
         env: &Environment,
-        spec: &Spec,
         types: &'ctx StateTypes<'ctx>,
-        decls: &StateDecls<'ctx>,
+        decls: &'ctx StateDecls<'ctx>,
+        spec: &Spec,
+        function: &Function,
     ) -> z3::ast::Bool<'ctx> {
         let mut clauses = Vec::new();
         let fds_graph_rev = petgraph::visit::Reversed(&self.fds_graph);
@@ -163,7 +199,6 @@ impl State {
 
         while let Some(node_idx) = topo.next(fds_graph_rev) {
             let fd_resource_idx = *fds_graph_rev.node_weight(node_idx).unwrap();
-            let fd = decls.resources.get(&fd_resource_idx).unwrap();
             let dir = match dirs.get(&fd_resource_idx) {
                 | Some(&dir) => dir,
                 | None => continue,
@@ -249,26 +284,225 @@ impl State {
 
         // Constrain all the resource values.
         {
+            clauses.push(z3::ast::Bool::and(
+                ctx,
+                self.resources
+                    .iter()
+                    .map(|(idx, resource_value)| {
+                        let tdef = spec
+                            .types
+                            .get_by_key(env.resources_types.get(idx).unwrap())
+                            .unwrap();
+                        let resource_node = decls.resources.get(idx).unwrap();
+
+                        types.encode_wasi_value(ctx, spec, resource_node, tdef, resource_value)
+                    })
+                    .collect_vec()
+                    .as_slice(),
+            ));
+        }
+
+        // Children relation. Maps any file (directory) to its children.
+        {
+            let mut children = Vec::new();
+
+            for (&_idx, preopen) in &decls.preopens {
+                let mut stack = vec![&preopen.root];
+
+                while let Some(dir) = stack.pop() {
+                    for (name, child) in &dir.children {
+                        children.push((&dir.node, name, child.node()));
+
+                        match child {
+                            | FileEncoding::Directory(d) => stack.push(d),
+                            | FileEncoding::RegularFile(_f) => continue,
+                        }
+                    }
+                }
+            }
+
+            let some_dir = z3::ast::Dynamic::fresh_const(ctx, "", &types.file.sort);
+            let some_file = z3::ast::Dynamic::fresh_const(ctx, "", &types.file.sort);
+            let some_name = z3::ast::String::fresh_const(ctx, "");
+
             clauses.push(z3::ast::forall_const(
                 ctx,
+                &[&some_dir, &some_file, &some_name],
                 &[],
-                &[],
-                &z3::ast::Bool::and(
+                &z3::ast::Bool::or(
                     ctx,
-                    self.resources
-                        .iter()
-                        .map(|(idx, resource_value)| {
-                            let tdef = spec
-                                .types
-                                .get_by_key(env.resources_types.get(idx).unwrap())
-                                .unwrap();
-                            let resource_node = decls.resources.get(idx).unwrap();
-
-                            types.encode_wasi_value(ctx, spec, resource_node, tdef, resource_value)
+                    children
+                        .into_iter()
+                        .map(|(dir, name, file)| {
+                            z3::ast::Bool::and(
+                                ctx,
+                                &[
+                                    dir._eq(&some_dir),
+                                    z3::ast::String::from_str(ctx, name.as_str())
+                                        .unwrap()
+                                        ._eq(&some_name),
+                                    file._eq(&some_file),
+                                ],
+                            )
                         })
                         .collect_vec()
                         .as_slice(),
+                )
+                .ite(
+                    &decls
+                        .children
+                        .apply(&[&some_dir, &some_name, &some_file])
+                        .as_bool()
+                        .unwrap(),
+                    &decls
+                        .children
+                        .apply(&[&some_dir, &some_name, &some_file])
+                        .as_bool()
+                        .unwrap()
+                        .not(),
                 ),
+            ));
+        }
+
+        // Path segment components cannot be empty.
+        clauses.push(z3::ast::Bool::and(
+            ctx,
+            &decls
+                .paths
+                .iter()
+                .map(|(_param_name, path_string)| {
+                    path_string
+                        .segments
+                        .iter()
+                        .map(|segment| {
+                            z3::ast::Bool::and(
+                                ctx,
+                                &[types.segment.variants[1]
+                                    .tester
+                                    .apply(&[segment])
+                                    .as_bool()
+                                    .unwrap()],
+                            )
+                            .implies(&unsafe {
+                                z3::ast::Int::wrap(
+                                    ctx,
+                                    z3_sys::Z3_mk_seq_length(
+                                        ctx.get_z3_context(),
+                                        types.segment.variants[1].accessors[0]
+                                            .apply(&[segment])
+                                            .as_string()
+                                            .unwrap()
+                                            .get_z3_ast(),
+                                    ),
+                                )
+                                ._eq(&z3::ast::Int::from_u64(ctx, 0))
+                                .not()
+                            })
+                        })
+                        .collect_vec()
+                })
+                .flatten()
+                .collect_vec(),
+        ));
+
+        // Adjacent segments can't both be components.
+        clauses.push(z3::ast::Bool::and(
+            ctx,
+            &decls
+                .paths
+                .iter()
+                .map(|(_param_name, path)| {
+                    let mut subclauses = Vec::new();
+
+                    for (i, segment) in path.segments.iter().enumerate() {
+                        if i > 0 {
+                            subclauses.push(
+                                types.segment.variants[1]
+                                    .tester
+                                    .apply(&[segment])
+                                    .as_bool()
+                                    .unwrap()
+                                    .implies(
+                                        &types.segment.variants[1]
+                                            .tester
+                                            .apply(&[path.segments.get(i - 1).unwrap()])
+                                            .as_bool()
+                                            .unwrap()
+                                            .not(),
+                                    ),
+                            );
+                        }
+                    }
+
+                    subclauses
+                })
+                .flatten()
+                .collect_vec(),
+        ));
+
+        // The first segment must be a component.
+        clauses.push(z3::ast::Bool::and(
+            ctx,
+            &decls
+                .paths
+                .iter()
+                .map(|(_param_name, path)| {
+                    types.segment.variants[1]
+                        .tester
+                        .apply(&[path.segments.get(0).unwrap()])
+                        .as_bool()
+                        .unwrap()
+                })
+                .collect_vec(),
+        ));
+
+        // Components cannot contain slash "/".
+        clauses.push(z3::ast::Bool::and(
+            ctx,
+            decls
+                .paths
+                .iter()
+                .flat_map(|(_param_name, path)| &path.segments)
+                .map(|segment| {
+                    types.segment.variants[1]
+                        .tester
+                        .apply(&[segment])
+                        .as_bool()
+                        .unwrap()
+                        .implies(
+                            &types.segment.variants[1].accessors[0]
+                                .apply(&[segment])
+                                .as_string()
+                                .unwrap()
+                                .contains(&z3::ast::String::from_str(ctx, "/").unwrap())
+                                .not(),
+                        )
+                })
+                .collect_vec()
+                .as_slice(),
+        ));
+
+        // Constrain param resources.
+        for (param_name, param_node) in decls.params.iter() {
+            let param = function
+                .params
+                .iter()
+                .find(|param| &param.name == param_name)
+                .unwrap();
+            let param_tdef = param.tref.resolve(spec);
+            let resource_idxs = env.resources_by_types.get(&param_tdef.name).unwrap();
+
+            clauses.push(z3::ast::Bool::or(
+                ctx,
+                resource_idxs
+                    .iter()
+                    .map(|&idx| {
+                        let resource_node = decls.resources.get(&idx).unwrap();
+
+                        param_node._eq(resource_node)
+                    })
+                    .collect_vec()
+                    .as_slice(),
             ));
         }
 
@@ -363,7 +597,6 @@ impl State {
                     .iter()
                     .enumerate()
                     .map(|(i, member)| {
-                        println!("{:#?}", node);
                         self.decode_to_wasi_value(
                             spec,
                             types,
@@ -384,7 +617,7 @@ impl State {
                     .as_bytes()
                     .to_vec(),
             ),
-            | WasiType::List(list_type) => todo!(),
+            | WasiType::List(_list_type) => todo!(),
         }
     }
 }
@@ -672,8 +905,8 @@ impl<'ctx> StateTypes<'ctx> {
                         .unwrap(),
                 }
             },
-            | (_, WasiValue::Variant(variant_value)) => unreachable!(),
-            | (_, WasiValue::List(list_value)) => unreachable!(),
+            | (_, WasiValue::Variant(_variant_value)) => unreachable!(),
+            | (_, WasiValue::List(_list_value)) => unreachable!(),
         }
     }
 }
@@ -684,9 +917,8 @@ struct StateDecls<'ctx> {
     children:  z3::FuncDecl<'ctx>,
     preopens:  BTreeMap<ResourceIdx, PreopenFsEncoding<'ctx>>,
     resources: BTreeMap<ResourceIdx, z3::ast::Dynamic<'ctx>>,
-}
-
-impl<'ctx> StateDecls<'ctx> {
+    paths:     BTreeMap<String, PathStringEncoding<'ctx>>,
+    params:    BTreeMap<String, z3::ast::Dynamic<'ctx>>,
 }
 
 // #[derive(Debug)]
@@ -825,7 +1057,63 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_, '_> {
         &mut self,
         spec: &'spec Spec,
     ) -> Result<&'spec Function, eyre::Error> {
-        todo!()
+        let interface = spec
+            .interfaces
+            .get_by_key("wasi_snapshot_preview1")
+            .unwrap();
+        let mut candidates = Vec::new();
+
+        for (_name, function) in &interface.functions {
+            let mut state = State::new();
+
+            for (&idx, path) in &self.ctx.preopens {
+                state.push_preopen(idx, path);
+            }
+
+            for param in &function.params {
+                let tdef = param.tref.resolve(spec);
+
+                if tdef.name == "path" {
+                    state.push_path(
+                        param.name.clone(),
+                        PathString {
+                            param_name: param.name.clone(),
+                            nsegments:  self.u.choose_index(8).unwrap() + 1,
+                        },
+                    );
+                }
+            }
+
+            for (resource_type, resources) in &self.env.resources_by_types {
+                for &idx in resources {
+                    state.push_resource(
+                        idx,
+                        spec.types.get_by_key(resource_type).unwrap(),
+                        self.env.resources.get(idx).unwrap().state.clone(),
+                    );
+                }
+            }
+
+            let types = StateTypes::new(self.z3_ctx, spec);
+            let decls = state.declare(spec, self.z3_ctx, &types, &self.env, function);
+            let solver = z3::Solver::new(self.z3_ctx);
+
+            solver.assert(&state.encode(self.z3_ctx, &self.env, &types, &decls, spec, function));
+
+            match solver.check() {
+                | z3::SatResult::Sat => (),
+                | _ => continue,
+            };
+
+            candidates.push(function);
+        }
+
+        let function = *self
+            .u
+            .choose(&candidates)
+            .wrap_err("failed to choose a function")?;
+
+        Ok(function)
     }
 
     fn prepare_arguments(
@@ -833,503 +1121,80 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_, '_> {
         spec: &Spec,
         function: &Function,
     ) -> Result<Vec<(WasiValue, Option<ResourceIdx>)>, eyre::Error> {
-        todo!()
+        let mut state = State::new();
+
+        for (&idx, path) in &self.ctx.preopens {
+            state.push_preopen(idx, path);
+        }
+
+        for param in &function.params {
+            let tdef = param.tref.resolve(spec);
+
+            if tdef.name == "path" {
+                state.push_path(
+                    param.name.clone(),
+                    PathString {
+                        param_name: param.name.clone(),
+                        nsegments:  self.u.choose_index(8).unwrap() + 1,
+                    },
+                );
+            }
+        }
+
+        for (resource_type, resources) in &self.env.resources_by_types {
+            for &idx in resources {
+                state.push_resource(
+                    idx,
+                    spec.types.get_by_key(resource_type).unwrap(),
+                    self.env.resources.get(idx).unwrap().state.clone(),
+                );
+            }
+        }
+
+        let types = StateTypes::new(self.z3_ctx, spec);
+        let decls = state.declare(spec, self.z3_ctx, &types, &self.env, function);
+        let solver = z3::Solver::new(self.z3_ctx);
+
+        solver.assert(&state.encode(self.z3_ctx, &self.env, &types, &decls, spec, function));
+
+        assert_eq!(solver.check(), z3::SatResult::Sat);
+
+        let model = solver.get_model().unwrap();
+        let mut params = Vec::with_capacity(function.params.len());
+
+        for param in function.params.iter() {
+            match decls.params.get(&param.name) {
+                | Some(param_node) => {
+                    let tdef = param.tref.resolve(spec);
+                    let param_node_value = model.eval(param_node, true).unwrap().simplify();
+                    let wasi_value =
+                        state.decode_to_wasi_value(spec, &types, &tdef, &param_node_value);
+                    let resource_idx = *self
+                        .env
+                        .reverse_resource_index
+                        .get(&tdef.name)
+                        .unwrap()
+                        .get(&wasi_value)
+                        .unwrap();
+                    let value = self.ctx.resources.get(&resource_idx).unwrap();
+
+                    params.push((value.to_owned(), Some(resource_idx)));
+                },
+                | None => params.push((
+                    param
+                        .tref
+                        .resolve(spec)
+                        .wasi
+                        .arbitrary_value(spec, self.u)
+                        .unwrap(),
+                    None,
+                )),
+            }
+        }
+
+        Ok(params)
     }
 }
-
-// #[derive(Debug)]
-// struct State<'ctx> {
-//     z3_file_type:    z3::DatatypeSort<'ctx>,
-//     z3_segment_type: z3::DatatypeSort<'ctx>,
-
-//     resource_types: IndexSpace<String, z3::DatatypeSort<'ctx>>,
-//     preopens:       IndexSpace<ResourceIdx, PreopenFs>,
-//     paths:          BTreeMap<String, PathString>,
-//     fds:            BTreeMap<ResourceIdx, (ResourceIdx, PathBuf)>,
-// }
-
-// impl<'ctx> State<'ctx> {
-//     pub fn new(ctx: &'ctx z3::Context, spec: &Spec) -> Self {
-//         fn encode_type<'ctx>(
-//             ctx: &'ctx z3::Context,
-//             spec: &Spec,
-//             name: &str,
-//             tdef: &TypeDef,
-//             resource_types: &mut IndexSpace<String, z3::DatatypeSort<'ctx>>,
-//         ) {
-//             if resource_types.get_by_key(name).is_some() {
-//                 return;
-//             }
-
-//             let wasi_type = match &tdef.state {
-//                 | Some(state) => state,
-//                 | None => &tdef.wasi,
-//             };
-//             let mut datatype = z3::DatatypeBuilder::new(ctx, name);
-
-//             datatype = match wasi_type {
-//                 | WasiType::S64
-//                 | WasiType::U8
-//                 | WasiType::U16
-//                 | WasiType::U32
-//                 | WasiType::U64
-//                 | WasiType::Handle => datatype.variant(
-//                     name,
-//                     vec![(name, z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))],
-//                 ),
-//                 | WasiType::Flags(flags_type) => datatype.variant(
-//                     name,
-//                     flags_type
-//                         .fields
-//                         .iter()
-//                         .map(|field| {
-//                             (
-//                                 field.as_str(),
-//                                 z3::DatatypeAccessor::Sort(z3::Sort::bool(ctx)),
-//                             )
-//                         })
-//                         .collect_vec(),
-//                 ),
-//                 | WasiType::Variant(variant_type) => {
-//                     for case in &variant_type.cases {
-//                         let fields = match &case.payload {
-//                             | Some(payload) => {
-//                                 let payload_tdef = payload.resolve(spec);
-
-//                                 encode_type(
-//                                     ctx,
-//                                     spec,
-//                                     &payload_tdef.name,
-//                                     payload_tdef,
-//                                     resource_types,
-//                                 );
-
-//                                 vec![(
-//                                     "payload",
-//                                     z3::DatatypeAccessor::Sort(
-//                                         resource_types
-//                                             .get_by_key(&payload_tdef.name)
-//                                             .unwrap()
-//                                             .sort
-//                                             .clone(),
-//                                     ),
-//                                 )]
-//                             },
-//                             | None => vec![],
-//                         };
-
-//                         datatype = datatype.variant(&case.name, fields);
-//                     }
-
-//                     datatype
-//                 },
-//                 | WasiType::Record(record_type) => datatype.variant(
-//                     name,
-//                     record_type
-//                         .members
-//                         .iter()
-//                         .map(|member| {
-//                             let member_tdef = member.tref.resolve(spec);
-
-//                             encode_type(
-//                                 ctx,
-//                                 spec,
-//                                 &member_tdef.name,
-//                                 member.tref.resolve(spec),
-//                                 resource_types,
-//                             );
-
-//                             let member_datatype = resource_types
-//                                 .get_by_key(&member.tref.resolve(spec).name)
-//                                 .unwrap();
-//                             (
-//                                 member.name.as_str(),
-//                                 z3::DatatypeAccessor::Sort(member_datatype.sort.clone()),
-//                             )
-//                         })
-//                         .collect_vec(),
-//                 ),
-//                 | WasiType::String => datatype.variant(
-//                     name,
-//                     vec![(name, z3::DatatypeAccessor::Sort(z3::Sort::string(ctx)))],
-//                 ),
-//                 | WasiType::List(list_type) => {
-//                     let tdef = list_type.item.resolve(spec);
-
-//                     encode_type(ctx, spec, &tdef.name, tdef, resource_types);
-//                     datatype.variant(
-//                         name,
-//                         vec![(
-//                             name,
-//                             z3::DatatypeAccessor::Sort(z3::Sort::array(
-//                                 ctx,
-//                                 &z3::Sort::int(ctx),
-//                                 &resource_types.get_by_key(&tdef.name).unwrap().sort,
-//                             )),
-//                         )],
-//                     )
-//                 },
-//             };
-
-//             resource_types.push(tdef.name.clone(), datatype.finish());
-//         }
-
-//         let mut resource_types: IndexSpace<String, z3::DatatypeSort> = Default::default();
-
-//         for (name, tdef) in spec.types.iter() {
-//             encode_type(ctx, spec, name, tdef, &mut resource_types);
-//         }
-
-//         Self {
-//             z3_file_type: z3::DatatypeBuilder::new(ctx, "file")
-//                 .variant("directory", vec![])
-//                 .variant("regular-file", vec![])
-//                 .finish(),
-//             z3_segment_type: z3::DatatypeBuilder::new(ctx, "segment")
-//                 .variant("separator", vec![])
-//                 .variant(
-//                     "component",
-//                     vec![("string", z3::DatatypeAccessor::Sort(z3::Sort::string(ctx)))],
-//                 )
-//                 .finish(),
-//             resource_types,
-//             preopens: Default::default(),
-//             paths: Default::default(),
-//             fds: Default::default(),
-//         }
-//     }
-
-//     pub fn push_dir(&mut self, resource_idx: ResourceIdx, path: &Path) -> Result<(), eyre::Error> {
-//         let dir = PreopenFs::new(path)?;
-
-//         self.preopens.push(resource_idx, dir);
-
-//         Ok(())
-//     }
-
-//     pub fn push_path(&mut self, param_name: String, path_string: PathString) {
-//         self.paths.insert(param_name, path_string);
-//     }
-
-//     pub fn declare(&'ctx self, ctx: &'ctx z3::Context) -> StateDecl<'ctx, '_> {
-//         let mut preopens: IndexSpace<ResourceIdx, EncodedPreopenFs> = Default::default();
-//         let mut children: Vec<_> = Default::default();
-//         let mut files: Vec<_> = Default::default();
-//         let mut paths: BTreeMap<_, _> = Default::default();
-//         let children_relation = ChildrenRelation(z3::FuncDecl::new(
-//             ctx,
-//             "children",
-//             &[
-//                 &self.z3_file_type.sort,
-//                 &z3::Sort::string(ctx),
-//                 &self.z3_file_type.sort,
-//             ],
-//             &z3::Sort::bool(ctx),
-//         ));
-
-//         for (&resource_idx, preopen) in self.preopens.iter() {
-//             let mut scope = PreopenFsEncodingScope::new(ctx, self, resource_idx);
-//             let dir = preopen.root.encode(ctx, self, &mut scope);
-
-//             preopens.push(resource_idx, EncodedPreopenFs { root: dir });
-//             children.extend(scope.children);
-//             files.extend(scope.files);
-//         }
-
-//         for (param_name, path_string) in &self.paths {
-//             paths.insert(param_name.to_owned(), path_string.declare(ctx, self));
-//         }
-
-//         let fd = self.resource_types.get_by_key("fd").unwrap();
-
-//         StateDecl {
-//             state: self,
-//             preopens,
-//             files,
-//             children,
-//             children_relation,
-//             paths,
-//             fd_file: z3::FuncDecl::new(
-//                 ctx,
-//                 "fd-file",
-//                 &[&fd.sort, &self.z3_file_type.sort],
-//                 &z3::Sort::bool(ctx),
-//             ),
-//         }
-//     }
-// }
-
-// #[derive(Debug)]
-// struct StateDecl<'ctx, 'state> {
-//     state:             &'state State<'ctx>,
-//     preopens:          IndexSpace<ResourceIdx, EncodedPreopenFs<'ctx>>,
-//     files:             Vec<EncodedFile<'ctx>>,
-//     children:          Vec<(EncodedDirectory<'ctx>, String, EncodedFile<'ctx>)>,
-//     children_relation: ChildrenRelation<'ctx>,
-//     paths:             BTreeMap<String, EncodedPathString<'ctx>>,
-//     fd_file:           z3::FuncDecl<'ctx>,
-// }
-
-// impl<'ctx> StateDecl<'ctx, '_> {
-//     fn encode(&'ctx self, ctx: &'ctx z3::Context) -> StateEncoding<'ctx> {
-//         let mut clauses: Vec<z3::ast::Bool> = Default::default();
-//         let any_dir = z3::ast::Dynamic::fresh_const(ctx, "", &self.state.z3_file_type.sort);
-//         let any_file = z3::ast::Dynamic::fresh_const(ctx, "", &self.state.z3_file_type.sort);
-//         let some_name = z3::ast::String::fresh_const(ctx, "");
-
-//         // Children relation.
-//         clauses.push(z3::ast::forall_const(
-//             ctx,
-//             &[&any_dir, &any_file, &some_name],
-//             &[],
-//             &z3::ast::Bool::or(
-//                 ctx,
-//                 self.children
-//                     .iter()
-//                     .map(|(dir, name, file)| {
-//                         z3::ast::Bool::and(
-//                             ctx,
-//                             &[
-//                                 &dir.node._eq(&any_dir),
-//                                 &file.node()._eq(&any_file),
-//                                 &some_name._eq(&z3::ast::String::from_str(ctx, name).unwrap()),
-//                             ],
-//                         )
-//                     })
-//                     .collect_vec()
-//                     .as_slice(),
-//             )
-//             .ite(
-//                 &self
-//                     .children_relation
-//                     .has_child(ctx, &any_dir, &some_name, &any_file),
-//                 &self
-//                     .children_relation
-//                     .has_child(ctx, &any_dir, &some_name, &any_file)
-//                     .not(),
-//             ),
-//         ));
-
-//         // File type.
-//         self.files
-//             .iter()
-//             .map(|file| match file {
-//                 | EncodedFile::Directory(d) => {
-//                     clauses.push(
-//                         self.state.z3_file_type.variants[0]
-//                             .tester
-//                             .apply(&[d.node()])
-//                             .as_bool()
-//                             .unwrap(),
-//                     );
-//                 },
-//                 | EncodedFile::RegularFile(f) => {
-//                     clauses.push(
-//                         self.state.z3_file_type.variants[1]
-//                             .tester
-//                             .apply(&[f.node()])
-//                             .as_bool()
-//                             .unwrap(),
-//                     );
-//                 },
-//             })
-//             .collect_vec();
-
-//         // Path segment components cannot be the empty string.
-//         clauses.push(z3::ast::Bool::and(
-//             ctx,
-//             &self
-//                 .paths
-//                 .iter()
-//                 .map(|(_param_name, path_string)| {
-//                     path_string
-//                         .segments
-//                         .iter()
-//                         .map(|segment| {
-//                             z3::ast::Bool::and(
-//                                 ctx,
-//                                 &[self.state.z3_segment_type.variants[1]
-//                                     .tester
-//                                     .apply(&[&segment.node])
-//                                     .as_bool()
-//                                     .unwrap()],
-//                             )
-//                             .implies(&unsafe {
-//                                 z3::ast::Int::wrap(
-//                                     ctx,
-//                                     z3_sys::Z3_mk_seq_length(
-//                                         ctx.get_z3_context(),
-//                                         self.state.z3_segment_type.variants[1].accessors[0]
-//                                             .apply(&[&segment.node])
-//                                             .as_string()
-//                                             .unwrap()
-//                                             .get_z3_ast(),
-//                                     ),
-//                                 )
-//                                 ._eq(&z3::ast::Int::from_u64(ctx, 0))
-//                                 .not()
-//                             })
-//                         })
-//                         .collect_vec()
-//                 })
-//                 .flatten()
-//                 .collect_vec(),
-//         ));
-
-//         // The first segment must be a component.
-//         clauses.push(z3::ast::Bool::and(
-//             ctx,
-//             &self
-//                 .paths
-//                 .iter()
-//                 .map(|(_param_name, path)| {
-//                     self.state.z3_segment_type.variants[1]
-//                         .tester
-//                         .apply(&[&path.segments[0].node])
-//                         .as_bool()
-//                         .unwrap()
-//                 })
-//                 .collect_vec(),
-//         ));
-
-//         // Adjacent segments can't both be components.
-//         clauses.push(z3::ast::Bool::and(
-//             ctx,
-//             &self
-//                 .paths
-//                 .iter()
-//                 .map(|(_param_name, path)| {
-//                     let mut subclauses = Vec::new();
-
-//                     for (i, segment) in path.segments.iter().enumerate() {
-//                         if i > 0 {
-//                             subclauses.push(
-//                                 self.state.z3_segment_type.variants[1]
-//                                     .tester
-//                                     .apply(&[&segment.node])
-//                                     .as_bool()
-//                                     .unwrap()
-//                                     .implies(
-//                                         &self.state.z3_segment_type.variants[1]
-//                                             .tester
-//                                             .apply(&[&path.segments.get(i - 1).unwrap().node])
-//                                             .as_bool()
-//                                             .unwrap()
-//                                             .not(),
-//                                     ),
-//                             );
-//                         }
-//                     }
-
-//                     subclauses
-//                 })
-//                 .flatten()
-//                 .collect_vec(),
-//         ));
-
-//         // Components cannot contain slash "/".
-//         clauses.push(z3::ast::Bool::and(
-//             ctx,
-//             self.paths
-//                 .iter()
-//                 .flat_map(|(_param_name, path)| &path.segments)
-//                 .map(|segment| {
-//                     self.state.z3_segment_type.variants[1]
-//                         .tester
-//                         .apply(&[&segment.node])
-//                         .as_bool()
-//                         .unwrap()
-//                         .implies(
-//                             &self.state.z3_segment_type.variants[1].accessors[0]
-//                                 .apply(&[&segment.node])
-//                                 .as_string()
-//                                 .unwrap()
-//                                 .contains(&z3::ast::String::from_str(ctx, "/").unwrap())
-//                                 .not(),
-//                         )
-//                 })
-//                 .collect_vec()
-//                 .as_slice(),
-//         ));
-
-//         let fd = self.state.resource_types.get_by_key("fd").unwrap();
-//         let some_fd = z3::ast::Dynamic::fresh_const(ctx, "", &fd.sort);
-//         let some_file = z3::ast::Dynamic::fresh_const(ctx, "", &self.state.z3_file_type.sort);
-
-//         for (&resource_idx, &(parent_idx, ref path)) in &self.state.fds {
-//             let mut curr = parent_idx;
-//             let mut paths = Vec::new();
-
-//             loop {
-//                 let &(next_idx, ref path) = self.state.fds.get(&curr).unwrap();
-
-//                 if next_idx == curr {
-//                     break;
-//                 }
-
-//                 paths.push(path);
-//             }
-
-//             // curr is now a preopen
-
-//             let preopen = self.state.preopens.get_by_key(&curr).unwrap();
-//             let mut curr_file = File::Directory(preopen.root.clone());
-
-//             while let Some(path) = paths.pop() {
-//                 let mut curr = &curr_file;
-
-//                 for component in path.components() {
-//                     let component = component.as_os_str().to_os_string();
-
-//                     match curr {
-//                         | File::Directory(directory) => {
-//                             let (name, file) = directory
-//                                 .children
-//                                 .iter()
-//                                 .find(|(name, file)| name == &component)
-//                                 .unwrap();
-
-//                             curr = file;
-//                         },
-//                         | File::RegularFile(regular_file) => panic!("dir expected"),
-//                     }
-//                 }
-
-//                 curr_file = curr.to_owned();
-//             }
-//         }
-
-//         clauses.push(z3::ast::forall_const(
-//             ctx,
-//             &[&some_fd, &some_file],
-//             &[],
-//             &z3::ast::Bool::or(
-//                 ctx,
-//                 self.state
-//                     .fds
-//                     .iter()
-//                     .map(|(resource_idx, (parent_resource_idx, path))| todo!())
-//                     .collect_vec()
-//                     .as_slice(),
-//             )
-//             .ite(
-//                 &self
-//                     .fd_file
-//                     .apply(&[&some_fd, &some_file])
-//                     .as_bool()
-//                     .unwrap(),
-//                 &self
-//                     .fd_file
-//                     .apply(&[&some_fd, &some_file])
-//                     .as_bool()
-//                     .unwrap()
-//                     .not(),
-//             ),
-//         ));
-
-//         StateEncoding { clauses }
-//     }
-// }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 struct PreopenFs {
@@ -1390,6 +1255,15 @@ impl File {
 enum FileEncoding<'ctx> {
     Directory(DirectoryEncoding<'ctx>),
     RegularFile(RegularFileEncoding<'ctx>),
+}
+
+impl<'ctx> FileEncoding<'ctx> {
+    fn node(&self) -> &z3::ast::Dynamic {
+        match self {
+            | FileEncoding::Directory(d) => &d.node,
+            | FileEncoding::RegularFile(f) => &f.node,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -1513,28 +1387,25 @@ impl PathString {
 }
 
 #[derive(Debug)]
-struct EncodedPathString<'ctx> {
+struct PathStringEncoding<'ctx> {
     segments: Vec<z3::ast::Dynamic<'ctx>>,
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashSet, path};
+    use std::collections::HashSet;
 
     use tempfile::tempdir;
 
     use super::*;
-    use crate::{
-        resource::{self, Resource, Resources},
-        spec::RecordValue,
-    };
+    use crate::{resource::Resource, spec::RecordValue};
 
     #[test]
     fn ok() {
         let cfg = z3::Config::new();
         let ctx = z3::Context::new(&cfg);
         let solver = z3::Solver::new(&ctx);
-        let spec = Spec::preview1(&ctx).unwrap();
+        let spec = Spec::preview1().unwrap();
         let tempdir = tempdir().unwrap();
         let mut env = Environment::new();
 
@@ -1602,19 +1473,25 @@ mod tests {
             spec.types.get_by_key("fd").unwrap(),
             env.resources.get(file_resource_idx).unwrap().state.clone(),
         );
+        state.push_path(
+            "path".to_string(),
+            PathString {
+                param_name: "path".to_owned(),
+                nsegments:  3,
+            },
+        );
 
-        let decls = state.declare(&ctx, &types, &env);
-        let clause = state.encode(&ctx, &env, &spec, &types, &decls);
+        let function = spec
+            .interfaces
+            .get_by_key("wasi_snapshot_preview1")
+            .unwrap()
+            .functions
+            .get("path_open")
+            .unwrap();
+        let decls = state.declare(&spec, &ctx, &types, &env, function);
+        let clause = state.encode(&ctx, &env, &types, &decls, &spec, function);
 
         solver.assert(&clause);
-
-        // state.push_path(
-        //     "path".to_string(),
-        //     PathString {
-        //         param_name: "path".to_owned(),
-        //         nsegments:  3,
-        //     },
-        // );
 
         assert_eq!(solver.check(), z3::SatResult::Sat);
 
@@ -1674,88 +1551,5 @@ mod tests {
 
             solver.pop(1);
         }
-
-        // assert!(model
-        //     .eval(
-        //         &z3::ast::exists_const(
-        //             &ctx,
-        //             &[&some_file],
-        //             &[],
-        //             &state_decl.children_relation.has_child(
-        //                 &ctx,
-        //                 encoded_preopen_fs.root.node(),
-        //                 &z3::ast::String::from_str(&ctx, "file").unwrap(),
-        //                 &some_file,
-        //             ),
-        //         ),
-        //         true,
-        //     )
-        //     .unwrap()
-        //     .simplify()
-        //     .as_bool()
-        //     .unwrap());
-        // assert!(!model
-        //     .eval(
-        //         &z3::ast::exists_const(
-        //             &ctx,
-        //             &[&some_file],
-        //             &[],
-        //             &state_decl.children_relation.has_child(
-        //                 &ctx,
-        //                 encoded_preopen_fs.root.node(),
-        //                 &z3::ast::String::from_str(&ctx, "nonexistant").unwrap(),
-        //                 &some_file,
-        //             ),
-        //         ),
-        //         true,
-        //     )
-        //     .unwrap()
-        //     .simplify()
-        //     .as_bool()
-        //     .unwrap());
-        // let path = state_decl.paths.get("path").unwrap();
-
-        // // The second path segment cannot be a component because the first segment
-        // // is always a component.
-        // solver.push();
-        // solver.assert(
-        //     &state.z3_segment_type.variants[1]
-        //         .tester
-        //         .apply(&[&path.segments[1].node])
-        //         .as_bool()
-        //         .unwrap(),
-        // );
-        // assert_eq!(solver.check(), z3::SatResult::Unsat);
-        // solver.pop(1);
-
-        // // Components cannot contain "/".
-        // solver.push();
-        // solver.assert(&z3::ast::Bool::and(
-        //     &ctx,
-        //     state_decl
-        //         .paths
-        //         .iter()
-        //         .flat_map(|(_param_name, path)| &path.segments)
-        //         .map(|segment| {
-        //             state.z3_segment_type.variants[1]
-        //                 .tester
-        //                 .apply(&[&segment.node])
-        //                 .as_bool()
-        //                 .unwrap()
-        //                 .implies(
-        //                     &state.z3_segment_type.variants[1].accessors[0]
-        //                         .apply(&[&segment.node])
-        //                         .as_string()
-        //                         .unwrap()
-        //                         .contains(&z3::ast::String::from_str(&ctx, "/").unwrap()),
-        //                 )
-        //         })
-        //         .collect_vec()
-        //         .as_slice(),
-        // ));
-        // assert_eq!(solver.check(), z3::SatResult::Unsat);
-        // solver.pop(1);
-
-        // panic!()
     }
 }

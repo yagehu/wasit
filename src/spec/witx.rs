@@ -30,10 +30,10 @@ use super::{
 #[grammar = "spec/witx.pest"]
 struct Parser;
 
-pub(super) fn preview1<'ctx>(ctx: &'ctx z3::Context) -> Result<Spec<'ctx>, eyre::Error> {
+pub(super) fn preview1() -> Result<Spec, eyre::Error> {
     const DOC: &str = include_str!("preview1.witx");
 
-    let mut spec = Spec::new(ctx);
+    let mut spec = Spec::new();
     let doc = Parser::parse(Rule::document, DOC)
         .wrap_err("failed to parse document")?
         .next()
@@ -93,7 +93,7 @@ pub(super) fn preview1<'ctx>(ctx: &'ctx z3::Context) -> Result<Spec<'ctx>, eyre:
                                     }
                                 }
 
-                                spec.insert_type_def(ctx, name.to_string(), wasi, state);
+                                spec.insert_type_def(name.to_string(), wasi, state);
                             },
                             | _ => unreachable!(),
                         }
@@ -120,10 +120,7 @@ pub(super) fn preview1<'ctx>(ctx: &'ctx z3::Context) -> Result<Spec<'ctx>, eyre:
     Ok(spec)
 }
 
-fn preview1_module<'ctx>(
-    spec: &Spec<'ctx>,
-    pairs: Pairs<'_, Rule>,
-) -> Result<Interface, eyre::Error> {
+fn preview1_module(spec: &Spec, pairs: Pairs<'_, Rule>) -> Result<Interface, eyre::Error> {
     let mut interface = Interface::new();
 
     for pair in pairs {
@@ -244,10 +241,7 @@ fn preview1_module<'ctx>(
     Ok(interface)
 }
 
-fn preview1_wasi_type<'ctx>(
-    spec: &Spec<'ctx>,
-    pair: Pair<'_, Rule>,
-) -> Result<WasiType, eyre::Error> {
+fn preview1_wasi_type(spec: &Spec, pair: Pair<'_, Rule>) -> Result<WasiType, eyre::Error> {
     let pair = pair.into_inner().next().unwrap();
 
     Ok(match pair.as_rule() {
@@ -419,7 +413,7 @@ fn preview1_wasi_type<'ctx>(
     })
 }
 
-fn preview1_tref<'ctx>(spec: &Spec<'ctx>, pair: Pair<'_, Rule>) -> Result<TypeRef, eyre::Error> {
+fn preview1_tref(spec: &Spec, pair: Pair<'_, Rule>) -> Result<TypeRef, eyre::Error> {
     match pair.as_rule() {
         | Rule::id => {
             let id = pair.as_str().strip_prefix('$').unwrap();
@@ -458,7 +452,6 @@ mod tests {
     #[test]
     fn ok() {
         let cfg = z3::Config::new();
-        let ctx = z3::Context::new(&cfg);
-        let _spec = preview1(&ctx).unwrap();
+        let _spec = preview1().unwrap();
     }
 }

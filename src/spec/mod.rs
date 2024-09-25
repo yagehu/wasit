@@ -8,69 +8,45 @@ use serde::{Deserialize, Serialize};
 use witx::{ilang, olang};
 
 #[derive(Debug)]
-pub struct Spec<'ctx> {
-    pub(crate) types:      IndexSpace<String, TypeDef<'ctx>>,
+pub struct Spec {
+    pub(crate) types:      IndexSpace<String, TypeDef>,
     pub(crate) interfaces: IndexSpace<String, Interface>,
 }
 
-impl<'ctx> Spec<'ctx> {
-    fn new(ctx: &'ctx z3::Context) -> Self {
+impl Spec {
+    fn new() -> Self {
         let mut types: IndexSpace<String, TypeDef> = Default::default();
 
         types.push(
             "s64".to_string(),
             TypeDef {
-                name:     "s64".to_string(),
-                wasi:     WasiType::S64,
-                state:    None,
-                datatype: z3::DatatypeBuilder::new(ctx, "s64")
-                    .variant(
-                        "s64",
-                        vec![("s64", z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))],
-                    )
-                    .finish(),
+                name:  "s64".to_string(),
+                wasi:  WasiType::S64,
+                state: None,
             },
         );
         types.push(
             "u8".to_string(),
             TypeDef {
-                name:     "u8".to_string(),
-                wasi:     WasiType::U8,
-                state:    None,
-                datatype: z3::DatatypeBuilder::new(ctx, "u8")
-                    .variant(
-                        "u8",
-                        vec![("u8", z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))],
-                    )
-                    .finish(),
+                name:  "u8".to_string(),
+                wasi:  WasiType::U8,
+                state: None,
             },
         );
         types.push(
             "u32".to_string(),
             TypeDef {
-                name:     "u32".to_string(),
-                wasi:     WasiType::U32,
-                state:    None,
-                datatype: z3::DatatypeBuilder::new(ctx, "u32")
-                    .variant(
-                        "u32",
-                        vec![("u32", z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))],
-                    )
-                    .finish(),
+                name:  "u32".to_string(),
+                wasi:  WasiType::U32,
+                state: None,
             },
         );
         types.push(
             "u64".to_string(),
             TypeDef {
-                name:     "u64".to_string(),
-                wasi:     WasiType::U64,
-                state:    None,
-                datatype: z3::DatatypeBuilder::new(ctx, "u64")
-                    .variant(
-                        "u64",
-                        vec![("u64", z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))],
-                    )
-                    .finish(),
+                name:  "u64".to_string(),
+                wasi:  WasiType::U64,
+                state: None,
             },
         );
 
@@ -80,126 +56,12 @@ impl<'ctx> Spec<'ctx> {
         }
     }
 
-    pub fn preview1(ctx: &'ctx z3::Context) -> Result<Self, eyre::Error> {
-        witx::preview1(ctx)
+    pub fn preview1() -> Result<Self, eyre::Error> {
+        witx::preview1()
     }
 
-    fn insert_type_def(
-        &mut self,
-        ctx: &'ctx z3::Context,
-        name: String,
-        wasi: WasiType,
-        state: Option<WasiType>,
-    ) {
-        fn build_z3_datatype<'ctx>(
-            ctx: &'ctx z3::Context,
-            spec: &Spec<'ctx>,
-            datatype_builder: z3::DatatypeBuilder<'ctx>,
-            wasi: &WasiType,
-        ) -> z3::DatatypeBuilder<'ctx> {
-            let mut datatype_builder = datatype_builder;
-
-            match &wasi {
-                | WasiType::S64 => datatype_builder.variant(
-                    "s64",
-                    vec![("s64", z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))],
-                ),
-                | WasiType::U8 => datatype_builder.variant(
-                    "u8",
-                    vec![("u8", z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))],
-                ),
-                | WasiType::U16 => datatype_builder.variant(
-                    "u16",
-                    vec![("u16", z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))],
-                ),
-                | WasiType::U32 => datatype_builder.variant(
-                    "u32",
-                    vec![("u32", z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))],
-                ),
-                | WasiType::U64 => datatype_builder.variant(
-                    "u64",
-                    vec![("u64", z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))],
-                ),
-                | WasiType::Handle => datatype_builder.variant(
-                    "handle",
-                    vec![("handle", z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))],
-                ),
-                | WasiType::Flags(flags) => datatype_builder.variant(
-                    "flags",
-                    flags
-                        .fields
-                        .iter()
-                        .map(|field| {
-                            (
-                                field.as_str(),
-                                z3::DatatypeAccessor::Sort(z3::Sort::bool(ctx)),
-                            )
-                        })
-                        .collect(),
-                ),
-                | WasiType::Variant(variant) => {
-                    for case in &variant.cases {
-                        let datatype_accessor = z3::DatatypeAccessor::Sort(match &case.payload {
-                            | Some(tref) => tref.resolve(spec).datatype.sort.clone(),
-                            | None => z3::Sort::bool(ctx),
-                        });
-
-                        datatype_builder = datatype_builder
-                            .variant(&case.name, vec![("payload", datatype_accessor)]);
-                    }
-
-                    datatype_builder
-                },
-                | WasiType::Record(record) => datatype_builder.variant(
-                    "record",
-                    record
-                        .members
-                        .iter()
-                        .map(|member| -> Option<_> {
-                            Some((
-                                member.name.as_str(),
-                                z3::DatatypeAccessor::Sort(
-                                    member.tref.resolve(spec).datatype.sort.clone(),
-                                ),
-                            ))
-                        })
-                        .collect::<Option<_>>()
-                        .unwrap(),
-                ),
-                | WasiType::String => datatype_builder.variant(
-                    "string",
-                    vec![("string", z3::DatatypeAccessor::Sort(z3::Sort::string(ctx)))],
-                ),
-                | WasiType::List(list) => datatype_builder.variant(
-                    "list",
-                    vec![(
-                        "list",
-                        z3::DatatypeAccessor::Sort(z3::Sort::array(
-                            ctx,
-                            &z3::Sort::int(ctx),
-                            &list.item.resolve(spec).datatype.sort,
-                        )),
-                    )],
-                ),
-            }
-        }
-
-        let mut datatype_builder = z3::DatatypeBuilder::new(ctx, name.as_str());
-
-        datatype_builder = match &state {
-            | Some(state) => build_z3_datatype(ctx, self, datatype_builder, state),
-            | None => build_z3_datatype(ctx, self, datatype_builder, &wasi),
-        };
-
-        self.types.push(
-            name.clone(),
-            TypeDef {
-                name,
-                wasi,
-                state,
-                datatype: datatype_builder.finish(),
-            },
-        );
+    fn insert_type_def(&mut self, name: String, wasi: WasiType, state: Option<WasiType>) {
+        self.types.push(name.clone(), TypeDef { name, wasi, state });
     }
 
     pub fn get_type(&self, name: &str) -> Option<WasiType> {
@@ -268,7 +130,7 @@ impl TypeRef {
         self.resolve(spec).wasi.mem_size(spec)
     }
 
-    pub fn resolve<'ctx, 'spec>(&self, spec: &'spec Spec<'ctx>) -> &'spec TypeDef<'ctx> {
+    pub fn resolve<'ctx, 'spec>(&self, spec: &'spec Spec) -> &'spec TypeDef {
         match self {
             | Self::Named(name) => spec.types.get_by_key(name).unwrap(),
             | Self::Anonymous(wasi_type) => match wasi_type {
@@ -283,7 +145,7 @@ impl TypeRef {
         }
     }
 
-    fn resolve_wasi<'ctx, 'spec>(&self, spec: &'spec Spec<'ctx>) -> WasiType {
+    fn resolve_wasi<'ctx, 'spec>(&self, spec: &'spec Spec) -> WasiType {
         match self {
             | Self::Named(name) => spec.types.get_by_key(name).unwrap().wasi.clone(),
             | Self::Anonymous(wasi_type) => wasi_type.to_owned(),
@@ -291,12 +153,11 @@ impl TypeRef {
     }
 }
 
-#[derive(Debug)]
-pub struct TypeDef<'ctx> {
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct TypeDef {
     pub name:  String,
     pub wasi:  WasiType,
     pub state: Option<WasiType>,
-    datatype:  z3::DatatypeSort<'ctx>,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -821,7 +682,7 @@ impl WasiValue {
                     },
                 ))
             },
-            | (_, Self::Record(_)) | (_, Self::Flags(_)) | (_, Self::List(_)) | (_, Self::Variant(_)) => unreachable!(),
+            | (_, Self::Record(_)) | (_, Self::Flags(_)) | (_, Self::List(_)) | (_, Self::Variant(_)) => unreachable!("{:#?}", tref),
         };
 
         wazzi_executor_pb_rust::Value {
@@ -830,7 +691,7 @@ impl WasiValue {
         }
     }
 
-    pub fn from_pb(value: wazzi_executor_pb_rust::Value, spec: &Spec, tdef: &TypeDef<'_>) -> Self {
+    pub fn from_pb(value: wazzi_executor_pb_rust::Value, spec: &Spec, tdef: &TypeDef) -> Self {
         match (&tdef.wasi, value.which.unwrap()) {
             | (_, wazzi_executor_pb_rust::value::Which::Handle(handle)) => Self::Handle(handle),
             | (_, wazzi_executor_pb_rust::value::Which::Builtin(builtin)) => {

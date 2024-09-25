@@ -193,9 +193,7 @@ impl<'s> Fuzzer<'s> {
                 data
             },
         };
-        let z3_cfg = z3::Config::new();
-        let z3_ctx = z3::Context::new(&z3_cfg);
-        let spec = Spec::preview1(&z3_ctx).wrap_err("failed to init spec")?;
+        let spec = Spec::preview1().wrap_err("failed to init spec")?;
         let mut initializers: Vec<EnvironmentInitializer> = Default::default();
         let mut runtimes: Vec<_> = Default::default();
 
@@ -267,7 +265,7 @@ impl<'s> Fuzzer<'s> {
                             move || -> Result<(), FuzzError> {
                                 let z3_cfg = z3::Config::new();
                                 let z3_ctx = z3::Context::new(&z3_cfg);
-                                let spec = Spec::preview1(&z3_ctx)?;
+                                let spec = Spec::preview1()?;
                                 let mut iteration = 0;
 
                                 loop {
@@ -374,9 +372,7 @@ impl<'s> Fuzzer<'s> {
                 .name("wazzi-differ".to_string())
                 .spawn_scoped(scope, {
                     move || -> Result<(), FuzzError> {
-                        let z3_cfg = z3::Config::new();
-                        let z3_ctx = z3::Context::new(&z3_cfg);
-                        let spec = Spec::preview1(&z3_ctx)?;
+                        let spec = Spec::preview1()?;
 
                         while let Ok((function, params, results)) = rx.recv() {
                             let runtimes = run_store

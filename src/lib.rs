@@ -10,7 +10,10 @@ pub use resource::ResourceIdx;
 use resource::{Resource, Resources};
 pub use strategy::{CallStrategy, StatefulStrategy, StatelessStrategy};
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap},
+    path::PathBuf,
+};
 
 use eyre::eyre as err;
 use itertools::Itertools;
@@ -425,12 +428,14 @@ pub struct Call {
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct RuntimeContext {
+    pub preopens:  BTreeMap<ResourceIdx, PathBuf>,
     pub resources: BTreeMap<ResourceIdx, WasiValue>,
 }
 
 impl RuntimeContext {
     pub fn new() -> Self {
         Self {
+            preopens:  Default::default(),
             resources: Default::default(),
         }
     }
