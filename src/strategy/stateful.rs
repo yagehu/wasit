@@ -10,7 +10,7 @@ use eyre::Context;
 use idxspace::IndexSpace;
 use itertools::Itertools;
 use petgraph::{data::DataMap as _, graph::DiGraph, visit::IntoNeighborsDirected};
-use z3::ast::Ast;
+use z3::ast::{exists_const, forall_const, Ast};
 
 use super::CallStrategy;
 use crate::{
@@ -500,6 +500,11 @@ impl State {
                 .find(|param| &param.name == param_name)
                 .unwrap();
             let param_tdef = param.tref.resolve(spec);
+
+            if param_tdef.state.is_none() {
+                continue;
+            }
+
             let empty = BTreeSet::new();
             let resource_idxs = match env.resources_by_types.get(&param_tdef.name) {
                 | Some(idxs) => idxs,
@@ -733,7 +738,163 @@ impl State {
                     variant_tdef,
                 )
             },
-            | Term::NoNonExistentDirBacktrack(t) => todo!(),
+            | Term::NoNonExistentDirBacktrack(t) => {
+                let mut clauses = Vec::new();
+                let namespace = format!("nndb-{}-{}", t.fd_param, t.path_param);
+                let segment_file = z3::FuncDecl::new(
+                    ctx,
+                    format!("{namespace}--segment-file"),
+                    &[&types.segment.sort, &types.file.sort],
+                    &z3::Sort::bool(ctx),
+                );
+                let param_path = decls.paths.get(&t.path_param).unwrap();
+                let param_fd = decls.params.get(&t.fd_param).unwrap();
+                let root_dir = z3::ast::Dynamic::fresh_const(ctx, "", &types.file.sort);
+
+                clauses.push(
+                    decls
+                        .fd_file
+                        .apply(&[param_fd, &root_dir])
+                        .as_bool()
+                        .unwrap(),
+                );
+
+                let mut curr = root_dir;
+                let next_file =
+                    z3::ast::Dynamic::fresh_const(ctx, &format!("{namespace}--"), &types.file.sort);
+
+                clauses.push(
+                    decls
+                        .children
+                        .apply(&[
+                            &curr,
+                            &types.segment.variants[1].accessors[0]
+                                .apply(&[param_path.segments.first().unwrap()]),
+                            &next_file,
+                        ])
+                        .as_bool()
+                        .unwrap()
+                        .ite(
+                            &segment_file
+                                .apply(&[param_path.segments.first().unwrap(), &next_file])
+                                .as_bool()
+                                .unwrap(),
+                            &segment_file
+                                .apply(&[param_path.segments.first().unwrap(), &next_file])
+                                .as_bool()
+                                .unwrap()
+                                .not(),
+                        ),
+                );
+
+                curr = next_file;
+
+                for (i, segment) in param_path.segments.iter().enumerate().skip(1) {
+                    let next_file = z3::ast::Dynamic::fresh_const(
+                        ctx,
+                        &format!("{namespace}--"),
+                        &types.file.sort,
+                    );
+
+                    for (j, prev_segment) in param_path.segments.iter().enumerate().take(i - 1) {
+                        let some_file = z3::ast::Dynamic::fresh_const(ctx, "", &types.file.sort);
+
+                        clauses.push(
+                            segment_file
+                                .apply(&[segment, &next_file])
+                                .as_bool()
+                                .unwrap()
+                                .iff(&exists_const(
+                                    ctx,
+                                    &[&some_segment, &some_file],
+                                    &[],
+                                    &z3::ast::Bool::and(
+                                        ctx,
+                                        &[
+                                            &segment_file
+                                                .apply(&[prev_segment, &some_file])
+                                                .as_bool()
+                                                .unwrap(),
+                                            decls.children.apply(&[&some_file, types.segment]),
+                                        ],
+                                    ),
+                                )),
+                        );
+                    }
+
+                    curr = next_file;
+                }
+
+                (
+                    z3::ast::Dynamic::from_ast(&z3::ast::Bool::and(ctx, clauses.as_slice())),
+                    spec.types.get_by_key("bool").unwrap(),
+                )
+                //         let path_string = state_decl.paths.get(path_param_name).unwrap();
+
+                //         clauses.push(
+                //             segment_file_relation
+                //                 .apply(&[
+                //                     &path_string.segments.first().unwrap().node,
+                //                     &preopen.root.node,
+                //                 ])
+                //                 .as_bool()
+                //                 .unwrap(),
+                //         );
+
+                //         let mut prev_option_file = z3::ast::Dynamic::fresh_const(ctx, "", &option_file.sort);
+
+                //         // We always start with a valid fd that maps to a file.
+                //         clauses.push(
+                //             // option_file.variants[1]
+                //             //     .tester
+                //             //     .apply(&[&prev_option_file])
+                //             //     .as_bool()
+                //             //     .unwrap(),
+                //             todo!("we also need to constrain the option file to the actual file mapped by the fd"),
+                //         );
+
+                //         for (i, segment) in path_string.segments.iter().enumerate() {
+                //             let next_option_file = z3::ast::Dynamic::fresh_const(ctx, "", &option_file.sort);
+                //             let some_file =
+                //                 z3::ast::Dynamic::fresh_const(ctx, "", &state_decl.state.z3_file_type.sort);
+
+                //             clauses.push(z3::ast::exists_const(
+                //                 ctx,
+                //                 &[&some_file],
+                //                 &[],
+                //                 &z3::ast::Bool::and(
+                //                     ctx,
+                //                     &[
+                //                         option_file.variants[1]
+                //                             .tester
+                //                             .apply(&[&next_option_file])
+                //                             .as_bool()
+                //                             .unwrap(),
+                //                         option_file.variants[1].accessors[0]
+                //                             .apply(&[&next_option_file])
+                //                             ._eq(&some_file),
+                //                     ],
+                //                 )
+                //                 .iff(&z3::ast::Bool::and(
+                //                     ctx,
+                //                     &[
+                //                         &state_decl.state.z3_segment_type.variants[1]
+                //                             .tester
+                //                             .apply(&[&segment.node])
+                //                             .as_bool()
+                //                             .unwrap(),
+                //                         todo!(),
+                //                         // state_decl.state.z3_segment_type.variants[1].accessors[0]
+                //                         //     .apply(&[&segment.node])
+                //                         //     .as_string()
+                //                         //     .unwrap(),
+                //                     ],
+                //                 )),
+                //             ));
+
+                //             prev_option_file = next_option_file;
+                //         }
+            },
         }
     }
 
@@ -1149,114 +1310,6 @@ struct StateDecls<'ctx> {
     params:    BTreeMap<String, z3::ast::Dynamic<'ctx>>,
 }
 
-// #[derive(Debug)]
-// struct NoNonexistentDirBacktrack<'ctx> {
-//     clauses:               Vec<z3::ast::Bool<'ctx>>,
-//     segment_file_relation: z3::FuncDecl<'ctx>,
-// }
-
-// impl<'ctx> NoNonexistentDirBacktrack<'ctx> {
-//     fn new(
-//         ctx: &'ctx z3::Context,
-//         state_decl: &mut StateDecl<'ctx, '_>,
-//         fd_idx: ResourceIdx,
-//         path_param_name: &str,
-//     ) -> Self {
-//         let namespace = format!("nndb-{}-{}", fd_idx.0, path_param_name);
-//         let option_file = z3::DatatypeBuilder::new(ctx, format!("{namespace}--option-file"))
-//             .variant("none", vec![])
-//             .variant(
-//                 "some",
-//                 vec![(
-//                     "some",
-//                     z3::DatatypeAccessor::Sort(state_decl.state.z3_file_type.sort.clone()),
-//                 )],
-//             )
-//             .finish();
-//         let preopen = state_decl.preopens.get_by_key(&fd_idx).unwrap();
-//         let path_string = state_decl.paths.get(path_param_name).unwrap();
-//         let segment_file_relation = z3::FuncDecl::new(
-//             ctx,
-//             format!("{}--segment-file", namespace),
-//             &[
-//                 &state_decl.state.z3_segment_type.sort,
-//                 &state_decl.state.z3_file_type.sort,
-//             ],
-//             &z3::Sort::bool(ctx),
-//         );
-//         let mut clauses: Vec<_> = Default::default();
-
-//         clauses.push(
-//             segment_file_relation
-//                 .apply(&[
-//                     &path_string.segments.first().unwrap().node,
-//                     &preopen.root.node,
-//                 ])
-//                 .as_bool()
-//                 .unwrap(),
-//         );
-
-//         let mut prev_option_file = z3::ast::Dynamic::fresh_const(ctx, "", &option_file.sort);
-
-//         // We always start with a valid fd that maps to a file.
-//         clauses.push(
-//             // option_file.variants[1]
-//             //     .tester
-//             //     .apply(&[&prev_option_file])
-//             //     .as_bool()
-//             //     .unwrap(),
-//             todo!("we also need to constrain the option file to the actual file mapped by the fd"),
-//         );
-
-//         for (i, segment) in path_string.segments.iter().enumerate() {
-//             let next_option_file = z3::ast::Dynamic::fresh_const(ctx, "", &option_file.sort);
-//             let some_file =
-//                 z3::ast::Dynamic::fresh_const(ctx, "", &state_decl.state.z3_file_type.sort);
-
-//             clauses.push(z3::ast::exists_const(
-//                 ctx,
-//                 &[&some_file],
-//                 &[],
-//                 &z3::ast::Bool::and(
-//                     ctx,
-//                     &[
-//                         option_file.variants[1]
-//                             .tester
-//                             .apply(&[&next_option_file])
-//                             .as_bool()
-//                             .unwrap(),
-//                         option_file.variants[1].accessors[0]
-//                             .apply(&[&next_option_file])
-//                             ._eq(&some_file),
-//                     ],
-//                 )
-//                 .iff(&z3::ast::Bool::and(
-//                     ctx,
-//                     &[
-//                         &state_decl.state.z3_segment_type.variants[1]
-//                             .tester
-//                             .apply(&[&segment.node])
-//                             .as_bool()
-//                             .unwrap(),
-//                         todo!(),
-//                         // state_decl.state.z3_segment_type.variants[1].accessors[0]
-//                         //     .apply(&[&segment.node])
-//                         //     .as_string()
-//                         //     .unwrap(),
-//                     ],
-//                 )),
-//             ));
-
-//             prev_option_file = next_option_file;
-//         }
-
-//         Self {
-//             clauses,
-//             segment_file_relation,
-//         }
-//     }
-// }
-
 pub struct StatefulStrategy<'u, 'data, 'env, 'ctx, 'zctx> {
     z3_ctx: &'zctx z3::Context,
     u:      &'u mut Unstructured<'data>,
@@ -1391,12 +1444,15 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_, '_> {
         let mut params = Vec::with_capacity(function.params.len());
 
         for param in function.params.iter() {
-            match decls.params.get(&param.name) {
-                | Some(param_node) => {
-                    let tdef = param.tref.resolve(spec);
-                    let param_node_value = model.eval(param_node, true).unwrap().simplify();
-                    let wasi_value =
-                        state.decode_to_wasi_value(spec, &types, &tdef, &param_node_value);
+            let tdef = param.tref.resolve(spec);
+            let param_node_value = model
+                .eval(decls.params.get(&param.name).unwrap(), true)
+                .unwrap()
+                .simplify();
+            let wasi_value = state.decode_to_wasi_value(spec, &types, &tdef, &param_node_value);
+
+            match &tdef.state {
+                | Some(_state) => {
                     let resource_idx = *self
                         .env
                         .reverse_resource_index
