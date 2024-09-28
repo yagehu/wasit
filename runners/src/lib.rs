@@ -3,6 +3,7 @@ extern crate wazzi_executor_pb_rust as pb;
 use std::{
     ffi::OsString,
     fmt,
+    fs,
     io,
     ops::DerefMut as _,
     path::{Path, PathBuf},
@@ -13,6 +14,8 @@ use std::{
 
 use eyre::Context;
 use protobuf::Message as _;
+use serde::{Deserialize, Serialize};
+use tera::Tera;
 
 #[derive(Clone, Debug)]
 pub struct RunningExecutor {
@@ -78,99 +81,103 @@ pub trait WasiRunner: fmt::Debug + Send + Sync {
     ) -> Result<process::Child, eyre::Error>;
 }
 
-// #[derive(Clone, Debug)]
-// pub struct Node<'p> {
-//     path: &'p Path,
-// }
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct Node<'p> {
+    path: &'p Path,
+}
 
-// impl<'p> Node<'p> {
-//     pub fn new(path: &'p Path) -> Self {
-//         Self { path }
-//     }
-// }
+impl<'p> Node<'p> {
+    pub fn new(path: &'p Path) -> Self {
+        Self { path }
+    }
+}
 
-// impl WasiRunner for Node<'_> {
-//     fn base_dir_fd(&self) -> u32 {
-//         3
-//     }
+impl Default for Node<'_> {
+    fn default() -> Self {
+        Self::new(Path::new("node"))
+    }
+}
 
-//     fn prepare_command(
-//         &self,
-//         wasm_path: PathBuf,
-//         working_dir: &Path,
-//         base_dir: Option<PathBuf>,
-//     ) -> (process::Command, Option<Vec<u8>>) {
-//         static GLUE_TMPL: &str = include_str!("run.js.tera.tmpl");
+impl WasiRunner for Node<'_> {
+    fn run(
+        &self,
+        wasm_path: &Path,
+        working_dir: &Path,
+        preopens: Vec<MappedDir>,
+    ) -> Result<process::Child, eyre::Error> {
+        static GLUE_TMPL: &str = include_str!("run.js.tera.tmpl");
 
-//         let mut tmpl_ctx = tera::Context::new();
+        let mut tmpl_ctx = tera::Context::new();
 
-//         tmpl_ctx.insert("executor", &wasm_path.canonicalize().unwrap());
+        tmpl_ctx.insert("executor", &wasm_path.canonicalize().unwrap());
+        tmpl_ctx.insert("preopens", &preopens);
 
-//         if let Some(base_dir) = base_dir {
-//             tmpl_ctx.insert("execroot", &base_dir.canonicalize().unwrap());
-//         }
+        let glue = Tera::one_off(GLUE_TMPL, &tmpl_ctx, false).unwrap();
+        let glue_path = working_dir.join("glue.js");
 
-//         let glue = Tera::one_off(GLUE_TMPL, &tmpl_ctx, false).unwrap();
-//         let glue_path = working_dir.join("glue.js");
+        fs::write(&glue_path, glue).unwrap();
 
-//         fs::write(&glue_path, glue).unwrap();
+        let mut command = process::Command::new(self.path);
 
-//         let mut command = process::Command::new(self.path);
+        command
+            .arg(glue_path)
+            .stdin(process::Stdio::piped())
+            .stdout(process::Stdio::piped())
+            .stderr(process::Stdio::piped())
+            .current_dir(working_dir)
+            .spawn()
+            .wrap_err("failed to spawn command")
+    }
+}
 
-//         command.arg(glue_path);
-//         command.stdin(process::Stdio::piped());
-//         command.stdout(process::Stdio::piped());
-//         command.stderr(process::Stdio::piped());
-//         command.current_dir(working_dir);
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct Wasmedge<'p> {
+    path: &'p Path,
+}
 
-//         (command, None)
-//     }
-// }
+impl<'p> Wasmedge<'p> {
+    pub fn new(path: &'p Path) -> Self {
+        Self { path }
+    }
+}
 
-// #[derive(Clone, Debug)]
-// pub struct Wasmedge<'p> {
-//     path: &'p Path,
-// }
+impl Default for Wasmedge<'_> {
+    fn default() -> Self {
+        Self::new(Path::new("wasmedge"))
+    }
+}
 
-// impl<'p> Wasmedge<'p> {
-//     pub fn new(path: &'p Path) -> Self {
-//         Self { path }
-//     }
+impl WasiRunner for Wasmedge<'_> {
+    fn run(
+        &self,
+        wasm_path: &Path,
+        working_dir: &Path,
+        preopens: Vec<MappedDir>,
+    ) -> Result<process::Child, eyre::Error> {
+        let mut command = process::Command::new(self.path);
 
-//     fn mount_base_dir(&self, dir: Option<PathBuf>) -> Vec<OsString> {
-//         match dir {
-//             | Some(dir) => vec!["--dir".into(), dir.into()],
-//             | None => Vec::new(),
-//         }
-//     }
-// }
+        command.arg("run");
 
-// impl WasiRunner for Wasmedge<'_> {
-//     fn base_dir_fd(&self) -> u32 {
-//         3
-//     }
+        for dir in preopens {
+            let mut dir_arg = OsString::new();
 
-//     fn prepare_command(
-//         &self,
-//         wasm_path: PathBuf,
-//         working_dir: &Path,
-//         base_dir: Option<PathBuf>,
-//     ) -> (process::Command, Option<Vec<u8>>) {
-//         let mut command = process::Command::new(self.path);
-//         let mut args = vec![OsString::from("run")];
+            dir_arg.push(dir.name);
+            dir_arg.push(":");
+            dir_arg.push(dir.host_path);
+            command.arg("--dir");
+            command.arg(dir_arg);
+        }
 
-//         args.extend(self.mount_base_dir(base_dir));
-//         args.push(wasm_path.into());
-
-//         command.args(args);
-//         command.stdin(process::Stdio::piped());
-//         command.stdout(process::Stdio::piped());
-//         command.stderr(process::Stdio::piped());
-//         command.current_dir(working_dir);
-
-//         (command, None)
-//     }
-// }
+        command
+            .arg(wasm_path)
+            .stdin(process::Stdio::piped())
+            .stdout(process::Stdio::piped())
+            .stderr(process::Stdio::piped())
+            .current_dir(working_dir)
+            .spawn()
+            .wrap_err("failed to spawn command")
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct Wasmer<'p> {
@@ -310,7 +317,7 @@ impl WasiRunner for Wamr<'_> {
 //     }
 // }
 
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 pub struct MappedDir {
     pub name:      String,
     pub host_path: PathBuf,

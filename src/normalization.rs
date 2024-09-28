@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use wazzi_runners::{MappedDir, Wamr, WasiRunner, Wasmer};
+use wazzi_runners::{MappedDir, Node, Wamr, WasiRunner, Wasmedge, Wasmer};
 
 use crate::{
     spec::{Spec, TypeRef, WasiValue},
@@ -17,6 +17,124 @@ pub trait InitializeState: WasiRunner {
     ) -> Result<EnvironmentInitializer, eyre::Error>;
 }
 
+fn initialize(
+    spec: &Spec,
+    executor: &RunningExecutor,
+) -> Result<EnvironmentInitializer, eyre::Error> {
+    let mut fd: u32 = 3;
+    let mut preopens: Vec<_> = Default::default();
+
+    loop {
+        let mut call = executor.call(pb::request::Call {
+            func:           pb::WasiFunc::FD_PRESTAT_GET.into(),
+            params:         vec![pb::Value {
+                which:          Some(pb::value::Which::Handle(fd)),
+                special_fields: Default::default(),
+            }],
+            results:        vec![spec
+                .get_type("prestat")
+                .unwrap()
+                .zero_value(spec)
+                .into_pb(spec, &TypeRef::Named("prestat".to_string()))],
+            special_fields: Default::default(),
+        })?;
+
+        if call.errno_some() != 0 {
+            break;
+        }
+
+        let pr_name_len = WasiValue::from_pb(
+            call.results.pop().unwrap(),
+            spec,
+            spec.types.get_by_key("prestat").unwrap(),
+        )
+        .variant()
+        .unwrap()
+        .payload
+        .as_ref()
+        .unwrap()
+        .record()
+        .unwrap()
+        .members
+        .first()
+        .unwrap()
+        .r#u32()
+        .unwrap();
+        let call = executor.call(pb::request::Call {
+            func:           pb::WasiFunc::FD_PRESTAT_DIR_NAME.into(),
+            params:         vec![
+                pb::Value {
+                    which:          Some(pb::value::Which::Handle(fd)),
+                    special_fields: Default::default(),
+                },
+                pb::Value {
+                    which:          Some(pb::value::Which::Array(pb::value::Array {
+                        items:          vec![
+                            pb::Value {
+                                which:          Some(pb::value::Which::Builtin(
+                                    pb::value::Builtin {
+                                        which:          Some(pb::value::builtin::Which::U8(0)),
+                                        special_fields: Default::default(),
+                                    }
+                                )),
+                                special_fields: Default::default(),
+                            };
+                            pr_name_len as usize
+                        ],
+                        item_size:      1,
+                        special_fields: Default::default(),
+                    })),
+                    special_fields: Default::default(),
+                },
+                pb::Value {
+                    which:          Some(pb::value::Which::Builtin(pb::value::Builtin {
+                        which:          Some(pb::value::builtin::Which::U32(pr_name_len)),
+                        special_fields: Default::default(),
+                    })),
+                    special_fields: Default::default(),
+                },
+            ],
+            results:        vec![],
+            special_fields: Default::default(),
+        })?;
+
+        assert_eq!(call.errno_some(), 0);
+
+        let full_dir_name = String::from_utf8(
+            WasiValue::from_pb(
+                call.params[1].clone(),
+                spec,
+                spec.types.get_by_key("path").unwrap(),
+            )
+            .string()
+            .unwrap()
+            .to_vec(),
+        )
+        .unwrap();
+        let dir_name = full_dir_name
+            .rsplit_once('/')
+            .unwrap_or(("", full_dir_name.as_str()))
+            .1
+            .to_string();
+
+        preopens.push((dir_name, WasiValue::Handle(fd)));
+        fd += 1;
+    }
+
+    Ok(EnvironmentInitializer { preopens })
+}
+
+impl InitializeState for Node<'_> {
+    fn initialize_state(
+        &self,
+        spec: &Spec,
+        executor: &RunningExecutor,
+        _mapped_dirs: Vec<MappedDir>,
+    ) -> Result<EnvironmentInitializer, eyre::Error> {
+        initialize(spec, executor)
+    }
+}
+
 impl InitializeState for Wamr<'_> {
     fn initialize_state(
         &self,
@@ -24,106 +142,18 @@ impl InitializeState for Wamr<'_> {
         executor: &RunningExecutor,
         _mapped_dirs: Vec<MappedDir>,
     ) -> Result<EnvironmentInitializer, eyre::Error> {
-        let mut fd: u32 = 3;
-        let mut preopens: Vec<_> = Default::default();
+        initialize(spec, executor)
+    }
+}
 
-        loop {
-            let mut call = executor.call(pb::request::Call {
-                func:           pb::WasiFunc::FD_PRESTAT_GET.into(),
-                params:         vec![pb::Value {
-                    which:          Some(pb::value::Which::Handle(fd)),
-                    special_fields: Default::default(),
-                }],
-                results:        vec![spec
-                    .get_type("prestat")
-                    .unwrap()
-                    .zero_value(spec)
-                    .into_pb(spec, &TypeRef::Named("prestat".to_string()))],
-                special_fields: Default::default(),
-            })?;
-
-            if call.errno_some() != 0 {
-                break;
-            }
-
-            let pr_name_len = WasiValue::from_pb(
-                call.results.pop().unwrap(),
-                spec,
-                spec.types.get_by_key("prestat").unwrap(),
-            )
-            .variant()
-            .unwrap()
-            .payload
-            .as_ref()
-            .unwrap()
-            .record()
-            .unwrap()
-            .members
-            .first()
-            .unwrap()
-            .r#u32()
-            .unwrap();
-            let call = executor.call(pb::request::Call {
-                func:           pb::WasiFunc::FD_PRESTAT_DIR_NAME.into(),
-                params:         vec![
-                    pb::Value {
-                        which:          Some(pb::value::Which::Handle(fd)),
-                        special_fields: Default::default(),
-                    },
-                    pb::Value {
-                        which:          Some(pb::value::Which::Array(pb::value::Array {
-                            items:          vec![
-                                pb::Value {
-                                    which:          Some(pb::value::Which::Builtin(
-                                        pb::value::Builtin {
-                                            which:          Some(pb::value::builtin::Which::U8(0)),
-                                            special_fields: Default::default(),
-                                        }
-                                    )),
-                                    special_fields: Default::default(),
-                                };
-                                pr_name_len as usize
-                            ],
-                            item_size:      1,
-                            special_fields: Default::default(),
-                        })),
-                        special_fields: Default::default(),
-                    },
-                    pb::Value {
-                        which:          Some(pb::value::Which::Builtin(pb::value::Builtin {
-                            which:          Some(pb::value::builtin::Which::U32(pr_name_len)),
-                            special_fields: Default::default(),
-                        })),
-                        special_fields: Default::default(),
-                    },
-                ],
-                results:        vec![],
-                special_fields: Default::default(),
-            })?;
-
-            assert_eq!(call.errno_some(), 0);
-
-            let dir_name = String::from_utf8(
-                WasiValue::from_pb(
-                    call.params[1].clone(),
-                    spec,
-                    spec.types.get_by_key("path").unwrap(),
-                )
-                .string()
-                .unwrap()
-                .to_vec(),
-            )
-            .unwrap()
-            .rsplit_once('/')
-            .unwrap()
-            .1
-            .to_string();
-
-            preopens.push((dir_name, WasiValue::Handle(fd)));
-            fd += 1;
-        }
-
-        Ok(EnvironmentInitializer { preopens })
+impl InitializeState for Wasmedge<'_> {
+    fn initialize_state(
+        &self,
+        spec: &Spec,
+        executor: &RunningExecutor,
+        _mapped_dirs: Vec<MappedDir>,
+    ) -> Result<EnvironmentInitializer, eyre::Error> {
+        initialize(spec, executor)
     }
 }
 

@@ -5,9 +5,9 @@ const { WASI } = require("wasi");
 const wasi = new WASI({
     version: "preview1",
     preopens: {
-        {% if execroot %}
-        ".": "{{ execroot }}",
-        {% endif %}
+        {%- for preopen in preopens %}
+        "{{ preopen.name }}": "{{ preopen.host_path }}",
+        {%- endfor %}
     },
 });
 const importObject = { wasi_snapshot_preview1: wasi.wasiImport };

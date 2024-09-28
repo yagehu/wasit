@@ -39,7 +39,7 @@ use wazzi::{
     StatefulStrategy,
     StatelessStrategy,
 };
-use wazzi_runners::{MappedDir, RunningExecutor, Wamr, Wasmer};
+use wazzi_runners::{MappedDir, Node, RunningExecutor, Wamr, Wasmedge, Wasmer};
 use wazzi_store::FuzzStore;
 
 #[derive(Parser, Debug)]
@@ -110,13 +110,21 @@ fn main() -> Result<(), eyre::Error> {
         &mut store,
         [
             (
+                "node",
+                Box::new(Node::default()) as Box<dyn InitializeState>,
+            ),
+            (
                 "wamr",
                 Box::new(Wamr::default()) as Box<dyn InitializeState>,
             ),
             (
-                "wasmer",
-                Box::new(Wasmer::default()) as Box<dyn InitializeState>,
+                "wasmedge",
+                Box::new(Wasmedge::default()) as Box<dyn InitializeState>,
             ),
+            // (
+            //     "wasmer",
+            //     Box::new(Wasmer::default()) as Box<dyn InitializeState>,
+            // ),
         ],
     );
     let data = cmd

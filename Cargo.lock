@@ -1633,6 +1633,7 @@ version = "0.1.0"
 dependencies = [
  "eyre",
  "protobuf",
+ "serde",
  "tera",
  "tracing",
  "wazzi-executor-pb-rust",
