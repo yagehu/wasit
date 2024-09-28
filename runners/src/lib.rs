@@ -3,7 +3,6 @@ extern crate wazzi_executor_pb_rust as pb;
 use std::{
     ffi::OsString,
     fmt,
-    fs,
     io,
     ops::DerefMut as _,
     path::{Path, PathBuf},
@@ -14,14 +13,11 @@ use std::{
 
 use eyre::Context;
 use protobuf::Message as _;
-use tera::Tera;
 
 #[derive(Clone, Debug)]
 pub struct RunningExecutor {
-    child:              Arc<Mutex<process::Child>>,
-    stdin:              Arc<Mutex<process::ChildStdin>>,
-    stdout:             Arc<Mutex<process::ChildStdout>>,
-    stderr_copy_handle: Arc<Mutex<Option<thread::JoinHandle<u64>>>>,
+    stdin:  Arc<Mutex<process::ChildStdin>>,
+    stdout: Arc<Mutex<process::ChildStdout>>,
 }
 
 impl RunningExecutor {
@@ -39,33 +35,16 @@ impl RunningExecutor {
             .run(executor_bin, working_dir, preopens)
             .wrap_err(format!("failed to run executor {}", executor_bin.display()))?;
         let mut stderr = child.stderr.take().unwrap();
-        let stderr_copy_handle = thread::spawn(move || {
+        let _stderr_copy_handle = thread::spawn(move || {
             io::copy(&mut stderr, stderr_logger.lock().unwrap().deref_mut()).unwrap()
         });
         let stdin = child.stdin.take().unwrap();
         let stdout = child.stdout.take().unwrap();
 
         Ok(Self {
-            child:              Arc::new(Mutex::new(child)),
-            stdin:              Arc::new(Mutex::new(stdin)),
-            stdout:             Arc::new(Mutex::new(stdout)),
-            stderr_copy_handle: Arc::new(Mutex::new(Some(stderr_copy_handle))),
+            stdin:  Arc::new(Mutex::new(stdin)),
+            stdout: Arc::new(Mutex::new(stdout)),
         })
-    }
-
-    fn kill(&self) {
-        self.child.lock().unwrap().kill().unwrap();
-        self.stderr_copy_handle
-            .lock()
-            .unwrap()
-            .take()
-            .unwrap()
-            .join()
-            .unwrap();
-    }
-
-    fn pid(&self) -> u32 {
-        self.child.lock().unwrap().id()
     }
 
     pub fn call(&self, call: pb::request::Call) -> Result<pb::response::Call, protobuf::Error> {

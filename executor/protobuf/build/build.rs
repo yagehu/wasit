@@ -18,8 +18,6 @@ fn main() {
         .unwrap();
     let target_protobuf_dir = target_dir.join("protobuf");
 
-    println!("cargo::rerun-if-changed={}", upstream_dir.display());
-
     env::set_current_dir(&out_dir).unwrap();
 
     let status = process::Command::new("cmake")

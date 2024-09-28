@@ -107,12 +107,4 @@ fn main() {
         target_dir.join("libprotobuf-c.a"),
     )
     .unwrap();
-    // fs::copy(
-    //     out_dir
-    //         .join("protobuf-c")
-    //         .join(".libs")
-    //         .join("libprotobuf-c.la"),
-    //     target_dir.join("libprotobuf-c.la"),
-    // )
-    // .unwrap();
 }
