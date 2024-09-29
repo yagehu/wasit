@@ -274,48 +274,53 @@ impl WasiRunner for Wamr<'_> {
     }
 }
 
-// #[derive(Clone, Debug)]
-// pub struct Wazero<'p> {
-//     path: &'p Path,
-// }
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct Wazero<'p> {
+    path: &'p Path,
+}
 
-// impl<'p> Wazero<'p> {
-//     pub fn new(path: &'p Path) -> Self {
-//         Self { path }
-//     }
+impl<'p> Wazero<'p> {
+    pub fn new(path: &'p Path) -> Self {
+        Self { path }
+    }
+}
 
-//     fn mount_base_dir(&self, dir: Option<PathBuf>) -> Vec<OsString> {
-//         match dir {
-//             | Some(dir) => vec![OsString::from("-mount"), dir.into()],
-//             | None => Vec::new(),
-//         }
-//     }
-// }
+impl Default for Wazero<'_> {
+    fn default() -> Self {
+        Self::new(Path::new("wazero"))
+    }
+}
 
-// impl WasiRunner for Wazero<'_> {
-//     fn base_dir_fd(&self) -> u32 {
-//         3
-//     }
+impl WasiRunner for Wazero<'_> {
+    fn run(
+        &self,
+        wasm_path: &Path,
+        working_dir: &Path,
+        preopens: Vec<MappedDir>,
+    ) -> Result<process::Child, eyre::Error> {
+        let mut command = process::Command::new(self.path);
 
-//     fn prepare_command(
-//         &self,
-//         wasm_path: PathBuf,
-//         working_dir: &Path,
-//         base_dir: Option<PathBuf>,
-//     ) -> (process::Command, Option<Vec<u8>>) {
-//         let mut command = process::Command::new(self.path);
+        command.arg("run");
 
-//         command.arg("run");
-//         command.args(self.mount_base_dir(base_dir));
-//         command.arg(wasm_path);
-//         command.stdin(process::Stdio::piped());
-//         command.stdout(process::Stdio::piped());
-//         command.stderr(process::Stdio::piped());
-//         command.current_dir(working_dir);
+        for preopen in preopens {
+            let mut arg = OsString::new();
 
-//         (command, None)
-//     }
-// }
+            arg.push(preopen.host_path);
+            arg.push(":");
+            arg.push(preopen.name);
+            command.arg("-mount").arg(arg);
+        }
+
+        command
+            .arg(wasm_path)
+            .stdin(process::Stdio::piped())
+            .stdout(process::Stdio::piped())
+            .stderr(process::Stdio::piped())
+            .current_dir(working_dir)
+            .spawn()
+            .wrap_err("failed to spawn command")
+    }
+}
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 pub struct MappedDir {

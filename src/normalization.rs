@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use wazzi_runners::{MappedDir, Node, Wamr, WasiRunner, Wasmedge, Wasmer};
+use wazzi_runners::{MappedDir, Node, Wamr, WasiRunner, Wasmedge, Wasmer, Wazero};
 
 use crate::{
     spec::{Spec, TypeRef, WasiValue},
@@ -276,5 +276,16 @@ impl InitializeState for Wasmer<'_> {
         }
 
         Ok(EnvironmentInitializer { preopens })
+    }
+}
+
+impl InitializeState for Wazero<'_> {
+    fn initialize_state(
+        &self,
+        spec: &Spec,
+        executor: &RunningExecutor,
+        _mapped_dirs: Vec<MappedDir>,
+    ) -> Result<EnvironmentInitializer, eyre::Error> {
+        initialize(spec, executor)
     }
 }
