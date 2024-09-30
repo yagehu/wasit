@@ -526,7 +526,7 @@ pub struct ListType {
     pub item: TypeRef,
 }
 
-#[derive(Serialize, Deserialize, Hash, PartialEq, Eq, Clone, Debug)]
+#[derive(Serialize, Deserialize, Hash, PartialOrd, Ord, PartialEq, Eq, Clone, Debug)]
 pub enum WasiValue {
     Handle(u32),
     S64(i64),
@@ -790,22 +790,22 @@ impl WasiValue {
     }
 }
 
-#[derive(Serialize, Deserialize, Hash, PartialEq, Eq, Clone, Debug)]
+#[derive(Serialize, Deserialize, Hash, PartialOrd, Ord, PartialEq, Eq, Clone, Debug)]
 pub struct RecordValue {
     pub members: Vec<WasiValue>,
 }
 
-#[derive(Serialize, Deserialize, Hash, PartialEq, Eq, Clone, Debug)]
+#[derive(Serialize, Deserialize, Hash, PartialOrd, Ord, PartialEq, Eq, Clone, Debug)]
 pub struct FlagsValue {
     pub fields: Vec<bool>,
 }
 
-#[derive(Serialize, Deserialize, Hash, PartialEq, Eq, Clone, Debug)]
+#[derive(Serialize, Deserialize, Hash, PartialOrd, Ord, PartialEq, Eq, Clone, Debug)]
 pub struct ListValue {
     pub items: Vec<WasiValue>,
 }
 
-#[derive(Serialize, Deserialize, Hash, PartialEq, Eq, Clone, Debug)]
+#[derive(Serialize, Deserialize, Hash, PartialOrd, Ord, PartialEq, Eq, Clone, Debug)]
 pub struct VariantValue {
     pub case_idx: usize,
     pub payload:  Option<WasiValue>,

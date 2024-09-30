@@ -968,12 +968,12 @@
 
   ;;; Create a symbolic link.
   ;;; Note: This is similar to `symlinkat` in POSIX.
-  (@interface func (export "path_symlink")
-    ;;; The contents of the symbolic link.
-    (param $old_path $path)
-    (param $fd $fd)
-    ;;; The destination path at which to create the symbolic link.
-    (param $new_path $path)
-    (result $error (expected (error $errno)))
-  )
+  ;(@interface func (export "path_symlink")
+  ;  ;;; The contents of the symbolic link.
+  ;  (param $old_path $path)
+  ;  (param $fd $fd)
+  ;  ;;; The destination path at which to create the symbolic link.
+  ;  (param $new_path $path)
+  ;  (result $error (expected (error $errno)))
+  ;)
 )

@@ -25,7 +25,7 @@ use wazzi_store::TraceStore;
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct EnvironmentInitializer {
-    preopens: Vec<(String, WasiValue)>,
+    preopens: Vec<(String, PathBuf, WasiValue)>,
 }
 
 pub fn apply_env_initializers(
@@ -67,7 +67,7 @@ pub fn apply_env_initializers(
     for (i, initializer) in initializers.iter().enumerate() {
         let mut preopen_ids_: HashMap<&str, ResourceIdx> = Default::default();
 
-        for (preopen_name, preopen_value) in &initializer.preopens {
+        for (preopen_name, host_path, preopen_value) in &initializer.preopens {
             let resource_id = match &preopens_ids {
                 | None => {
                     let state = WasiValue::Record(RecordValue {
@@ -89,6 +89,9 @@ pub fn apply_env_initializers(
             ctxs[i]
                 .resources
                 .insert(resource_id, preopen_value.to_owned());
+            ctxs[i]
+                .preopens
+                .insert(resource_id, host_path.to_path_buf());
         }
 
         if preopens_ids.is_none() {
@@ -112,7 +115,7 @@ pub fn apply_env_initializers(
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Environment {
     resources:              Resources,
-    resources_by_types:     HashMap<String, BTreeSet<ResourceIdx>>,
+    resources_by_types:     BTreeMap<String, BTreeSet<ResourceIdx>>,
     resources_types:        HashMap<ResourceIdx, String>,
     reverse_resource_index: HashMap<String, HashMap<WasiValue, ResourceIdx>>,
 }
@@ -279,9 +282,16 @@ impl Environment {
                         .enumerate()
                         .find(|(_i, member)| member.name == record_field_set.field)
                         .unwrap();
+                    let old_value = resource.state.clone();
                     let record = resource.state.record_mut().unwrap();
+                    let reverse_index = self
+                        .reverse_resource_index
+                        .entry(tdef.name.clone())
+                        .or_default();
 
                     *record.members.get_mut(i).unwrap() = value;
+                    reverse_index.remove(&old_value);
+                    reverse_index.insert(resource.state.clone(), id);
                 },
             }
         }

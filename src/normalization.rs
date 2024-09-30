@@ -20,6 +20,7 @@ pub trait InitializeState: WasiRunner {
 fn initialize(
     spec: &Spec,
     executor: &RunningExecutor,
+    mapped_dirs: Vec<MappedDir>,
 ) -> Result<EnvironmentInitializer, eyre::Error> {
     let mut fd: u32 = 3;
     let mut preopens: Vec<_> = Default::default();
@@ -117,7 +118,9 @@ fn initialize(
             .1
             .to_string();
 
-        preopens.push((dir_name, WasiValue::Handle(fd)));
+        let dir = mapped_dirs.iter().find(|dir| dir.name == dir_name).unwrap();
+
+        preopens.push((dir_name, dir.host_path.clone(), WasiValue::Handle(fd)));
         fd += 1;
     }
 
@@ -129,9 +132,9 @@ impl InitializeState for Node<'_> {
         &self,
         spec: &Spec,
         executor: &RunningExecutor,
-        _mapped_dirs: Vec<MappedDir>,
+        mapped_dirs: Vec<MappedDir>,
     ) -> Result<EnvironmentInitializer, eyre::Error> {
-        initialize(spec, executor)
+        initialize(spec, executor, mapped_dirs)
     }
 }
 
@@ -140,9 +143,9 @@ impl InitializeState for Wamr<'_> {
         &self,
         spec: &Spec,
         executor: &RunningExecutor,
-        _mapped_dirs: Vec<MappedDir>,
+        mapped_dirs: Vec<MappedDir>,
     ) -> Result<EnvironmentInitializer, eyre::Error> {
-        initialize(spec, executor)
+        initialize(spec, executor, mapped_dirs)
     }
 }
 
@@ -151,9 +154,9 @@ impl InitializeState for Wasmedge<'_> {
         &self,
         spec: &Spec,
         executor: &RunningExecutor,
-        _mapped_dirs: Vec<MappedDir>,
+        mapped_dirs: Vec<MappedDir>,
     ) -> Result<EnvironmentInitializer, eyre::Error> {
-        initialize(spec, executor)
+        initialize(spec, executor, mapped_dirs)
     }
 }
 
@@ -267,6 +270,7 @@ impl InitializeState for Wasmer<'_> {
 
             preopens.push((
                 dir.name.clone(),
+                dir.host_path.clone(),
                 WasiValue::from_pb(
                     call.results[0].clone(),
                     spec,
@@ -284,8 +288,8 @@ impl InitializeState for Wazero<'_> {
         &self,
         spec: &Spec,
         executor: &RunningExecutor,
-        _mapped_dirs: Vec<MappedDir>,
+        mapped_dirs: Vec<MappedDir>,
     ) -> Result<EnvironmentInitializer, eyre::Error> {
-        initialize(spec, executor)
+        initialize(spec, executor, mapped_dirs)
     }
 }

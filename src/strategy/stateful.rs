@@ -2,7 +2,7 @@
 mod tests;
 
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet},
     fs,
     io,
     path::{Path, PathBuf},
@@ -38,7 +38,7 @@ struct State {
     preopens:  IndexSpace<ResourceIdx, PreopenFs>,
     paths:     BTreeMap<String, PathString>,
     fds_graph: DiGraph<ResourceIdx, String>,
-    fds_idxs:  HashMap<ResourceIdx, petgraph::graph::NodeIndex>,
+    fds_idxs:  BTreeMap<ResourceIdx, petgraph::graph::NodeIndex>,
     resources: BTreeMap<ResourceIdx, WasiValue>,
 }
 
@@ -199,7 +199,7 @@ impl State {
         let mut clauses = Vec::new();
         let fds_graph_rev = petgraph::visit::Reversed(&self.fds_graph);
         let mut topo = petgraph::visit::Topo::new(&fds_graph_rev);
-        let mut dirs: HashMap<ResourceIdx, &DirectoryEncoding> = Default::default();
+        let mut dirs: BTreeMap<ResourceIdx, &DirectoryEncoding> = Default::default();
         let mut fd_file_pairs = Vec::new();
 
         for (&resource_idx, preopen) in decls.preopens.iter() {
@@ -422,16 +422,44 @@ impl State {
         {
             clauses.push(Bool::and(
                 ctx,
-                self.resources
+                decls
+                    .params
                     .iter()
-                    .map(|(idx, resource_value)| {
-                        let tdef = spec
-                            .types
-                            .get_by_key(env.resources_types.get(idx).unwrap())
+                    .filter_map(|(param_name, param_node)| {
+                        let param = function
+                            .params
+                            .iter()
+                            .find(|p| &p.name == param_name)
                             .unwrap();
-                        let resource_node = decls.resources.get(idx).unwrap();
+                        let tdef = param.tref.resolve(spec);
 
-                        types.encode_wasi_value(ctx, spec, resource_node, tdef, resource_value)
+                        if tdef.state.is_some() {
+                            let idxs = env
+                                .resources_by_types
+                                .get(&tdef.name)
+                                .cloned()
+                                .unwrap_or_default();
+
+                            Some(Bool::or(
+                                ctx,
+                                idxs.iter()
+                                    .map(|&idx| {
+                                        let resource = env.resources.get(idx).unwrap();
+
+                                        types.encode_wasi_value(
+                                            ctx,
+                                            spec,
+                                            param_node,
+                                            tdef,
+                                            &resource.state,
+                                        )
+                                    })
+                                    .collect_vec()
+                                    .as_slice(),
+                            ))
+                        } else {
+                            None
+                        }
                     })
                     .collect_vec()
                     .as_slice(),
@@ -986,21 +1014,21 @@ impl State {
 
 #[derive(Debug)]
 pub(crate) struct StateTypes<'ctx> {
-    resources: HashMap<String, z3::DatatypeSort<'ctx>>,
+    resources: BTreeMap<String, z3::DatatypeSort<'ctx>>,
     file:      z3::DatatypeSort<'ctx>,
     segment:   z3::DatatypeSort<'ctx>,
 }
 
 impl<'ctx> StateTypes<'ctx> {
     fn new(ctx: &'ctx z3::Context, spec: &Spec) -> Self {
-        let mut resources = HashMap::new();
+        let mut resources = BTreeMap::new();
 
         fn encode_type<'ctx>(
             ctx: &'ctx z3::Context,
             spec: &Spec,
             name: &str,
             tdef: &TypeDef,
-            resource_types: &mut HashMap<String, z3::DatatypeSort<'ctx>>,
+            resource_types: &mut BTreeMap<String, z3::DatatypeSort<'ctx>>,
         ) {
             if resource_types.get(name).is_some() {
                 return;
@@ -1699,11 +1727,9 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_, '_> {
             solver.assert(&state.encode(self.z3_ctx, &self.env, &types, &decls, spec, function));
 
             match solver.check() {
-                | z3::SatResult::Sat => (),
+                | z3::SatResult::Sat => candidates.push(function),
                 | _ => continue,
             };
-
-            candidates.push(function);
         }
 
         let function = *self
@@ -1729,11 +1755,13 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_, '_> {
             let tdef = param.tref.resolve(spec);
 
             if tdef.name == "path" {
+                let nsegments = self.u.choose_index(8).unwrap() + 1;
+
                 state.push_path(
                     param.name.clone(),
                     PathString {
                         param_name: param.name.clone(),
-                        nsegments:  self.u.choose_index(8).unwrap() + 1,
+                        nsegments:  nsegments,
                     },
                 );
             }
@@ -1752,12 +1780,50 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_, '_> {
         let types = StateTypes::new(self.z3_ctx, spec);
         let decls = state.declare(spec, self.z3_ctx, &types, &self.env, function);
         let solver = z3::Solver::new(self.z3_ctx);
+        let mut solutions = Vec::new();
+        let mut nsolutions = 0;
 
         solver.assert(&state.encode(self.z3_ctx, &self.env, &types, &decls, spec, function));
 
-        assert_eq!(solver.check(), z3::SatResult::Sat);
+        loop {
+            if solver.check() != z3::SatResult::Sat || nsolutions == 5 {
+                break;
+            }
 
-        let model = solver.get_model().unwrap();
+            let model = solver.get_model().unwrap();
+            let mut clauses = Vec::new();
+
+            for (param_name, param_node) in decls.params.iter() {
+                let param = function
+                    .params
+                    .iter()
+                    .find(|param| &param.name == param_name)
+                    .unwrap();
+                let tdef = param.tref.resolve(spec);
+
+                if tdef.name == "path" {
+                    let path = decls.paths.get(param_name).unwrap();
+
+                    for segment in path.segments.iter() {
+                        let seg = model.eval(segment, true).unwrap().simplify();
+
+                        clauses.push(segment._eq(&seg).not());
+                    }
+
+                    continue;
+                }
+
+                let p = model.eval(param_node, true).unwrap().simplify();
+
+                clauses.push(param_node._eq(&p).not());
+            }
+
+            solutions.push(model);
+            nsolutions += 1;
+            solver.assert(&Bool::or(self.z3_ctx, clauses.as_slice()));
+        }
+
+        let model = self.u.choose(&solutions).unwrap();
         let mut params = Vec::with_capacity(function.params.len());
 
         for param in function.params.iter() {
@@ -1808,30 +1874,19 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_, '_> {
 
             match &tdef.state {
                 | Some(_state) => {
-                    let resource_idx = *self
-                        .env
-                        .reverse_resource_index
-                        .get(&tdef.name)
-                        .unwrap()
-                        .get(&wasi_value)
-                        .unwrap();
+                    let x = self.env.reverse_resource_index.get(&tdef.name).unwrap();
+                    let resource_idx = x.get(&wasi_value);
+
+                    let resource_idx = match resource_idx {
+                        | Some(resource_idx) => *resource_idx,
+                        | None => panic!("{:#?} -> {:#?}", wasi_value, x),
+                    };
+
                     let value = self.ctx.resources.get(&resource_idx).unwrap();
 
                     params.push((value.to_owned(), Some(resource_idx)));
                 },
-                | None => {
-                    params.push((wasi_value, None));
-
-                    // params.push((
-                    //                 param
-                    //                     .tref
-                    //                     .resolve(spec)
-                    //                     .wasi
-                    //                     .arbitrary_value(spec, self.u)
-                    //                     .unwrap(),
-                    //                 None,
-                    //             ))
-                },
+                | None => params.push((wasi_value, None)),
             }
         }
 
