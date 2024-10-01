@@ -1770,7 +1770,7 @@ checksum = "dff9641d1cd4be8d1a070daf9e3773c5f67e78b4d9d42263020c057706765c04"
 [[package]]
 name = "z3"
 version = "0.12.1"
-source = "git+https://github.com/prove-rs/z3.rs.git#b47f3af5ce4b7b3b47024533892735c3ffc0267b"
+source = "git+https://github.com/yagehu/z3.rs.git?branch=yagehu/seq#5c541758ee2c82dec822cccba877c59d86705dee"
 dependencies = [
  "log",
  "num",
@@ -1780,7 +1780,7 @@ dependencies = [
 [[package]]
 name = "z3-sys"
 version = "0.8.1"
-source = "git+https://github.com/prove-rs/z3.rs.git#b47f3af5ce4b7b3b47024533892735c3ffc0267b"
+source = "git+https://github.com/yagehu/z3.rs.git?branch=yagehu/seq#5c541758ee2c82dec822cccba877c59d86705dee"
 dependencies = [
  "bindgen",
  "pkg-config",

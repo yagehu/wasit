@@ -21,6 +21,7 @@ use crate::{
         witx::ilang::{NoNonExistentDirBacktrack, Term},
         FlagsValue,
         Function,
+        ListValue,
         RecordValue,
         Spec,
         TypeDef,
@@ -899,8 +900,9 @@ impl State {
         }
     }
 
-    fn decode_to_wasi_value(
+    fn decode_to_wasi_value<'ctx>(
         &self,
+        ctx: &'ctx z3::Context,
         spec: &Spec,
         types: &StateTypes,
         tdef: &TypeDef,
@@ -922,7 +924,17 @@ impl State {
                     .as_i64()
                     .unwrap(),
             ),
-            | WasiType::U8 => todo!(),
+            | WasiType::U8 => WasiValue::U8(
+                datatype.variants[0].accessors[0]
+                    .apply(&[node])
+                    .simplify()
+                    .as_int()
+                    .unwrap()
+                    .as_u64()
+                    .unwrap()
+                    .try_into()
+                    .unwrap(),
+            ),
             | WasiType::U16 => todo!(),
             | WasiType::U32 => todo!(),
             | WasiType::U64 => WasiValue::U64(
@@ -971,6 +983,7 @@ impl State {
 
                 let payload = match &variant.cases[case_idx].payload {
                     | Some(payload_tref) => Some(self.decode_to_wasi_value(
+                        ctx,
                         spec,
                         types,
                         payload_tref.resolve(spec),
@@ -988,6 +1001,7 @@ impl State {
                     .enumerate()
                     .map(|(i, member)| {
                         self.decode_to_wasi_value(
+                            ctx,
                             spec,
                             types,
                             member.tref.resolve(spec),
@@ -1007,7 +1021,27 @@ impl State {
                     .as_bytes()
                     .to_vec(),
             ),
-            | WasiType::List(_list_type) => todo!(),
+            | WasiType::List(list_type) => {
+                let seq = datatype.variants[0].accessors[0]
+                    .apply(&[node])
+                    .simplify()
+                    .as_seq()
+                    .unwrap();
+                let length = seq.length().simplify().as_u64().unwrap();
+                let mut items = Vec::with_capacity(length as usize);
+
+                for i in 0..length {
+                    items.push(self.decode_to_wasi_value(
+                        ctx,
+                        spec,
+                        types,
+                        &list_type.item.resolve(spec),
+                        &seq.nth(&z3::ast::Int::from_u64(ctx, i)).simplify(),
+                    ));
+                }
+
+                WasiValue::List(ListValue { items })
+            },
         }
     }
 }
@@ -1128,14 +1162,12 @@ impl<'ctx> StateTypes<'ctx> {
                 | WasiType::List(list_type) => {
                     let tdef = list_type.item.resolve(spec);
 
-                    encode_type(ctx, spec, &tdef.name, tdef, resource_types);
                     datatype.variant(
                         name,
                         vec![(
                             name,
-                            z3::DatatypeAccessor::Sort(z3::Sort::array(
+                            z3::DatatypeAccessor::Sort(z3::Sort::seq(
                                 ctx,
-                                &z3::Sort::int(ctx),
                                 &resource_types.get(&tdef.name).unwrap().sort,
                             )),
                         )],
@@ -1870,7 +1902,8 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_, '_> {
                 .eval(decls.params.get(&param.name).unwrap(), true)
                 .unwrap()
                 .simplify();
-            let wasi_value = state.decode_to_wasi_value(spec, &types, &tdef, &param_node_value);
+            let wasi_value =
+                state.decode_to_wasi_value(self.z3_ctx, spec, &types, &tdef, &param_node_value);
 
             match &tdef.state {
                 | Some(_state) => {

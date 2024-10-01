@@ -140,6 +140,7 @@ fn ok() {
         let model = solver.get_model().unwrap();
         let fd_tdef = spec.types.get_by_key("fd").unwrap();
         let resource_value = state.decode_to_wasi_value(
+            &ctx,
             &spec,
             &types,
             fd_tdef,
