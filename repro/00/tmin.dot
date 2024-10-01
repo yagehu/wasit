@@ -1,5 +1,0 @@
-digraph {
-    0 [ label = "0" ]
-    200 [ label = "200" ]
-    0 -> 200 [ label = "Rf" ]
-}
