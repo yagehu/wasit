@@ -121,10 +121,10 @@ fn main() -> Result<(), eyre::Error> {
                 "wasmedge",
                 Box::new(Wasmedge::default()) as Box<dyn InitializeState>,
             ),
-            // (
-            //     "wasmer",
-            //     Box::new(Wasmer::default()) as Box<dyn InitializeState>,
-            // ),
+            (
+                "wasmer",
+                Box::new(Wasmer::default()) as Box<dyn InitializeState>,
+            ),
             (
                 "wazero",
                 Box::new(Wazero::default()) as Box<dyn InitializeState>,

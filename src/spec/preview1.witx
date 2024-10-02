@@ -791,6 +791,25 @@
           (@record.field.get (param $fd) $type)
           (@variant.const $filetype $regular_file)
         )
+
+        ; The sum of buffer lengths must not be 0.
+        (@int.gt
+          (@foldl (param $iovs) 0 (@lambda ((param $acc @int) (param $iovec $iovec))
+            (@int.add $acc (@record.field.get $iovec $buf_len))
+          ))
+          0
+        )
+
+        ; Each buffer length must equal the buf_len field.
+        (@foldl (param $iovs) @true (@lambda ((param $acc @bool) (param $iovec $iovec))
+          (@and
+            $acc
+            (@value.eq
+              (@int.const (@record.field.get $iovec $buf_len))
+              (@list.len (@record.field.get $iovec $buf))
+            )
+          )
+        ))
       )
     )
   )
