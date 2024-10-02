@@ -25,6 +25,8 @@ type =
   | union
   | flags
   | record
+  | pointer
+  | const_pointer
   | list
   | string
   | expected
@@ -61,6 +63,9 @@ flags =
   ~ (comment | id)+
   ~ ")"
   }
+
+pointer = { "(" ~ "@witx" ~ "pointer" ~ type_ref ~ ")" }
+const_pointer = { "(" ~ "@witx" ~ "const_pointer" ~ type_ref ~ ")" }
 
 record =
   { "(" ~ "record"

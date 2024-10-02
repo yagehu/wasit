@@ -4,13 +4,23 @@ term_final = _{ SOI ~ term ~ EOI }
 
 term =
  _{ comment
+  | id
+  | true
+
+  | foldl
+  | lambda
+  | map
+
   | not
   | and
   | or
   | record_field_get
   | flags_get
+  | int_const
   | int_add
+  | int_gt
   | int_le
+  | list_len
   | num_lit
   | param
   | value_eq
@@ -21,11 +31,45 @@ term =
 
 comment = @{ ";" ~ (!NEWLINE ~ ANY)* ~ NEWLINE }
 
+foldl =
+  { "(" ~ "@foldl"
+  ~ term
+  ~ term
+  ~ term
+  ~ ")"
+  }
+
 not = { "(" ~ "@not" ~ term ~ ")" }
 and = { "(" ~ "@and" ~ term+ ~ ")" }
 or = { "(" ~ "@or" ~ term+ ~ ")" }
 
 id = @{ "$" ~ (ASCII_ALPHANUMERIC | "." | "-" | "_")+ }
+
+true = @{ "@true" }
+
+lambda =
+  { "(" ~ "@lambda"
+  ~ "(" ~ bound* ~ ")"
+  ~ term
+  ~ ")"
+  }
+
+map =
+  { "(" ~ "@map"
+  ~ term
+  ~ term
+  ~ ")"
+  }
+
+bound = { "(" ~ "param" ~ id ~ type_ref ~ ")" }
+type_ref = _{ id | wazzi_type }
+wazzi_type =
+ _{ bool
+  | int
+  }
+
+bool = @{ "@bool" }
+int = @{ "@int" }
 
 num_lit = @{ ASCII_DIGIT+ }
 
@@ -33,8 +77,12 @@ record_field_get = { "(" ~ "@record.field.get" ~ term ~ id ~ ")" }
 
 flags_get = { "(" ~ "@flags.get" ~ term ~ id ~ ")" }
 
+int_const = { "(" ~ "@int.const" ~ term ~ ")" }
 int_add = { "(" ~ "@int.add" ~ term ~ term ~ ")" }
+int_gt = { "(" ~ "@int.gt" ~ term ~ term ~ ")" }
 int_le = { "(" ~ "@int.le" ~ term ~ term ~ ")" }
+
+list_len = { "(" ~ "@list.len" ~ term ~ ")" }
 
 param = { "(" ~ "param" ~ id ~ ")" }
 

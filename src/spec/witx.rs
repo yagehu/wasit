@@ -17,6 +17,7 @@ use super::{
     IntRepr,
     Interface,
     ListType,
+    PointerType,
     RecordMemberType,
     RecordType,
     Spec,
@@ -201,7 +202,7 @@ fn preview1_module(spec: &Spec, pairs: Pairs<'_, Rule>) -> Result<Interface, eyr
                         | Rule::annotation if annot_pair.as_str() == "@input" => {
                             let pair = pairs.next().unwrap();
                             let pair = ilang::Parser::parse(ilang::Rule::term_final, pair.as_str())
-                                .wrap_err("Failed to parse slang")?
+                                .wrap_err("Failed to parse ilang")?
                                 .next()
                                 .unwrap();
                             let term = ilang::to_term(pair)?;
@@ -403,6 +404,25 @@ fn preview1_wasi_type(spec: &Spec, pair: Pair<'_, Rule>) -> Result<WasiType, eyr
             WasiType::Record(RecordType { members })
         },
         | Rule::string => WasiType::String,
+        | Rule::pointer => {
+            let tref_pair = pair.into_inner().next().unwrap();
+            let item = preview1_tref(spec, tref_pair).wrap_err("failed to pointer type ref")?;
+
+            WasiType::Pointer(Box::new(PointerType {
+                item,
+                r#const: false,
+            }))
+        },
+        | Rule::const_pointer => {
+            let tref_pair = pair.into_inner().next().unwrap();
+            let item =
+                preview1_tref(spec, tref_pair).wrap_err("failed to const_pointer type ref")?;
+
+            WasiType::Pointer(Box::new(PointerType {
+                item,
+                r#const: true,
+            }))
+        },
         | Rule::list => {
             let tref_pair = pair.into_inner().next().unwrap();
             let item = preview1_tref(spec, tref_pair).wrap_err("failed to handle list type ref")?;
@@ -451,7 +471,6 @@ mod tests {
 
     #[test]
     fn ok() {
-        let cfg = z3::Config::new();
         let _spec = preview1().unwrap();
     }
 }

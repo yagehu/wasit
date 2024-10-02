@@ -324,6 +324,17 @@ impl Environment {
             },
             | (WasiType::Record(_), _) => panic!(),
             | (WasiType::Flags(_), _) => (),
+            | (WasiType::Pointer(pointer), WasiValue::List(pointer_value)) => {
+                for item in &pointer_value.items {
+                    self.add_resources_to_ctx_recursively(
+                        spec,
+                        ctx,
+                        pointer.item.resolve(spec),
+                        item,
+                    );
+                }
+            },
+            | (WasiType::Pointer(_), _) => panic!(),
             | (WasiType::List(list), WasiValue::List(list_value)) => {
                 for item in &list_value.items {
                     self.add_resources_to_ctx_recursively(spec, ctx, list.item.resolve(spec), item);
@@ -386,6 +397,16 @@ impl Environment {
             },
             | (WasiType::Record(_), _) => panic!(),
             | (WasiType::Flags(_), _) => (),
+            | (WasiType::Pointer(pointer), WasiValue::Pointer(pointer_value)) => {
+                for item in &pointer_value.items {
+                    self.register_result_value_resource_recursively(
+                        spec,
+                        pointer.item.resolve(spec),
+                        item,
+                    );
+                }
+            },
+            | (WasiType::Pointer(_), _) => panic!(),
             | (WasiType::List(list), WasiValue::List(list_value)) => {
                 for item in &list_value.items {
                     self.register_result_value_resource_recursively(

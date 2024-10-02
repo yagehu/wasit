@@ -24,12 +24,12 @@ fn ok() {
             state: WasiValue::Record(RecordValue {
                 members: vec![
                     WasiValue::U64(0),
-                    spec.get_type("fdflags")
+                    spec.get_wasi_type("fdflags")
                         .unwrap()
                         .flags()
                         .unwrap()
                         .value(HashSet::new()),
-                    spec.get_type("filetype")
+                    spec.get_wasi_type("filetype")
                         .unwrap()
                         .variant()
                         .unwrap()
@@ -47,12 +47,12 @@ fn ok() {
             state: WasiValue::Record(RecordValue {
                 members: vec![
                     WasiValue::U64(0),
-                    spec.get_type("fdflags")
+                    spec.get_wasi_type("fdflags")
                         .unwrap()
                         .flags()
                         .unwrap()
                         .value(HashSet::new()),
-                    spec.get_type("filetype")
+                    spec.get_wasi_type("filetype")
                         .unwrap()
                         .variant()
                         .unwrap()
@@ -125,10 +125,11 @@ fn ok() {
                     ._eq(&z3::ast::String::from_str(&ctx, "file").unwrap()),
                 &z3::ast::Bool::or(
                     &ctx,
-                    decls
-                        .resources
-                        .values()
-                        .map(|node| some_fd._eq(node))
+                    env.resources_by_types
+                        .get("fd")
+                        .unwrap()
+                        .iter()
+                        .map(|&idx| decls.resources.get(&idx).unwrap()._eq(&some_fd))
                         .collect_vec()
                         .as_slice(),
                 ),

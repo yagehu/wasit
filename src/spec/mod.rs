@@ -18,26 +18,6 @@ impl Spec {
         let mut types: IndexSpace<String, TypeDef> = Default::default();
 
         types.push(
-            "bool".to_string(),
-            TypeDef {
-                name:  "bool".to_string(),
-                wasi:  WasiType::Variant(VariantType {
-                    tag_repr: IntRepr::U8,
-                    cases:    vec![
-                        VariantCaseType {
-                            name:    "true".to_string(),
-                            payload: None,
-                        },
-                        VariantCaseType {
-                            name:    "false".to_string(),
-                            payload: None,
-                        },
-                    ],
-                }),
-                state: None,
-            },
-        );
-        types.push(
             "s64".to_string(),
             TypeDef {
                 name:  "s64".to_string(),
@@ -84,7 +64,7 @@ impl Spec {
         self.types.push(name.clone(), TypeDef { name, wasi, state });
     }
 
-    pub fn get_type(&self, name: &str) -> Option<WasiType> {
+    pub fn get_wasi_type(&self, name: &str) -> Option<WasiType> {
         let tdef = self.types.get_by_key(name)?;
 
         Some(match &tdef.state {
@@ -191,6 +171,7 @@ pub enum WasiType {
     Flags(FlagsType),
     Variant(VariantType),
     Record(RecordType),
+    Pointer(Box<PointerType>),
     String,
     List(Box<ListType>),
 }
@@ -224,6 +205,7 @@ impl WasiType {
                     .map(|member| member.tref.resolve(spec).wasi.zero_value(spec))
                     .collect::<Vec<_>>(),
             }),
+            | WasiType::Pointer(_pointer) => WasiValue::Pointer(PointerValue { items: vec![] }),
             | WasiType::String => WasiValue::String(Vec::new()),
             | WasiType::List(_list) => WasiValue::List(ListValue { items: vec![] }),
         }
@@ -280,6 +262,16 @@ impl WasiType {
 
                 WasiValue::String(bytes)
             },
+            | WasiType::Pointer(pointer) => {
+                let n = u.choose_index(16)?;
+                let mut items = Vec::with_capacity(n);
+
+                for _ in 0..n {
+                    items.push(pointer.item.resolve_wasi(spec).arbitrary_value(spec, u)?);
+                }
+
+                WasiValue::Pointer(PointerValue { items })
+            },
             | WasiType::List(list) => {
                 let n = u.choose_index(16)?;
                 let mut items = Vec::with_capacity(n);
@@ -307,6 +299,13 @@ impl WasiType {
         }
     }
 
+    pub fn pointer(&self) -> Option<&PointerType> {
+        match self {
+            | Self::Pointer(pointer) => Some(pointer),
+            | _ => None,
+        }
+    }
+
     pub fn record(&self) -> Option<&RecordType> {
         match self {
             | Self::Record(record) => Some(record),
@@ -320,6 +319,7 @@ impl WasiType {
             | WasiType::U16 => 2,
             | WasiType::U32 => 4,
             | WasiType::S64 | WasiType::U64 => 8,
+            | WasiType::Pointer(_) => 4,
             | WasiType::List(_) => 4,
             | WasiType::Record(record) => record.alignment(spec),
             | WasiType::Variant(variant) => variant.alignment(spec),
@@ -335,6 +335,7 @@ impl WasiType {
             | Self::U16 => 2,
             | Self::U32 => 4,
             | Self::S64 | Self::U64 => 8,
+            | Self::Pointer(_) => 4,
             | Self::List(_) => 8,
             | Self::Record(record) => record.mem_size(spec),
             | Self::Variant(variant) => variant.mem_size(spec),
@@ -526,6 +527,12 @@ pub struct ListType {
     pub item: TypeRef,
 }
 
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct PointerType {
+    pub item:    TypeRef,
+    pub r#const: bool,
+}
+
 #[derive(Serialize, Deserialize, Hash, PartialOrd, Ord, PartialEq, Eq, Clone, Debug)]
 pub enum WasiValue {
     Handle(u32),
@@ -537,6 +544,7 @@ pub enum WasiValue {
     Record(RecordValue),
     Flags(FlagsValue),
     List(ListValue),
+    Pointer(PointerValue),
     String(Vec<u8>),
     Variant(Box<VariantValue>),
 }
@@ -666,6 +674,30 @@ impl WasiValue {
                     },
                 )
             },
+            | (WasiType::Pointer(pointer), Self::Pointer(pointer_value)) => {
+                let items = pointer_value.items.into_iter().map(|item| {
+                    item.into_pb(spec, &pointer.item)
+                }).collect();
+
+                if pointer.r#const {
+                    wazzi_executor_pb_rust::value::Which::ConstPointer(
+                        wazzi_executor_pb_rust::value::Array {
+                            items,
+                            item_size: pointer.item.mem_size(spec),
+                            special_fields: Default::default()
+                        }
+                    )
+                } else {
+                    wazzi_executor_pb_rust::value::Which::Pointer(
+                        wazzi_executor_pb_rust::value::Array {
+                            items,
+                            item_size: pointer.item.mem_size(spec),
+                            special_fields: Default::default()
+                        }
+                    )
+                }
+            },
+            | (_, Self::Pointer(_pointer_value)) => unreachable!(),
             | (WasiType::List(list_type), Self::List(list)) => {
                 let items = list.items.into_iter().map(|item| {
                     item.into_pb(spec, &list_type.item)
@@ -798,6 +830,11 @@ pub struct RecordValue {
 #[derive(Serialize, Deserialize, Hash, PartialOrd, Ord, PartialEq, Eq, Clone, Debug)]
 pub struct FlagsValue {
     pub fields: Vec<bool>,
+}
+
+#[derive(Serialize, Deserialize, Hash, PartialOrd, Ord, PartialEq, Eq, Clone, Debug)]
+pub struct PointerValue {
+    pub items: Vec<WasiValue>,
 }
 
 #[derive(Serialize, Deserialize, Hash, PartialOrd, Ord, PartialEq, Eq, Clone, Debug)]

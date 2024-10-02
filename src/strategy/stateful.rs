@@ -13,15 +13,16 @@ use eyre::Context;
 use idxspace::IndexSpace;
 use itertools::Itertools;
 use petgraph::{data::DataMap as _, graph::DiGraph, visit::IntoNeighborsDirected};
-use z3::ast::{exists_const, forall_const, Ast, Bool};
+use z3::ast::{exists_const, forall_const, lambda_const, Ast, Bool, Int};
 
 use super::CallStrategy;
 use crate::{
     spec::{
-        witx::ilang::{NoNonExistentDirBacktrack, Term},
+        witx::ilang::{self, NoNonExistentDirBacktrack, Term},
         FlagsValue,
         Function,
         ListValue,
+        PointerValue,
         RecordValue,
         Spec,
         TypeDef,
@@ -181,7 +182,7 @@ impl State {
 
                     (
                         param_name.to_owned(),
-                        z3::ast::Dynamic::fresh_const(ctx, "", &datatype.sort),
+                        z3::ast::Dynamic::fresh_const(ctx, "param--", &datatype.sort),
                     )
                 })
                 .collect(),
@@ -549,7 +550,7 @@ impl State {
                                     .unwrap()],
                             )
                             .implies(&unsafe {
-                                z3::ast::Int::wrap(
+                                Int::wrap(
                                     ctx,
                                     z3_sys::Z3_mk_seq_length(
                                         ctx.get_z3_context(),
@@ -560,7 +561,7 @@ impl State {
                                             .get_z3_ast(),
                                     ),
                                 )
-                                ._eq(&z3::ast::Int::from_u64(ctx, 0))
+                                ._eq(&Int::from_u64(ctx, 0))
                                 .not()
                             })
                         })
@@ -682,11 +683,21 @@ impl State {
 
         // Input contract
         if let Some(input_contract) = function.input_contract.as_ref() {
+            let empty_eval_ctx = BTreeMap::new();
+
             clauses.push(
-                self.term_to_z3_ast(ctx, spec, types, decls, input_contract, function)
-                    .0
-                    .as_bool()
-                    .unwrap(),
+                self.term_to_z3_ast(
+                    ctx,
+                    &empty_eval_ctx,
+                    spec,
+                    types,
+                    decls,
+                    input_contract,
+                    function,
+                )
+                .0
+                .as_bool()
+                .unwrap(),
             );
         }
 
@@ -696,19 +707,117 @@ impl State {
     fn term_to_z3_ast<'ctx, 'spec>(
         &self,
         ctx: &'ctx z3::Context,
+        eval_ctx: &BTreeMap<String, (z3::ast::Dynamic<'ctx>, Type)>,
         spec: &'spec Spec,
         types: &'ctx StateTypes<'ctx>,
         decls: &'ctx StateDecls<'ctx>,
         term: &Term,
         function: &Function,
-    ) -> (z3::ast::Dynamic<'ctx>, &'spec TypeDef) {
+    ) -> (z3::ast::Dynamic<'ctx>, Type) {
         match term {
+            | Term::Foldl(t) => {
+                let (target, target_type) =
+                    self.term_to_z3_ast(ctx, eval_ctx, spec, types, decls, &t.target, function);
+                let (acc, acc_type) =
+                    self.term_to_z3_ast(ctx, eval_ctx, spec, types, decls, &t.acc, function);
+                let (func, _func_type) =
+                    self.term_to_z3_ast(ctx, eval_ctx, spec, types, decls, &t.func, function);
+
+                (
+                    types
+                        .resources
+                        .get(&target_type.wasi().unwrap().name)
+                        .unwrap()
+                        .variants[0]
+                        .accessors[0]
+                        .apply(&[&target])
+                        .as_seq()
+                        .unwrap()
+                        .foldl(&func.as_array().unwrap(), &acc),
+                    acc_type,
+                )
+            },
+            | Term::Lambda(t) => {
+                let bounds_ = t
+                    .bounds
+                    .iter()
+                    .map(|bound| {
+                        let (sort, t) = match &bound.tref {
+                            | ilang::TypeRef::Wasi(wasi) => (
+                                types.resources.get(wasi).unwrap().sort.clone(),
+                                Type::Wasi(spec.types.get_by_key(wasi).unwrap().clone()),
+                            ),
+                            | ilang::TypeRef::Wazzi(wazzi_type) => match wazzi_type {
+                                | ilang::WazziType::Bool => {
+                                    (z3::Sort::bool(ctx), Type::Wazzi(WazziType::Bool))
+                                },
+                                | ilang::WazziType::Int => {
+                                    (z3::Sort::int(ctx), Type::Wazzi(WazziType::Int))
+                                },
+                            },
+                        };
+
+                        (
+                            bound.name.clone(),
+                            z3::ast::Dynamic::fresh_const(ctx, "", &sort),
+                            t,
+                        )
+                    })
+                    .collect_vec();
+                let bounds = bounds_.iter().map(|b| &b.1 as &dyn Ast).collect_vec();
+                let eval_ctx = bounds_
+                    .iter()
+                    .map(|b| (b.0.to_owned(), (b.1.clone(), b.2.clone())))
+                    .collect();
+                let (body, r#type) =
+                    self.term_to_z3_ast(ctx, &eval_ctx, spec, types, decls, &t.body, function);
+
+                (
+                    z3::ast::Dynamic::from_ast(&lambda_const(ctx, bounds.as_slice(), &body)),
+                    Type::Wazzi(WazziType::Lambda(Box::new(LambdaType { range: r#type }))),
+                )
+            },
+            | Term::Map(t) => {
+                let (target, target_type) =
+                    self.term_to_z3_ast(ctx, eval_ctx, spec, types, decls, &t.target, function);
+                let (func, func_type) =
+                    self.term_to_z3_ast(ctx, eval_ctx, spec, types, decls, &t.func, function);
+                let range = match &func_type {
+                    | Type::Wasi(_type_def) => panic!(),
+                    | Type::Wazzi(wazzi_type) => match wazzi_type {
+                        | WazziType::Int => todo!(),
+                        | WazziType::Bool => todo!(),
+                        | WazziType::Lambda(lambda) => lambda.range.clone(),
+                        | WazziType::List(_) => todo!(),
+                    },
+                };
+
+                (
+                    types
+                        .resources
+                        .get(&target_type.wasi().unwrap().name)
+                        .unwrap()
+                        .variants[0]
+                        .accessors[0]
+                        .apply(&[&target])
+                        .as_seq()
+                        .unwrap()
+                        .map(&func.as_array().unwrap()),
+                    Type::Wazzi(WazziType::List(Box::new(range))),
+                )
+            },
+            | Term::Binding(name) => eval_ctx.get(name).unwrap().clone(),
+            | Term::True => (
+                z3::ast::Dynamic::from_ast(&Bool::from_bool(ctx, true)),
+                Type::Wazzi(WazziType::Bool),
+            ),
             | Term::Not(t) => {
-                let (term, tdef) = self.term_to_z3_ast(ctx, spec, types, decls, &t.term, function);
+                let (term, r#type) =
+                    self.term_to_z3_ast(ctx, eval_ctx, spec, types, decls, &t.term, function);
 
                 (
                     z3::ast::Dynamic::from_ast(&term.as_bool().unwrap().not()),
-                    tdef,
+                    r#type,
                 )
             },
             | Term::And(t) => (
@@ -717,15 +826,16 @@ impl State {
                     t.clauses
                         .iter()
                         .map(|clause| {
-                            self.term_to_z3_ast(ctx, spec, types, decls, clause, function)
+                            self.term_to_z3_ast(ctx, eval_ctx, spec, types, decls, clause, function)
                                 .0
+                                .simplify()
                                 .as_bool()
                                 .unwrap()
                         })
                         .collect_vec()
                         .as_slice(),
                 )),
-                spec.types.get_by_key("bool").unwrap(),
+                Type::Wazzi(WazziType::Bool),
             ),
             | Term::Or(t) => (
                 z3::ast::Dynamic::from_ast(&Bool::or(
@@ -733,7 +843,7 @@ impl State {
                     t.clauses
                         .iter()
                         .map(|clause| {
-                            self.term_to_z3_ast(ctx, spec, types, decls, clause, function)
+                            self.term_to_z3_ast(ctx, eval_ctx, spec, types, decls, clause, function)
                                 .0
                                 .as_bool()
                                 .unwrap()
@@ -741,11 +851,12 @@ impl State {
                         .collect_vec()
                         .as_slice(),
                 )),
-                spec.types.get_by_key("bool").unwrap(),
+                Type::Wazzi(WazziType::Bool),
             ),
             | Term::RecordFieldGet(t) => {
-                let (target, target_tdef) =
-                    self.term_to_z3_ast(ctx, spec, types, decls, &t.target, function);
+                let (target, target_type) =
+                    self.term_to_z3_ast(ctx, eval_ctx, spec, types, decls, &t.target, function);
+                let target_tdef = target_type.wasi().unwrap();
                 let target_datatype = types.resources.get(&target_tdef.name).unwrap();
                 let wasi_type = match &target_tdef.state {
                     | Some(state) => state,
@@ -761,7 +872,7 @@ impl State {
 
                 (
                     target_datatype.variants[0].accessors[i].apply(&[&target]),
-                    member.tref.resolve(spec),
+                    Type::Wasi(member.tref.resolve(spec).clone()),
                 )
             },
             | Term::Param(t) => {
@@ -774,11 +885,12 @@ impl State {
                     .tref
                     .resolve(spec);
 
-                (param.clone(), tdef)
+                (param.clone(), Type::Wasi(tdef.to_owned()))
             },
             | Term::FlagsGet(t) => {
-                let (target, target_tdef) =
-                    self.term_to_z3_ast(ctx, spec, types, decls, &t.target, function);
+                let (target, target_type) =
+                    self.term_to_z3_ast(ctx, eval_ctx, spec, types, decls, &t.target, function);
+                let target_tdef = target_type.wasi().unwrap();
                 let target_datatype = types.resources.get(&target_tdef.name).unwrap();
                 let wasi_type = match &target_tdef.state {
                     | Some(state) => state,
@@ -794,72 +906,91 @@ impl State {
 
                 (
                     target_datatype.variants[0].accessors[i].apply(&[&target]),
-                    spec.types.get_by_key("bool").unwrap(),
+                    Type::Wazzi(WazziType::Bool),
                 )
             },
             | Term::IntConst(t) => (
-                types.resources.get("s64").unwrap().variants[0]
-                    .constructor
-                    .apply(&[&z3::ast::Int::from_big_int(ctx, t)]),
-                spec.types.get_by_key("s64").unwrap(),
+                z3::ast::Dynamic::from_ast(&Int::from_big_int(ctx, t)),
+                Type::Wazzi(WazziType::Int),
             ),
-            | Term::IntAdd(t) => {
-                let (lhs, lhs_tdef) =
-                    self.term_to_z3_ast(ctx, spec, types, decls, &t.lhs, function);
-                let (rhs, rhs_tdef) =
-                    self.term_to_z3_ast(ctx, spec, types, decls, &t.rhs, function);
+            | Term::IntWrap(t) => {
+                let (op, op_type) =
+                    self.term_to_z3_ast(ctx, eval_ctx, spec, types, decls, &t.op, function);
 
                 (
-                    types.resources.get("s64").unwrap().variants[0]
-                        .constructor
-                        .apply(&[&z3::ast::Int::add(
-                            ctx,
-                            &[
-                                &types.resources.get(&lhs_tdef.name).unwrap().variants[0].accessors
-                                    [0]
-                                .apply(&[&lhs])
-                                .as_int()
-                                .unwrap(),
-                                &types.resources.get(&rhs_tdef.name).unwrap().variants[0].accessors
-                                    [0]
-                                .apply(&[&rhs])
-                                .as_int()
-                                .unwrap(),
-                            ],
-                        )]),
-                    spec.types.get_by_key("s64").unwrap(),
+                    z3::ast::Dynamic::from_ast(&op_type.unwrap_ast_as_int(types, &op)),
+                    Type::Wazzi(WazziType::Int),
+                )
+            },
+            | Term::IntAdd(t) => {
+                let (lhs, lhs_type) =
+                    self.term_to_z3_ast(ctx, eval_ctx, spec, types, decls, &t.lhs, function);
+                let (rhs, rhs_type) =
+                    self.term_to_z3_ast(ctx, eval_ctx, spec, types, decls, &t.rhs, function);
+
+                (
+                    z3::ast::Dynamic::from_ast(&Int::add(
+                        ctx,
+                        &[
+                            &lhs_type.unwrap_ast_as_int(types, &lhs),
+                            &rhs_type.unwrap_ast_as_int(types, &rhs),
+                        ],
+                    )),
+                    Type::Wazzi(WazziType::Int),
+                )
+            },
+            | Term::IntGt(t) => {
+                let (lhs, _lhs_type) =
+                    self.term_to_z3_ast(ctx, eval_ctx, spec, types, decls, &t.lhs, function);
+                let (rhs, _rhs_type) =
+                    self.term_to_z3_ast(ctx, eval_ctx, spec, types, decls, &t.rhs, function);
+
+                (
+                    z3::ast::Dynamic::from_ast(&lhs.as_int().unwrap().gt(&rhs.as_int().unwrap())),
+                    Type::Wazzi(WazziType::Bool),
                 )
             },
             | Term::IntLe(t) => {
-                let (lhs, lhs_tdef) =
-                    self.term_to_z3_ast(ctx, spec, types, decls, &t.lhs, function);
-                let (rhs, rhs_tdef) =
-                    self.term_to_z3_ast(ctx, spec, types, decls, &t.rhs, function);
+                let (lhs, lhs_type) =
+                    self.term_to_z3_ast(ctx, eval_ctx, spec, types, decls, &t.lhs, function);
+                let (rhs, rhs_type) =
+                    self.term_to_z3_ast(ctx, eval_ctx, spec, types, decls, &t.rhs, function);
 
                 (
                     z3::ast::Dynamic::from_ast(
-                        &types.resources.get(&lhs_tdef.name).unwrap().variants[0].accessors[0]
-                            .apply(&[&lhs])
-                            .as_int()
-                            .unwrap()
-                            .le(&types.resources.get(&rhs_tdef.name).unwrap().variants[0]
-                                .accessors[0]
-                                .apply(&[&rhs])
-                                .as_int()
-                                .unwrap()),
+                        &lhs_type
+                            .unwrap_ast_as_int(types, &lhs)
+                            .le(&rhs_type.unwrap_ast_as_int(types, &rhs)),
                     ),
-                    spec.types.get_by_key("bool").unwrap(),
+                    Type::Wazzi(WazziType::Bool),
+                )
+            },
+            | Term::ListLen(t) => {
+                let (op, op_type) =
+                    self.term_to_z3_ast(ctx, eval_ctx, spec, types, decls, &t.op, function);
+                let tdef = op_type.wasi().unwrap();
+                let datatype = types.resources.get(&tdef.name).unwrap();
+
+                (
+                    z3::ast::Dynamic::from_ast(
+                        &datatype.variants[0].accessors[0]
+                            .apply(&[&op])
+                            .as_seq()
+                            .unwrap()
+                            .length(),
+                    ),
+                    Type::Wazzi(WazziType::Int),
                 )
             },
             | Term::ValueEq(t) => {
-                let (lhs, _lhs_tdef) =
-                    self.term_to_z3_ast(ctx, spec, types, decls, &t.lhs, function);
-                let (rhs, _rhs_tdef) =
-                    self.term_to_z3_ast(ctx, spec, types, decls, &t.rhs, function);
+                let (lhs, _lhs_type) =
+                    self.term_to_z3_ast(ctx, eval_ctx, spec, types, decls, &t.lhs, function);
+                let (rhs, _rhs_type) =
+                    self.term_to_z3_ast(ctx, eval_ctx, spec, types, decls, &t.rhs, function);
 
                 (
                     z3::ast::Dynamic::from_ast(&lhs._eq(&rhs)),
-                    spec.types.get_by_key("bool").unwrap(),
+                    Type::Wazzi(WazziType::Bool),
                 )
             },
             | Term::VariantConst(t) => {
@@ -874,8 +1005,15 @@ impl State {
                     .unwrap();
                 let payload = match &t.payload {
                     | Some(payload_term) => {
-                        let (payload, _payload_tdef) =
-                            self.term_to_z3_ast(ctx, spec, types, decls, payload_term, function);
+                        let (payload, _payload_tdef) = self.term_to_z3_ast(
+                            ctx,
+                            eval_ctx,
+                            spec,
+                            types,
+                            decls,
+                            payload_term,
+                            function,
+                        );
 
                         vec![payload]
                     },
@@ -890,12 +1028,12 @@ impl State {
                             .collect_vec()
                             .as_slice(),
                     ),
-                    variant_tdef,
+                    Type::Wasi(variant_tdef.to_owned()),
                 )
             },
             | Term::NoNonExistentDirBacktrack(t) => (
                 no_nonexistent_dir_backtrack(ctx, types, decls, t),
-                spec.types.get_by_key("bool").unwrap(),
+                Type::Wazzi(WazziType::Bool),
             ),
         }
     }
@@ -936,7 +1074,15 @@ impl State {
                     .unwrap(),
             ),
             | WasiType::U16 => todo!(),
-            | WasiType::U32 => todo!(),
+            | WasiType::U32 => {
+                let i = datatype.variants[0].accessors[0]
+                    .apply(&[node])
+                    .simplify()
+                    .as_int()
+                    .unwrap();
+
+                WasiValue::U32(i.as_u64().unwrap() as u32)
+            },
             | WasiType::U64 => WasiValue::U64(
                 datatype.variants[0].accessors[0]
                     .apply(&[node])
@@ -1021,6 +1167,27 @@ impl State {
                     .as_bytes()
                     .to_vec(),
             ),
+            | WasiType::Pointer(pointer) => {
+                let seq = datatype.variants[0].accessors[0]
+                    .apply(&[node])
+                    .simplify()
+                    .as_seq()
+                    .unwrap();
+                let length = seq.length().simplify().as_u64().unwrap();
+                let mut items = Vec::with_capacity(length as usize);
+
+                for i in 0..length {
+                    items.push(self.decode_to_wasi_value(
+                        ctx,
+                        spec,
+                        types,
+                        &pointer.item.resolve(spec),
+                        &seq.nth(&Int::from_u64(ctx, i)).simplify(),
+                    ));
+                }
+
+                WasiValue::Pointer(PointerValue { items })
+            },
             | WasiType::List(list_type) => {
                 let seq = datatype.variants[0].accessors[0]
                     .apply(&[node])
@@ -1036,7 +1203,7 @@ impl State {
                         spec,
                         types,
                         &list_type.item.resolve(spec),
-                        &seq.nth(&z3::ast::Int::from_u64(ctx, i)).simplify(),
+                        &seq.nth(&Int::from_u64(ctx, i)).simplify(),
                     ));
                 }
 
@@ -1159,6 +1326,20 @@ impl<'ctx> StateTypes<'ctx> {
                     name,
                     vec![(name, z3::DatatypeAccessor::Sort(z3::Sort::string(ctx)))],
                 ),
+                | WasiType::Pointer(pointer) => {
+                    let tdef = pointer.item.resolve(spec);
+
+                    datatype.variant(
+                        name,
+                        vec![(
+                            name,
+                            z3::DatatypeAccessor::Sort(z3::Sort::seq(
+                                ctx,
+                                &resource_types.get(&tdef.name).unwrap().sort,
+                            )),
+                        )],
+                    )
+                },
                 | WasiType::List(list_type) => {
                     let tdef = list_type.item.resolve(spec);
 
@@ -1223,32 +1404,32 @@ impl<'ctx> StateTypes<'ctx> {
                 .apply(&[node])
                 .as_int()
                 .unwrap()
-                ._eq(&z3::ast::Int::from_u64(ctx, i.into())),
+                ._eq(&Int::from_u64(ctx, i.into())),
             | (_, &WasiValue::U16(i)) => datatype.variants[0].accessors[0]
                 .apply(&[node])
                 .as_int()
                 .unwrap()
-                ._eq(&z3::ast::Int::from_u64(ctx, i.into())),
+                ._eq(&Int::from_u64(ctx, i.into())),
             | (_, &WasiValue::U32(i)) => datatype.variants[0].accessors[0]
                 .apply(&[node])
                 .as_int()
                 .unwrap()
-                ._eq(&z3::ast::Int::from_u64(ctx, i.into())),
+                ._eq(&Int::from_u64(ctx, i.into())),
             | (_, &WasiValue::U64(i)) => datatype.variants[0].accessors[0]
                 .apply(&[node])
                 .as_int()
                 .unwrap()
-                ._eq(&z3::ast::Int::from_u64(ctx, i)),
+                ._eq(&Int::from_u64(ctx, i)),
             | (_, &WasiValue::S64(i)) => datatype.variants[0].accessors[0]
                 .apply(&[node])
                 .as_int()
                 .unwrap()
-                ._eq(&z3::ast::Int::from_i64(ctx, i)),
+                ._eq(&Int::from_i64(ctx, i)),
             | (_, &WasiValue::Handle(handle)) => datatype.variants[0].accessors[0]
                 .apply(&[node])
                 .as_int()
                 .unwrap()
-                ._eq(&z3::ast::Int::from_u64(ctx, handle.into())),
+                ._eq(&Int::from_u64(ctx, handle.into())),
             | (WasiType::Record(record), WasiValue::Record(record_value)) => Bool::and(
                 ctx,
                 record
@@ -1334,6 +1515,7 @@ impl<'ctx> StateTypes<'ctx> {
                 }
             },
             | (_, WasiValue::Variant(_variant_value)) => unreachable!(),
+            | (_, WasiValue::Pointer(_pointer_value)) => unreachable!(),
             | (_, WasiValue::List(_list_value)) => unreachable!(),
         }
     }
@@ -2100,4 +2282,52 @@ struct PathString {
 #[derive(Debug)]
 struct PathStringEncoding<'ctx> {
     segments: Vec<z3::ast::Dynamic<'ctx>>,
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+enum Type {
+    Wasi(TypeDef),
+    Wazzi(WazziType),
+}
+
+impl Type {
+    fn wasi(&self) -> Option<&TypeDef> {
+        match self {
+            | Self::Wasi(tdef) => Some(tdef),
+            | _ => None,
+        }
+    }
+
+    fn unwrap_ast_as_int<'ctx>(
+        &self,
+        types: &'ctx StateTypes<'ctx>,
+        ast: &z3::ast::Dynamic<'ctx>,
+    ) -> Int<'ctx> {
+        match &self {
+            | Type::Wasi(tdef) => match &tdef.wasi {
+                | WasiType::S64 | WasiType::U8 | WasiType::U16 | WasiType::U32 | WasiType::U64 => {
+                    types.resources.get(&tdef.name).unwrap().variants[0].accessors[0]
+                        .apply(&[ast])
+                        .as_int()
+                        .unwrap()
+                },
+                | _ => panic!(),
+            },
+            | Type::Wazzi(WazziType::Int) => ast.as_int().unwrap(),
+            | _ => panic!(),
+        }
+    }
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+enum WazziType {
+    Int,
+    Bool,
+    Lambda(Box<LambdaType>),
+    List(Box<Type>),
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+struct LambdaType {
+    range: Type,
 }

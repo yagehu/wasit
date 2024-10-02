@@ -33,7 +33,7 @@ fn initialize(
                 special_fields: Default::default(),
             }],
             results:        vec![spec
-                .get_type("prestat")
+                .get_wasi_type("prestat")
                 .unwrap()
                 .zero_value(spec)
                 .into_pb(spec, &TypeRef::Named("prestat".to_string()))],
@@ -171,7 +171,7 @@ impl InitializeState for Wasmer<'_> {
 
         let mut preopens: Vec<_> = Default::default();
         let rights_base = spec
-            .get_type("rights")
+            .get_wasi_type("rights")
             .unwrap()
             .flags()
             .unwrap()
@@ -193,7 +193,7 @@ impl InitializeState for Wasmer<'_> {
             )
             .into_pb(spec, &TypeRef::Named("rights".to_string()));
         let rights_inheriting = spec
-            .get_type("rights")
+            .get_wasi_type("rights")
             .unwrap()
             .flags()
             .unwrap()
@@ -224,7 +224,7 @@ impl InitializeState for Wasmer<'_> {
                         which:          Some(pb::value::Which::Handle(VIRTUAL_ROOT_FD)),
                         special_fields: Default::default(),
                     },
-                    spec.get_type("lookupflags")
+                    spec.get_wasi_type("lookupflags")
                         .unwrap()
                         .flags()
                         .unwrap()
@@ -236,7 +236,7 @@ impl InitializeState for Wasmer<'_> {
                         )),
                         special_fields: Default::default(),
                     },
-                    spec.get_type("oflags")
+                    spec.get_wasi_type("oflags")
                         .unwrap()
                         .flags()
                         .unwrap()
@@ -244,7 +244,7 @@ impl InitializeState for Wasmer<'_> {
                         .into_pb(spec, &TypeRef::Named("oflags".to_string())),
                     rights_base.clone(),
                     rights_inheriting.clone(),
-                    spec.get_type("fdflags")
+                    spec.get_wasi_type("fdflags")
                         .unwrap()
                         .flags()
                         .unwrap()

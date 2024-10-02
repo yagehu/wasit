@@ -337,14 +337,16 @@
   )
 )
 
-(typename $byte u8)
-(typename $buf (list $byte))
+(typename $buf (@witx pointer u8))
+(typename $cbuf (@witx const_pointer u8))
 
 ;;; A region of memory for scatter/gather reads.
 (typename $iovec
   (record
     ;;; The buffer to be filled.
     (field $buf $buf)
+    ;; The length of the buffer to be filled.
+    (field $buf_len $size)
   )
 )
 
@@ -352,7 +354,9 @@
 (typename $ciovec
   (record
     ;;; The buffer to be written.
-    (field $buf $buf)
+    (field $buf $cbuf)
+    ;; The length of the buffer to be written.
+    (field $buf_len $size)
   )
 )
 
@@ -860,10 +864,30 @@
     (result $error (expected $size (error $errno)))
     (@input
       (@and
+        ; Can only write to a regular file
         (@value.eq
           (@record.field.get (param $fd) $type)
           (@variant.const $filetype $regular_file)
         )
+
+        ; The input buffers must not be empty.
+        (@int.gt
+          (@foldl (param $iovs) 0 (@lambda ((param $acc @int) (param $iovec $ciovec))
+            (@int.add $acc (@record.field.get $iovec $buf_len))
+          ))
+          0
+        )
+
+        ; Buffer length must equal the buf_len field.
+        (@foldl (param $iovs) @true (@lambda ((param $acc @bool) (param $iovec $ciovec))
+          (@and
+            $acc
+            (@value.eq
+              (@int.const (@record.field.get $iovec $buf_len))
+              (@list.len (@record.field.get $iovec $buf))
+            )
+          )
+        ))
       )
     )
   )
