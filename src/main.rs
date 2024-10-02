@@ -39,7 +39,7 @@ use wazzi::{
     StatefulStrategy,
     StatelessStrategy,
 };
-use wazzi_runners::{MappedDir, Node, RunningExecutor, Wamr, Wasmedge, Wazero};
+use wazzi_runners::{MappedDir, Node, RunningExecutor, Wamr, Wasmedge, Wasmer, Wazero};
 use wazzi_store::FuzzStore;
 
 #[derive(Parser, Debug)]
