@@ -259,6 +259,17 @@ impl<'s> Fuzzer<'s> {
             let resume_pair = Arc::new((Mutex::new((true, 0usize)), Condvar::new()));
             let n_live_threads = Arc::new(AtomicUsize::new(self.runtimes.len()));
             let mut runtime_threads = Vec::with_capacity(self.runtimes.len());
+            let params = Arc::new(RwLock::new(Vec::new()));
+
+            thread::Builder::new()
+                .name("wazzi-strat".to_string())
+                .spawn_scoped(scope, {
+                    let params = params.clone();
+                    let spec = Spec::preview1()?;
+
+                    move || {}
+                })
+                .wrap_err("failed to spawn strategy thread")?;
 
             for ((runtime_name, mut store, executor), mut ctx) in runtimes.into_iter().zip(ctxs) {
                 runtime_threads.push(
