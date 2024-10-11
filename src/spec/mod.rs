@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, HashSet};
 use arbitrary::Unstructured;
 use idxspace::IndexSpace;
 use serde::{Deserialize, Serialize};
-use witx::{ilang, olang};
+use witx::slang;
 
 #[derive(Debug)]
 pub struct Spec {
@@ -95,12 +95,12 @@ impl Default for Interface {
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Function {
-    pub name:                  String,
-    pub params:                Vec<FunctionParam>,
-    pub results:               Vec<FunctionResult>,
-    pub effects:               olang::Program,
-    pub r#return:              Option<()>,
-    pub(crate) input_contract: Option<ilang::Term>,
+    pub name:                   String,
+    pub params:                 Vec<FunctionParam>,
+    pub results:                Vec<FunctionResult>,
+    pub r#return:               Option<()>,
+    pub(crate) input_contract:  Option<slang::Term>,
+    pub(crate) output_contract: Option<slang::Term>,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]

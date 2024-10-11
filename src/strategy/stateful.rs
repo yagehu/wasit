@@ -18,7 +18,7 @@ use z3::ast::{exists_const, forall_const, lambda_const, Ast, Bool, Int};
 use super::CallStrategy;
 use crate::{
     spec::{
-        witx::ilang::{self, NoNonExistentDirBacktrack, Term},
+        witx::slang::{self, NoNonExistentDirBacktrack, Term},
         FlagsValue,
         Function,
         ListValue,
@@ -743,15 +743,15 @@ impl State {
                     .iter()
                     .map(|bound| {
                         let (sort, t) = match &bound.tref {
-                            | ilang::TypeRef::Wasi(wasi) => (
+                            | slang::TypeRef::Wasi(wasi) => (
                                 types.resources.get(wasi).unwrap().sort.clone(),
                                 Type::Wasi(spec.types.get_by_key(wasi).unwrap().clone()),
                             ),
-                            | ilang::TypeRef::Wazzi(wazzi_type) => match wazzi_type {
-                                | ilang::WazziType::Bool => {
+                            | slang::TypeRef::Wazzi(wazzi_type) => match wazzi_type {
+                                | slang::WazziType::Bool => {
                                     (z3::Sort::bool(ctx), Type::Wazzi(WazziType::Bool))
                                 },
-                                | ilang::WazziType::Int => {
+                                | slang::WazziType::Int => {
                                     (z3::Sort::int(ctx), Type::Wazzi(WazziType::Int))
                                 },
                             },
@@ -853,7 +853,7 @@ impl State {
                 )),
                 Type::Wazzi(WazziType::Bool),
             ),
-            | Term::RecordFieldGet(t) => {
+            | Term::RecordField(t) => {
                 let (target, target_type) =
                     self.term_to_z3_ast(ctx, eval_ctx, spec, types, decls, &t.target, function);
                 let target_tdef = target_type.wasi().unwrap();
@@ -887,6 +887,7 @@ impl State {
 
                 (param.clone(), Type::Wasi(tdef.to_owned()))
             },
+            | Term::Result(t) => todo!(),
             | Term::FlagsGet(t) => {
                 let (target, target_type) =
                     self.term_to_z3_ast(ctx, eval_ctx, spec, types, decls, &t.target, function);
@@ -980,6 +981,17 @@ impl State {
                             .length(),
                     ),
                     Type::Wazzi(WazziType::Int),
+                )
+            },
+            | Term::U64Const(t) => {
+                let (value, _type) =
+                    self.term_to_z3_ast(ctx, eval_ctx, spec, types, decls, &t.term, function);
+
+                let datatype = types.resources.get("u64").unwrap();
+
+                (
+                    datatype.variants[0].constructor.apply(&[&value]),
+                    Type::Wasi(spec.types.get_by_key("u64").unwrap().clone()),
                 )
             },
             | Term::ValueEq(t) => {

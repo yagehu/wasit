@@ -18,8 +18,9 @@ pub(crate) enum Term {
     And(And),
     Or(Or),
 
-    RecordFieldGet(Box<RecordFieldGet>),
+    RecordField(Box<RecordField>),
     Param(Param),
+    Result(Param),
 
     FlagsGet(Box<FlagsGet>),
     ListLen(Box<ListLen>),
@@ -28,12 +29,16 @@ pub(crate) enum Term {
     IntAdd(Box<IntAdd>),
     IntGt(Box<IntGt>),
     IntLe(Box<IntLe>),
-
+    U64Const(Box<UnaryTerm>),
     ValueEq(Box<ValueEq>),
-
     VariantConst(Box<VariantConst>),
 
     NoNonExistentDirBacktrack(Box<NoNonExistentDirBacktrack>),
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub(crate) struct UnaryTerm {
+    pub(crate) term: Term,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -89,7 +94,7 @@ pub(crate) struct Or {
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub(crate) struct RecordFieldGet {
+pub(crate) struct RecordField {
     pub(crate) target: Term,
     pub(crate) member: String,
 }
@@ -153,7 +158,7 @@ pub(crate) struct NoNonExistentDirBacktrack {
 }
 
 #[derive(Parser)]
-#[grammar = "spec/witx/ilang.pest"]
+#[grammar = "spec/witx/slang.pest"]
 pub(super) struct Parser;
 
 pub(super) fn to_term(pair: Pair<'_, Rule>) -> Result<Term, eyre::Error> {
@@ -228,7 +233,7 @@ pub(super) fn to_term(pair: Pair<'_, Rule>) -> Result<Term, eyre::Error> {
                 .map(|p| to_term(p))
                 .collect::<Result<_, _>>()?,
         }),
-        | Rule::record_field_get => {
+        | Rule::record_field => {
             let mut pairs = pair.into_inner();
             let target = to_term(pairs.next().unwrap())
                 .wrap_err("failed to handle @record.field.get target")?;
@@ -240,12 +245,22 @@ pub(super) fn to_term(pair: Pair<'_, Rule>) -> Result<Term, eyre::Error> {
                 .unwrap()
                 .to_owned();
 
-            Term::RecordFieldGet(Box::new(RecordFieldGet {
+            Term::RecordField(Box::new(RecordField {
                 target,
                 member: attr,
             }))
         },
         | Rule::param => Term::Param(Param {
+            name: pair
+                .into_inner()
+                .next()
+                .unwrap()
+                .as_str()
+                .strip_prefix('$')
+                .unwrap()
+                .to_owned(),
+        }),
+        | Rule::result => Term::Result(Param {
             name: pair
                 .into_inner()
                 .next()
@@ -304,6 +319,9 @@ pub(super) fn to_term(pair: Pair<'_, Rule>) -> Result<Term, eyre::Error> {
 
             Term::IntConst(BigInt::from_str(s)?)
         },
+        | Rule::u64_const => Term::U64Const(Box::new(UnaryTerm {
+            term: to_term(pair.into_inner().next().unwrap())?,
+        })),
         | Rule::value_eq => {
             let mut pairs = pair.into_inner();
             let lhs = to_term(pairs.next().unwrap())?;

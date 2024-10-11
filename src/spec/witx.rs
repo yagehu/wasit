@@ -1,8 +1,6 @@
-pub mod ilang;
-pub mod olang;
+pub mod slang;
 
 use eyre::{eyre as err, Context as _, ContextCompat as _};
-use olang::Program;
 use pest::{
     iterators::{Pair, Pairs},
     Parser as _,
@@ -144,7 +142,7 @@ fn preview1_module(spec: &Spec, pairs: Pairs<'_, Rule>) -> Result<Interface, eyr
         let mut results = Vec::new();
         let mut r#return = None;
         let mut input_contract = None;
-        let mut effects = Program { stmts: Vec::new() };
+        let mut output_contract = None;
 
         for pair in pairs {
             match pair.as_rule() {
@@ -201,23 +199,23 @@ fn preview1_module(spec: &Spec, pairs: Pairs<'_, Rule>) -> Result<Interface, eyr
                     match annot_pair.as_rule() {
                         | Rule::annotation if annot_pair.as_str() == "@input" => {
                             let pair = pairs.next().unwrap();
-                            let pair = ilang::Parser::parse(ilang::Rule::term_final, pair.as_str())
-                                .wrap_err("Failed to parse ilang")?
+                            let pair = slang::Parser::parse(slang::Rule::term_final, pair.as_str())
+                                .wrap_err("Failed to parse slang")?
                                 .next()
                                 .unwrap();
-                            let term = ilang::to_term(pair)?;
+                            let term = slang::to_term(pair)?;
 
                             input_contract = Some(term);
                         },
-                        | Rule::annotation if annot_pair.as_str() == "@effects" => {
-                            for pair in pairs {
-                                let pair = olang::Parser::parse(olang::Rule::stmt, pair.as_str())
-                                    .wrap_err("failed to parse elang")?
-                                    .next()
-                                    .unwrap();
+                        | Rule::annotation if annot_pair.as_str() == "@output" => {
+                            let pair = pairs.next().unwrap();
+                            let pair = slang::Parser::parse(slang::Rule::term_final, pair.as_str())
+                                .wrap_err("failed to parse output slang")?
+                                .next()
+                                .unwrap();
+                            let term = slang::to_term(pair)?;
 
-                                effects.stmts.push(olang::to_stmt(spec, pair)?);
-                            }
+                            output_contract = Some(term);
                         },
                         | _ => panic!("{:?}", annot_pair),
                     }
@@ -234,7 +232,7 @@ fn preview1_module(spec: &Spec, pairs: Pairs<'_, Rule>) -> Result<Interface, eyr
                 results,
                 r#return,
                 input_contract,
-                effects,
+                output_contract,
             },
         );
     }

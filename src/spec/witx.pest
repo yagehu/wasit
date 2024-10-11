@@ -8,7 +8,7 @@ typename = { "(" ~ "typename" ~ id ~ type_ref ~ annotation_expr* ~ ")" }
 
 comment = @{ ";" ~ (!NEWLINE ~ ANY)* ~ NEWLINE }
 
-id = @{ "$" ~ (ASCII_ALPHANUMERIC | "." | "-" | "_")+ }
+id = @{ "$" ~ (ASCII_ALPHANUMERIC | "." | "-" | "_" | "'")+ }
 
 type_ref = { id | type }
 
