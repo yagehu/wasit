@@ -107,6 +107,15 @@ impl CallStrategy for StatelessStrategy<'_, '_, '_, '_> {
 
         Ok(params)
     }
+
+    fn handle_results(
+        &mut self,
+        _spec: &Spec,
+        _function: &Function,
+        _results: Vec<Option<ResourceIdx>>,
+    ) -> Result<(), eyre::Error> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]

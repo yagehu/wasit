@@ -1040,7 +1040,7 @@
     (@output
       (@or
         (@and
-          (@value.eq (@record.field (result $ok') $offset) (@u64.const 0))
+          (@value.eq (@int.const (@record.field (result $ok') $offset)) (@int.const (@u64.const 0)))
             ;(@record.field (result $ok') $flags (param $fdflags))
             ;;; TODO @fs.file_type
             ;(@record.field (result $ok') $type (@variant.const $filetype $regular_file))

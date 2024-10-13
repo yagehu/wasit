@@ -15,7 +15,7 @@ use std::{
     path::PathBuf,
 };
 
-use eyre::eyre as err;
+use eyre::{eyre as err, Context};
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use spec::{Function, RecordValue, Spec, TypeDef, WasiType, WasiValue};
@@ -148,7 +148,6 @@ impl Environment {
     }
 
     pub fn call(
-        &self,
         spec: &Spec,
         store: &mut TraceStore<Call>,
         function: &Function,
@@ -227,9 +226,10 @@ impl Environment {
         spec: &Spec,
         function: &Function,
         params: &[(WasiValue, Option<ResourceIdx>)],
-        results: Vec<(String, WasiValue)>,
-    ) {
+        results: &Vec<(String, WasiValue)>,
+    ) -> Vec<Option<ResourceIdx>> {
         let mut resources: HashMap<&str, ResourceIdx> = Default::default();
+        let mut result_resource_idxs = Vec::new();
 
         for (result, (name, result_value)) in function.results.iter().zip(results.iter()) {
             if let Some(id) = self.register_result_value_resource_recursively(
@@ -237,66 +237,14 @@ impl Environment {
                 result.tref.resolve(spec),
                 result_value,
             ) {
+                result_resource_idxs.push(Some(id));
                 resources.insert(name, id);
+            } else {
+                result_resource_idxs.push(None);
             }
         }
 
-        todo!()
-
-        // for stmt in &function.effects.stmts {
-        //     match stmt {
-        //         | olang::Stmt::RecordFieldSet(record_field_set) => {
-        //             let value = match &record_field_set.value {
-        //                 | olang::Expr::Param(param_name) => {
-        //                     let (i, _param) = function
-        //                         .params
-        //                         .iter()
-        //                         .enumerate()
-        //                         .find(|(_i, param)| &param.name == param_name)
-        //                         .unwrap();
-
-        //                     params[i].0.clone()
-        //                 },
-        //                 | olang::Expr::ResourceId(param_name) => {
-        //                     let (i, _param) = function
-        //                         .params
-        //                         .iter()
-        //                         .enumerate()
-        //                         .find(|(_i, param)| &param.name == param_name)
-        //                         .unwrap();
-
-        //                     WasiValue::U64(params[i].1.unwrap().0 as u64)
-        //                 },
-        //                 | olang::Expr::WasiValue(value) => value.clone(),
-        //             };
-        //             let result = function
-        //                 .results
-        //                 .iter()
-        //                 .find(|result| result.name == record_field_set.result)
-        //                 .unwrap();
-        //             let tdef = result.tref.resolve(spec);
-        //             let id = *resources.get(record_field_set.result.as_str()).unwrap();
-        //             let resource = self.resources.get_mut(id).unwrap();
-        //             let record_type = tdef.state.as_ref().unwrap().record().unwrap();
-        //             let (i, _field_type) = record_type
-        //                 .members
-        //                 .iter()
-        //                 .enumerate()
-        //                 .find(|(_i, member)| member.name == record_field_set.field)
-        //                 .unwrap();
-        //             let old_value = resource.state.clone();
-        //             let record = resource.state.record_mut().unwrap();
-        //             let reverse_index = self
-        //                 .reverse_resource_index
-        //                 .entry(tdef.name.clone())
-        //                 .or_default();
-
-        //             *record.members.get_mut(i).unwrap() = value;
-        //             reverse_index.remove(&old_value);
-        //             reverse_index.insert(resource.state.clone(), id);
-        //         },
-        //     }
-        // }
+        result_resource_idxs
     }
 
     pub fn add_resources_to_ctx_recursively(

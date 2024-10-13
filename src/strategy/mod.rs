@@ -18,4 +18,11 @@ pub trait CallStrategy {
         spec: &Spec,
         function: &Function,
     ) -> Result<Vec<(WasiValue, Option<ResourceIdx>)>, eyre::Error>;
+
+    fn handle_results(
+        &mut self,
+        spec: &Spec,
+        function: &Function,
+        results: Vec<Option<ResourceIdx>>,
+    ) -> Result<(), eyre::Error>;
 }

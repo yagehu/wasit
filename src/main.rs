@@ -64,7 +64,7 @@ impl Strategy {
     fn into_call_strategy<'a>(
         self,
         u: &'a mut Unstructured,
-        env: &'a Environment,
+        env: &'a mut Environment,
         ctx: &'a RuntimeContext,
         z3_ctx: &'a z3::Context,
     ) -> Box<dyn CallStrategy + 'a> {
@@ -259,17 +259,6 @@ impl<'s> Fuzzer<'s> {
             let resume_pair = Arc::new((Mutex::new((true, 0usize)), Condvar::new()));
             let n_live_threads = Arc::new(AtomicUsize::new(self.runtimes.len()));
             let mut runtime_threads = Vec::with_capacity(self.runtimes.len());
-            let params = Arc::new(RwLock::new(Vec::new()));
-
-            thread::Builder::new()
-                .name("wazzi-strat".to_string())
-                .spawn_scoped(scope, {
-                    let params = params.clone();
-                    let spec = Spec::preview1()?;
-
-                    move || {}
-                })
-                .wrap_err("failed to spawn strategy thread")?;
 
             for ((runtime_name, mut store, executor), mut ctx) in runtimes.into_iter().zip(ctxs) {
                 runtime_threads.push(
@@ -308,11 +297,10 @@ impl<'s> Fuzzer<'s> {
                                         return Err(FuzzError::DiffFound);
                                     }
 
-                                    let env = env.read().unwrap();
-                                    let mut strategy =
-                                        strategy.into_call_strategy(&mut u, &env, &ctx, &z3_ctx);
+                                    let mut env = env.write().unwrap();
+                                    let mut strategy = strategy
+                                        .into_call_strategy(&mut u, &mut env, &ctx, &z3_ctx);
                                     let function = strategy.select_function(&spec)?;
-                                    let mut env_prev_iter = env.deref().clone();
 
                                     tracing::info!(
                                         epoch = epoch,
@@ -322,7 +310,7 @@ impl<'s> Fuzzer<'s> {
                                     );
                                     iteration += 1;
 
-                                    let (params, results) = match env.call(
+                                    let (params, results) = match Environment::call(
                                         &spec,
                                         store.trace_mut(),
                                         function,
@@ -343,6 +331,8 @@ impl<'s> Fuzzer<'s> {
                                     };
 
                                     drop(strategy);
+
+                                    let mut env_prev_iter = env.deref().clone();
 
                                     if let Some(results) = &results {
                                         for (result_value, result) in
@@ -373,7 +363,7 @@ impl<'s> Fuzzer<'s> {
                                         pause_state.0 = 0;
                                         pause_state.1 = pause_state.1.wrapping_add(1);
                                         pause_cond.notify_all();
-                                        tx.send((function, params, results)).unwrap();
+                                        tx.send((function, params, results, ctx.clone())).unwrap();
                                     }
 
                                     drop(
@@ -394,10 +384,12 @@ impl<'s> Fuzzer<'s> {
             thread::Builder::new()
                 .name("wazzi-differ".to_string())
                 .spawn_scoped(scope, {
+                    let mut u = Unstructured::new(&data);
+
                     move || -> Result<(), FuzzError> {
                         let spec = Spec::preview1()?;
 
-                        while let Ok((function, params, results)) = rx.recv() {
+                        while let Ok((function, params, results, ctx)) = rx.recv() {
                             let runtimes = run_store
                                 .runtimes::<Call>()
                                 .wrap_err("failed to resume runtimes")?
@@ -488,19 +480,30 @@ impl<'s> Fuzzer<'s> {
                                 }
                             }
 
-                            if let Some(results) = results {
-                                let results = function
-                                    .results
-                                    .iter()
-                                    .zip(results)
-                                    .map(|(result, result_value)| {
-                                        (result.name.clone(), result_value)
-                                    })
-                                    .collect_vec();
+                            if !cancel.load(atomic::Ordering::SeqCst) {
+                                if let Some(results) = results {
+                                    let z3_cfg = z3::Config::new();
+                                    let z3_ctx = z3::Context::new(&z3_cfg);
+                                    let results = function
+                                        .results
+                                        .iter()
+                                        .zip(results)
+                                        .map(|(result, result_value)| {
+                                            (result.name.clone(), result_value)
+                                        })
+                                        .collect_vec();
+                                    let mut env = env.write().unwrap();
+                                    let result_resource_idxs = env.execute_function_effects(
+                                        &spec, &function, &params, &results,
+                                    );
+                                    let mut strategy = self
+                                        .strategy
+                                        .into_call_strategy(&mut u, &mut env, &ctx, &z3_ctx);
 
-                                env.write()
-                                    .unwrap()
-                                    .execute_function_effects(&spec, &function, &params, results);
+                                    strategy
+                                        .handle_results(&spec, &function, result_resource_idxs)
+                                        .unwrap();
+                                }
                             }
 
                             let (resume_mu, resume_cond) = &*resume_pair;

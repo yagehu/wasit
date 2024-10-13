@@ -174,14 +174,12 @@ fn preview1_module(spec: &Spec, pairs: Pairs<'_, Rule>) -> Result<Interface, eyr
                     match &tref.resolve_wasi(spec) {
                         | WasiType::Variant(variant) => {
                             match (variant.cases.first(), variant.cases.get(1)) {
-                                | (Some(c1), Some(c2))
-                                    if c1.name == "expected" && c2.name == "error" =>
-                                {
+                                | (Some(c1), Some(c2)) if c1.name == "ok" && c2.name == "error" => {
                                     r#return = Some(());
 
                                     if let Some(payload) = c1.payload.as_ref() {
                                         results.push(FunctionResult {
-                                            name: "expected".to_owned(),
+                                            name: "ok".to_owned(),
                                             tref: payload.to_owned(),
                                         });
                                     }
@@ -361,7 +359,7 @@ fn preview1_wasi_type(spec: &Spec, pair: Pair<'_, Rule>) -> Result<WasiType, eyr
                 tag_repr: IntRepr::U8,
                 cases:    vec![
                     VariantCaseType {
-                        name:    "expected".to_owned(),
+                        name:    "ok".to_owned(),
                         payload: expected_pair.map(|p| preview1_tref(spec, p)).transpose()?,
                     },
                     VariantCaseType {
