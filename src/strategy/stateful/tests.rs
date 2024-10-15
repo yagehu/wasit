@@ -94,16 +94,7 @@ fn ok() {
         .get("path_open")
         .unwrap();
     let decls = state.declare(&spec, &ctx, &types, &env, function);
-    let clause = state.encode(
-        &ctx,
-        &env,
-        &types,
-        &decls,
-        &spec,
-        function,
-        &mut ToSolves::default(),
-        function.input_contract.as_ref().clone(),
-    );
+    let clause = state.encode(&ctx, &env, &types, &decls, &spec, function, None);
 
     solver.assert(&clause);
 

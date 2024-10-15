@@ -501,7 +501,17 @@ impl<'s> Fuzzer<'s> {
                                         .into_call_strategy(&mut u, &mut env, &ctx, &z3_ctx);
 
                                     strategy
-                                        .handle_results(&spec, &function, result_resource_idxs)
+                                        .handle_results(
+                                            &spec,
+                                            &function,
+                                            params
+                                                .iter()
+                                                .map(|(_wasi_value, resource_idx)| {
+                                                    resource_idx.to_owned()
+                                                })
+                                                .collect_vec(),
+                                            result_resource_idxs,
+                                        )
                                         .unwrap();
                                 }
                             }

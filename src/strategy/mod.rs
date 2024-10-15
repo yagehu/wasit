@@ -23,6 +23,7 @@ pub trait CallStrategy {
         &mut self,
         spec: &Spec,
         function: &Function,
+        params: Vec<Option<ResourceIdx>>,
         results: Vec<Option<ResourceIdx>>,
     ) -> Result<(), eyre::Error>;
 }

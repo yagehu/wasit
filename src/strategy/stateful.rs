@@ -138,6 +138,72 @@ impl State {
             );
         }
 
+        let mut to_solves = ToSolves::default();
+
+        if let Some(output_contract) = &function.output_contract {
+            fn scan_primed_in_output_contract<'ctx>(term: &Term, to_solves: &mut ToSolves<'ctx>) {
+                match term {
+                    | Term::Foldl(_t) => todo!(),
+                    | Term::Lambda(_t) => todo!(),
+                    | Term::Map(_t) => todo!(),
+                    | Term::Binding(_) => todo!(),
+                    | Term::True => todo!(),
+                    | Term::Not(_t) => todo!(),
+                    | Term::And(t) => {
+                        for clause in &t.clauses {
+                            scan_primed_in_output_contract(clause, to_solves);
+                        }
+                    },
+                    | Term::Or(t) => {
+                        for clause in &t.clauses {
+                            scan_primed_in_output_contract(clause, to_solves);
+                        }
+                    },
+                    | Term::RecordField(t) => scan_primed_in_output_contract(&t.target, to_solves),
+                    | Term::Param(_t) => (),
+                    | Term::Result(_t) => (),
+                    | Term::ResourceId(_) => (),
+                    | Term::FlagsGet(_t) => todo!(),
+                    | Term::ListLen(_t) => todo!(),
+                    | Term::IntWrap(t) => scan_primed_in_output_contract(&t.op, to_solves),
+                    | Term::IntConst(_t) => (),
+                    | Term::IntAdd(_t) => todo!(),
+                    | Term::IntGt(_t) => todo!(),
+                    | Term::IntLe(_t) => todo!(),
+                    | Term::U64Const(t) => scan_primed_in_output_contract(&t.term, to_solves),
+                    | Term::ValueEq(t) => {
+                        scan_primed_in_output_contract(&t.lhs, to_solves);
+                        scan_primed_in_output_contract(&t.rhs, to_solves);
+                    },
+                    | Term::VariantConst(t) => {
+                        if let Some(payload) = &t.payload {
+                            scan_primed_in_output_contract(payload, to_solves);
+                        }
+                    },
+                    | Term::NoNonExistentDirBacktrack(_t) => todo!(),
+                }
+            }
+
+            scan_primed_in_output_contract(output_contract, &mut to_solves);
+        }
+
+        let mut params = BTreeMap::new();
+        if to_solves.results.is_empty() && to_solves.params.is_empty() {
+            params = function
+                .params
+                .iter()
+                .map(|param| (&param.name, param.tref.resolve(spec)))
+                .map(|(param_name, tdef)| {
+                    let datatype = types.resources.get(&tdef.name).unwrap();
+
+                    (
+                        param_name.to_owned(),
+                        z3::ast::Dynamic::fresh_const(ctx, "param--", &datatype.sort),
+                    )
+                })
+                .collect();
+        }
+
         StateDecls {
             fd_file: z3::FuncDecl::new(
                 ctx,
@@ -173,19 +239,8 @@ impl State {
                     )
                 })
                 .collect(),
-            params: function
-                .params
-                .iter()
-                .map(|param| (&param.name, param.tref.resolve(spec)))
-                .map(|(param_name, tdef)| {
-                    let datatype = types.resources.get(&tdef.name).unwrap();
-
-                    (
-                        param_name.to_owned(),
-                        z3::ast::Dynamic::fresh_const(ctx, "param--", &datatype.sort),
-                    )
-                })
-                .collect(),
+            params,
+            to_solves,
         }
     }
 
@@ -197,8 +252,8 @@ impl State {
         decls: &'ctx StateDecls<'ctx>,
         spec: &Spec,
         function: &Function,
-        to_solves: &mut ToSolves<'ctx>,
-        term: Option<&Term>,
+        params_resources: Option<&[Option<ResourceIdx>]>,
+        contract: Option<&Term>,
     ) -> Bool<'ctx> {
         let mut clauses = Vec::new();
         let fds_graph_rev = petgraph::visit::Reversed(&self.fds_graph);
@@ -687,7 +742,7 @@ impl State {
         }
 
         // Input contract
-        if let Some(term) = term {
+        if let Some(term) = contract {
             let empty_eval_ctx = BTreeMap::new();
 
             clauses.push(
@@ -699,7 +754,7 @@ impl State {
                     decls,
                     term,
                     function,
-                    to_solves,
+                    params_resources,
                 )
                 .0
                 .as_bool()
@@ -719,18 +774,39 @@ impl State {
         decls: &'ctx StateDecls<'ctx>,
         term: &Term,
         function: &Function,
-        to_solves: &mut ToSolves<'ctx>,
+        params_resources: Option<&[Option<ResourceIdx>]>,
     ) -> (z3::ast::Dynamic<'ctx>, Type) {
         match term {
             | Term::Foldl(t) => {
                 let (target, target_type) = self.term_to_z3_ast(
-                    ctx, eval_ctx, spec, types, decls, &t.target, function, to_solves,
+                    ctx,
+                    eval_ctx,
+                    spec,
+                    types,
+                    decls,
+                    &t.target,
+                    function,
+                    params_resources,
                 );
                 let (acc, acc_type) = self.term_to_z3_ast(
-                    ctx, eval_ctx, spec, types, decls, &t.acc, function, to_solves,
+                    ctx,
+                    eval_ctx,
+                    spec,
+                    types,
+                    decls,
+                    &t.acc,
+                    function,
+                    params_resources,
                 );
                 let (func, _func_type) = self.term_to_z3_ast(
-                    ctx, eval_ctx, spec, types, decls, &t.func, function, to_solves,
+                    ctx,
+                    eval_ctx,
+                    spec,
+                    types,
+                    decls,
+                    &t.func,
+                    function,
+                    params_resources,
                 );
 
                 (
@@ -780,7 +856,14 @@ impl State {
                     .map(|b| (b.0.to_owned(), (b.1.clone(), b.2.clone())))
                     .collect();
                 let (body, r#type) = self.term_to_z3_ast(
-                    ctx, &eval_ctx, spec, types, decls, &t.body, function, to_solves,
+                    ctx,
+                    &eval_ctx,
+                    spec,
+                    types,
+                    decls,
+                    &t.body,
+                    function,
+                    params_resources,
                 );
 
                 (
@@ -790,10 +873,24 @@ impl State {
             },
             | Term::Map(t) => {
                 let (target, target_type) = self.term_to_z3_ast(
-                    ctx, eval_ctx, spec, types, decls, &t.target, function, to_solves,
+                    ctx,
+                    eval_ctx,
+                    spec,
+                    types,
+                    decls,
+                    &t.target,
+                    function,
+                    params_resources,
                 );
                 let (func, func_type) = self.term_to_z3_ast(
-                    ctx, eval_ctx, spec, types, decls, &t.func, function, to_solves,
+                    ctx,
+                    eval_ctx,
+                    spec,
+                    types,
+                    decls,
+                    &t.func,
+                    function,
+                    params_resources,
                 );
                 let range = match &func_type {
                     | Type::Wasi(_type_def) => panic!(),
@@ -826,7 +923,14 @@ impl State {
             ),
             | Term::Not(t) => {
                 let (term, r#type) = self.term_to_z3_ast(
-                    ctx, eval_ctx, spec, types, decls, &t.term, function, to_solves,
+                    ctx,
+                    eval_ctx,
+                    spec,
+                    types,
+                    decls,
+                    &t.term,
+                    function,
+                    params_resources,
                 );
 
                 (
@@ -841,7 +945,14 @@ impl State {
                         .iter()
                         .map(|clause| {
                             self.term_to_z3_ast(
-                                ctx, eval_ctx, spec, types, decls, clause, function, to_solves,
+                                ctx,
+                                eval_ctx,
+                                spec,
+                                types,
+                                decls,
+                                clause,
+                                function,
+                                params_resources,
                             )
                             .0
                             .simplify()
@@ -860,7 +971,14 @@ impl State {
                         .iter()
                         .map(|clause| {
                             self.term_to_z3_ast(
-                                ctx, eval_ctx, spec, types, decls, clause, function, to_solves,
+                                ctx,
+                                eval_ctx,
+                                spec,
+                                types,
+                                decls,
+                                clause,
+                                function,
+                                params_resources,
                             )
                             .0
                             .as_bool()
@@ -873,7 +991,14 @@ impl State {
             ),
             | Term::RecordField(t) => {
                 let (target, target_type) = self.term_to_z3_ast(
-                    ctx, eval_ctx, spec, types, decls, &t.target, function, to_solves,
+                    ctx,
+                    eval_ctx,
+                    spec,
+                    types,
+                    decls,
+                    &t.target,
+                    function,
+                    params_resources,
                 );
                 let target_tdef = target_type.wasi().unwrap();
                 let target_datatype = types.resources.get(&target_tdef.name).unwrap();
@@ -916,34 +1041,37 @@ impl State {
                     let tdef = function_result.tref.resolve(spec);
 
                     (
-                        match to_solves.results.get(&t.name) {
-                            | Some(result) => result.clone(),
-                            | None => {
-                                to_solves.results.insert(
-                                    t.name.strip_suffix('\'').unwrap().to_string(),
-                                    Dynamic::new_const(
-                                        ctx,
-                                        format!("result-{}", t.name),
-                                        &types.resources.get(&tdef.name).unwrap().sort,
-                                    ),
-                                );
-
-                                to_solves
-                                    .results
-                                    .get(t.name.strip_suffix('\'').unwrap())
-                                    .unwrap()
-                                    .clone()
-                            },
-                        },
+                        decls.to_solves.results.get(&t.name).unwrap().clone(),
                         Type::Wasi(tdef.to_owned()),
                     )
                 } else {
                     todo!()
                 }
             },
+            | Term::ResourceId(name) => {
+                let (param_idx, _function_param) = function
+                    .params
+                    .iter()
+                    .enumerate()
+                    .find(|(_, param)| &param.name == name)
+                    .unwrap();
+                let resource_idx = params_resources.unwrap().get(param_idx).unwrap().unwrap();
+
+                (
+                    Dynamic::from_ast(&Int::from_u64(ctx, resource_idx.0 as u64)),
+                    Type::Wazzi(WazziType::Int),
+                )
+            },
             | Term::FlagsGet(t) => {
                 let (target, target_type) = self.term_to_z3_ast(
-                    ctx, eval_ctx, spec, types, decls, &t.target, function, to_solves,
+                    ctx,
+                    eval_ctx,
+                    spec,
+                    types,
+                    decls,
+                    &t.target,
+                    function,
+                    params_resources,
                 );
                 let target_tdef = target_type.wasi().unwrap();
                 let target_datatype = types.resources.get(&target_tdef.name).unwrap();
@@ -970,7 +1098,14 @@ impl State {
             ),
             | Term::IntWrap(t) => {
                 let (op, op_type) = self.term_to_z3_ast(
-                    ctx, eval_ctx, spec, types, decls, &t.op, function, to_solves,
+                    ctx,
+                    eval_ctx,
+                    spec,
+                    types,
+                    decls,
+                    &t.op,
+                    function,
+                    params_resources,
                 );
 
                 (
@@ -980,10 +1115,24 @@ impl State {
             },
             | Term::IntAdd(t) => {
                 let (lhs, lhs_type) = self.term_to_z3_ast(
-                    ctx, eval_ctx, spec, types, decls, &t.lhs, function, to_solves,
+                    ctx,
+                    eval_ctx,
+                    spec,
+                    types,
+                    decls,
+                    &t.lhs,
+                    function,
+                    params_resources,
                 );
                 let (rhs, rhs_type) = self.term_to_z3_ast(
-                    ctx, eval_ctx, spec, types, decls, &t.rhs, function, to_solves,
+                    ctx,
+                    eval_ctx,
+                    spec,
+                    types,
+                    decls,
+                    &t.rhs,
+                    function,
+                    params_resources,
                 );
 
                 (
@@ -999,10 +1148,24 @@ impl State {
             },
             | Term::IntGt(t) => {
                 let (lhs, _lhs_type) = self.term_to_z3_ast(
-                    ctx, eval_ctx, spec, types, decls, &t.lhs, function, to_solves,
+                    ctx,
+                    eval_ctx,
+                    spec,
+                    types,
+                    decls,
+                    &t.lhs,
+                    function,
+                    params_resources,
                 );
                 let (rhs, _rhs_type) = self.term_to_z3_ast(
-                    ctx, eval_ctx, spec, types, decls, &t.rhs, function, to_solves,
+                    ctx,
+                    eval_ctx,
+                    spec,
+                    types,
+                    decls,
+                    &t.rhs,
+                    function,
+                    params_resources,
                 );
 
                 (
@@ -1012,10 +1175,24 @@ impl State {
             },
             | Term::IntLe(t) => {
                 let (lhs, lhs_type) = self.term_to_z3_ast(
-                    ctx, eval_ctx, spec, types, decls, &t.lhs, function, to_solves,
+                    ctx,
+                    eval_ctx,
+                    spec,
+                    types,
+                    decls,
+                    &t.lhs,
+                    function,
+                    params_resources,
                 );
                 let (rhs, rhs_type) = self.term_to_z3_ast(
-                    ctx, eval_ctx, spec, types, decls, &t.rhs, function, to_solves,
+                    ctx,
+                    eval_ctx,
+                    spec,
+                    types,
+                    decls,
+                    &t.rhs,
+                    function,
+                    params_resources,
                 );
 
                 (
@@ -1029,7 +1206,14 @@ impl State {
             },
             | Term::ListLen(t) => {
                 let (op, op_type) = self.term_to_z3_ast(
-                    ctx, eval_ctx, spec, types, decls, &t.op, function, to_solves,
+                    ctx,
+                    eval_ctx,
+                    spec,
+                    types,
+                    decls,
+                    &t.op,
+                    function,
+                    params_resources,
                 );
                 let tdef = op_type.wasi().unwrap();
                 let datatype = types.resources.get(&tdef.name).unwrap();
@@ -1047,7 +1231,14 @@ impl State {
             },
             | Term::U64Const(t) => {
                 let (value, _type) = self.term_to_z3_ast(
-                    ctx, eval_ctx, spec, types, decls, &t.term, function, to_solves,
+                    ctx,
+                    eval_ctx,
+                    spec,
+                    types,
+                    decls,
+                    &t.term,
+                    function,
+                    params_resources,
                 );
 
                 let datatype = types.resources.get("u64").unwrap();
@@ -1059,10 +1250,24 @@ impl State {
             },
             | Term::ValueEq(t) => {
                 let (lhs, _lhs_type) = self.term_to_z3_ast(
-                    ctx, eval_ctx, spec, types, decls, &t.lhs, function, to_solves,
+                    ctx,
+                    eval_ctx,
+                    spec,
+                    types,
+                    decls,
+                    &t.lhs,
+                    function,
+                    params_resources,
                 );
                 let (rhs, _rhs_type) = self.term_to_z3_ast(
-                    ctx, eval_ctx, spec, types, decls, &t.rhs, function, to_solves,
+                    ctx,
+                    eval_ctx,
+                    spec,
+                    types,
+                    decls,
+                    &t.rhs,
+                    function,
+                    params_resources,
                 );
 
                 (
@@ -1090,7 +1295,7 @@ impl State {
                             decls,
                             payload_term,
                             function,
-                            to_solves,
+                            params_resources,
                         );
 
                         vec![payload]
@@ -1945,6 +2150,7 @@ struct StateDecls<'ctx> {
     resources: BTreeMap<ResourceIdx, z3::ast::Dynamic<'ctx>>,
     paths:     BTreeMap<String, PathStringEncoding<'ctx>>,
     params:    BTreeMap<String, z3::ast::Dynamic<'ctx>>,
+    to_solves: ToSolves<'ctx>,
 }
 
 pub struct StatefulStrategy<'u, 'data, 'env, 'ctx, 'zctx> {
@@ -2023,8 +2229,8 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_, '_> {
                 &decls,
                 spec,
                 function,
-                &mut ToSolves::default(),
-                function.input_contract.as_ref().clone(),
+                None,
+                function.input_contract.as_ref(),
             ));
 
             match solver.check() {
@@ -2091,8 +2297,8 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_, '_> {
             &decls,
             spec,
             function,
-            &mut ToSolves::default(),
-            function.input_contract.as_ref().clone(),
+            None,
+            function.input_contract.as_ref(),
         ));
 
         loop {
@@ -2208,6 +2414,7 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_, '_> {
         &mut self,
         spec: &Spec,
         function: &Function,
+        params: Vec<Option<ResourceIdx>>,
         results: Vec<Option<ResourceIdx>>,
     ) -> Result<(), eyre::Error> {
         let mut state = State::new();
@@ -2249,7 +2456,6 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_, '_> {
         let types = StateTypes::new(self.z3_ctx, spec);
         let decls = state.declare(spec, self.z3_ctx, &types, &self.env, function);
         let solver = z3::Solver::new(self.z3_ctx);
-        let mut to_solves = ToSolves::default();
 
         solver.assert(&state.encode(
             self.z3_ctx,
@@ -2258,8 +2464,8 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_, '_> {
             &decls,
             spec,
             function,
-            &mut to_solves,
-            function.output_contract.as_ref().clone(),
+            Some(params.as_slice()),
+            function.output_contract.as_ref(),
         ));
 
         match solver.check() {
@@ -2270,7 +2476,7 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_, '_> {
         let model = solver.get_model().unwrap();
         let mut clauses = Vec::new();
 
-        for (name, result) in &to_solves.results {
+        for (name, result) in &decls.to_solves.results {
             let result_value = model.eval(result, true).unwrap().simplify();
             let (result_idx, function_result) = function
                 .results
@@ -2296,7 +2502,9 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_, '_> {
 
         match solver.check() {
             | z3::SatResult::Unsat => (),
-            | _ => return Err(err!("more than one solution for output contract")),
+            | _ => {
+                return Err(err!("more than one solution for output contract"));
+            },
         }
 
         Ok(())

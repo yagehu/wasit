@@ -21,6 +21,7 @@ pub(crate) enum Term {
     RecordField(Box<RecordField>),
     Param(Param),
     Result(Param),
+    ResourceId(String),
 
     FlagsGet(Box<FlagsGet>),
     ListLen(Box<ListLen>),
@@ -270,6 +271,15 @@ pub(super) fn to_term(pair: Pair<'_, Rule>) -> Result<Term, eyre::Error> {
                 .unwrap()
                 .to_owned(),
         }),
+        | Rule::resource_id => Term::ResourceId(
+            pair.into_inner()
+                .next()
+                .unwrap()
+                .as_str()
+                .strip_prefix('$')
+                .unwrap()
+                .to_string(),
+        ),
         | Rule::flags_get => {
             let mut pairs = pair.into_inner();
             let target =

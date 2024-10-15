@@ -1041,11 +1041,11 @@
       (@or
         (@and
           (@value.eq (@int.const (@record.field (result $ok') $offset)) (@int.const (@u64.const 0)))
-            ;(@record.field (result $ok') $flags (param $fdflags))
+          (@value.eq (@record.field (result $ok') $flags) (param $fdflags))
             ;;; TODO @fs.file_type
-            ;(@record.field (result $ok') $type (@variant.const $filetype $regular_file))
-            ;(@record.field (result $ok') $path (param $path))
-            ;(@record.field (result $ok') $parent (@resource-id $fd))
+          (@value.eq (@record.field (result $ok') $type) (@variant.const $filetype $regular_file))
+          (@value.eq (@record.field (result $ok') $path) (param $path))
+          (@value.eq (@int.const (@record.field (result $ok') $parent)) (@resource-id $fd))
         )
       )
     )

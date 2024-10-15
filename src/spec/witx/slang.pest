@@ -13,6 +13,7 @@ term =
 
   | param
   | result
+  | resource_id
 
   | not
   | and
@@ -91,6 +92,7 @@ list_len = { "(" ~ "@list.len" ~ term ~ ")" }
 
 param = { "(" ~ "param" ~ id ~ ")" }
 result = { "(" ~ "result" ~ id ~ ")" }
+resource_id = { "(" ~ "@resource-id" ~ id ~ ")" }
 
 value_eq = { "(" ~ "@value.eq" ~ term ~ term ~ ")" }
 
