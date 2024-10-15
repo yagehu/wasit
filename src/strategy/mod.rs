@@ -6,23 +6,29 @@ pub use stateless::StatelessStrategy;
 
 use crate::{
     spec::{Function, Spec, WasiValue},
+    Environment,
     ResourceIdx,
 };
 
 pub trait CallStrategy {
-    fn select_function<'spec>(&mut self, spec: &'spec Spec)
-        -> Result<&'spec Function, eyre::Error>;
+    fn select_function<'spec>(
+        &mut self,
+        spec: &'spec Spec,
+        env: &Environment,
+    ) -> Result<&'spec Function, eyre::Error>;
 
     fn prepare_arguments(
         &mut self,
         spec: &Spec,
         function: &Function,
+        env: &Environment,
     ) -> Result<Vec<(WasiValue, Option<ResourceIdx>)>, eyre::Error>;
 
     fn handle_results(
         &mut self,
         spec: &Spec,
         function: &Function,
+        env: &mut Environment,
         params: Vec<Option<ResourceIdx>>,
         results: Vec<Option<ResourceIdx>>,
     ) -> Result<(), eyre::Error>;

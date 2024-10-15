@@ -33,7 +33,6 @@ use wazzi::{
     spec::Spec,
     Call,
     CallStrategy,
-    Environment,
     EnvironmentInitializer,
     RuntimeContext,
     StatefulStrategy,
@@ -64,13 +63,12 @@ impl Strategy {
     fn into_call_strategy<'a>(
         self,
         u: &'a mut Unstructured,
-        env: &'a mut Environment,
         ctx: &'a RuntimeContext,
         z3_ctx: &'a z3::Context,
     ) -> Box<dyn CallStrategy + 'a> {
         match self {
-            | Strategy::Stateful => Box::new(StatefulStrategy::new(u, env, ctx, z3_ctx)),
-            | Strategy::Stateless => Box::new(StatelessStrategy::new(u, env, ctx)),
+            | Strategy::Stateful => Box::new(StatefulStrategy::new(u, ctx, z3_ctx)),
+            | Strategy::Stateless => Box::new(StatelessStrategy::new(u, ctx)),
         }
     }
 }
@@ -281,6 +279,7 @@ impl<'s> Fuzzer<'s> {
                                 let mut iteration = 0;
 
                                 loop {
+                                    let env = env.clone();
                                     let (resume_mu, resume_cond) = &*resume_pair;
                                     let resume_state = resume_mu.lock().unwrap();
                                     let resume_gen = resume_state.1;
@@ -297,10 +296,10 @@ impl<'s> Fuzzer<'s> {
                                         return Err(FuzzError::DiffFound);
                                     }
 
-                                    let mut env = env.write().unwrap();
-                                    let mut strategy = strategy
-                                        .into_call_strategy(&mut u, &mut env, &ctx, &z3_ctx);
-                                    let function = strategy.select_function(&spec)?;
+                                    let mut strategy =
+                                        strategy.into_call_strategy(&mut u, &ctx, &z3_ctx);
+                                    let function =
+                                        strategy.select_function(&spec, &env.read().unwrap())?;
 
                                     tracing::info!(
                                         epoch = epoch,
@@ -310,7 +309,7 @@ impl<'s> Fuzzer<'s> {
                                     );
                                     iteration += 1;
 
-                                    let (params, results) = match Environment::call(
+                                    let (params, results) = match env.read().unwrap().call(
                                         &spec,
                                         store.trace_mut(),
                                         function,
@@ -332,7 +331,7 @@ impl<'s> Fuzzer<'s> {
 
                                     drop(strategy);
 
-                                    let mut env_prev_iter = env.deref().clone();
+                                    let mut env_prev_iter = env.read().unwrap().deref().clone();
 
                                     if let Some(results) = &results {
                                         for (result_value, result) in
@@ -496,14 +495,14 @@ impl<'s> Fuzzer<'s> {
                                     let result_resource_idxs = env.execute_function_effects(
                                         &spec, &function, &params, &results,
                                     );
-                                    let mut strategy = self
-                                        .strategy
-                                        .into_call_strategy(&mut u, &mut env, &ctx, &z3_ctx);
+                                    let mut strategy =
+                                        self.strategy.into_call_strategy(&mut u, &ctx, &z3_ctx);
 
                                     strategy
                                         .handle_results(
                                             &spec,
                                             &function,
+                                            &mut env,
                                             params
                                                 .iter()
                                                 .map(|(_wasi_value, resource_idx)| {

@@ -2192,33 +2192,27 @@ struct StateDecls<'ctx> {
     to_solves: ToSolves<'ctx>,
 }
 
-pub struct StatefulStrategy<'u, 'data, 'env, 'ctx, 'zctx> {
+pub struct StatefulStrategy<'u, 'data, 'ctx, 'zctx> {
     z3_ctx: &'zctx z3::Context,
     u:      &'u mut Unstructured<'data>,
-    env:    &'env mut Environment,
     ctx:    &'ctx RuntimeContext,
 }
 
-impl<'u, 'data, 'env, 'ctx, 'zctx> StatefulStrategy<'u, 'data, 'env, 'ctx, 'zctx> {
+impl<'u, 'data, 'ctx, 'zctx> StatefulStrategy<'u, 'data, 'ctx, 'zctx> {
     pub fn new(
         u: &'u mut Unstructured<'data>,
-        env: &'env mut Environment,
         ctx: &'ctx RuntimeContext,
         z3_ctx: &'zctx z3::Context,
     ) -> Self {
-        Self {
-            z3_ctx,
-            u,
-            env,
-            ctx,
-        }
+        Self { z3_ctx, u, ctx }
     }
 }
 
-impl CallStrategy for StatefulStrategy<'_, '_, '_, '_, '_> {
+impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
     fn select_function<'spec>(
         &mut self,
         spec: &'spec Spec,
+        env: &Environment,
     ) -> Result<&'spec Function, eyre::Error> {
         let interface = spec
             .interfaces
@@ -2247,23 +2241,23 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_, '_> {
                 }
             }
 
-            for (resource_type, resources) in &self.env.resources_by_types {
+            for (resource_type, resources) in &env.resources_by_types {
                 for &idx in resources {
                     state.push_resource(
                         idx,
                         spec.types.get_by_key(resource_type).unwrap(),
-                        self.env.resources.get(idx).unwrap().state.clone(),
+                        env.resources.get(idx).unwrap().state.clone(),
                     );
                 }
             }
 
             let types = StateTypes::new(self.z3_ctx, spec);
-            let decls = state.declare(spec, self.z3_ctx, &types, &self.env, function, None);
+            let decls = state.declare(spec, self.z3_ctx, &types, env, function, None);
             let solver = z3::Solver::new(self.z3_ctx);
 
             solver.assert(&state.encode(
                 self.z3_ctx,
-                &self.env,
+                env,
                 &types,
                 &decls,
                 spec,
@@ -2290,6 +2284,7 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_, '_> {
         &mut self,
         spec: &Spec,
         function: &Function,
+        env: &Environment,
     ) -> Result<Vec<(WasiValue, Option<ResourceIdx>)>, eyre::Error> {
         let mut state = State::new();
 
@@ -2313,25 +2308,25 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_, '_> {
             }
         }
 
-        for (resource_type, resources) in &self.env.resources_by_types {
+        for (resource_type, resources) in &env.resources_by_types {
             for &idx in resources {
                 state.push_resource(
                     idx,
                     spec.types.get_by_key(resource_type).unwrap(),
-                    self.env.resources.get(idx).unwrap().state.clone(),
+                    env.resources.get(idx).unwrap().state.clone(),
                 );
             }
         }
 
         let types = StateTypes::new(self.z3_ctx, spec);
-        let decls = state.declare(spec, self.z3_ctx, &types, &self.env, function, None);
+        let decls = state.declare(spec, self.z3_ctx, &types, env, function, None);
         let solver = z3::Solver::new(self.z3_ctx);
         let mut solutions = Vec::new();
         let mut nsolutions = 0;
 
         solver.assert(&state.encode(
             self.z3_ctx,
-            &self.env,
+            &env,
             &types,
             &decls,
             spec,
@@ -2430,7 +2425,7 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_, '_> {
 
             match &tdef.state {
                 | Some(_state) => {
-                    let x = self.env.reverse_resource_index.get(&tdef.name).unwrap();
+                    let x = env.reverse_resource_index.get(&tdef.name).unwrap();
                     let resource_idx = x.get(&wasi_value);
 
                     let resource_idx = match resource_idx {
@@ -2453,6 +2448,7 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_, '_> {
         &mut self,
         spec: &Spec,
         function: &Function,
+        env: &mut Environment,
         params: Vec<Option<ResourceIdx>>,
         results: Vec<Option<ResourceIdx>>,
     ) -> Result<(), eyre::Error> {
@@ -2482,12 +2478,12 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_, '_> {
         //     state.push_resource(result_idx, spec.types.get_by_key(""), value);
         // }
 
-        for (resource_type, resources) in &self.env.resources_by_types {
+        for (resource_type, resources) in &env.resources_by_types {
             for &idx in resources {
                 state.push_resource(
                     idx,
                     spec.types.get_by_key(resource_type).unwrap(),
-                    self.env.resources.get(idx).unwrap().state.clone(),
+                    env.resources.get(idx).unwrap().state.clone(),
                 );
             }
         }
@@ -2497,7 +2493,7 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_, '_> {
             spec,
             self.z3_ctx,
             &types,
-            &self.env,
+            env,
             function,
             function.output_contract.as_ref(),
         );
@@ -2505,7 +2501,7 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_, '_> {
 
         solver.assert(&state.encode(
             self.z3_ctx,
-            &self.env,
+            &env,
             &types,
             &decls,
             spec,
@@ -2522,7 +2518,7 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_, '_> {
         let model = solver.get_model().unwrap();
         let mut clauses = Vec::new();
 
-        println!("solve 1 {:#?}", model);
+        // println!("solve 1 {:#?}", model);
 
         for (name, result) in &decls.to_solves.results {
             let result_value = model.eval(result, true).unwrap().simplify();
@@ -2537,12 +2533,7 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_, '_> {
                 state.decode_to_wasi_value(self.z3_ctx, spec, &types, &tdef, &result_value);
             let result_resource_idx = results.get(result_idx).unwrap().unwrap();
 
-            self.env
-                .resources
-                .get_mut(result_resource_idx)
-                .unwrap()
-                .state = wasi_value;
-
+            env.resources.get_mut(result_resource_idx).unwrap().state = wasi_value;
             clauses.push(result._eq(&result_value).not());
         }
 
@@ -2551,7 +2542,7 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_, '_> {
         match solver.check() {
             | z3::SatResult::Unsat => (),
             | _ => {
-                println!("solve 2 {:#?}", solver.get_model().unwrap());
+                // println!("solve 2 {:#?}", solver.get_model().unwrap());
                 return Err(err!("more than one solution for output contract"));
             },
         }

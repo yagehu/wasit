@@ -10,26 +10,22 @@ use crate::{
     RuntimeContext,
 };
 
-pub struct StatelessStrategy<'u, 'data, 'env, 'ctx> {
+pub struct StatelessStrategy<'u, 'data, 'ctx> {
     u:   &'u mut Unstructured<'data>,
-    env: &'env Environment,
     ctx: &'ctx RuntimeContext,
 }
 
-impl<'u, 'data, 'env, 'ctx> StatelessStrategy<'u, 'data, 'env, 'ctx> {
-    pub fn new(
-        u: &'u mut Unstructured<'data>,
-        env: &'env Environment,
-        ctx: &'ctx RuntimeContext,
-    ) -> Self {
-        Self { u, env, ctx }
+impl<'u, 'data, 'ctx> StatelessStrategy<'u, 'data, 'ctx> {
+    pub fn new(u: &'u mut Unstructured<'data>, ctx: &'ctx RuntimeContext) -> Self {
+        Self { u, ctx }
     }
 }
 
-impl CallStrategy for StatelessStrategy<'_, '_, '_, '_> {
+impl CallStrategy for StatelessStrategy<'_, '_, '_> {
     fn select_function<'spec>(
         &mut self,
         spec: &'spec Spec,
+        env: &Environment,
     ) -> Result<&'spec Function, eyre::Error> {
         let mut pool: Vec<&Function> = Default::default();
 
@@ -44,7 +40,7 @@ impl CallStrategy for StatelessStrategy<'_, '_, '_, '_> {
                         continue;
                     }
 
-                    let resources = match self.env.resources_by_types.get(&param.name) {
+                    let resources = match env.resources_by_types.get(&param.name) {
                         | None => {
                             is_candidate = false;
                             break;
@@ -75,6 +71,7 @@ impl CallStrategy for StatelessStrategy<'_, '_, '_, '_> {
         &mut self,
         spec: &Spec,
         function: &Function,
+        env: &Environment,
     ) -> Result<Vec<(WasiValue, Option<ResourceIdx>)>, eyre::Error> {
         let mut params = Vec::with_capacity(function.params.len());
 
@@ -86,8 +83,7 @@ impl CallStrategy for StatelessStrategy<'_, '_, '_, '_> {
                     params.push((tdef.wasi.arbitrary_value(spec, self.u)?, None));
                 },
                 | Some(_state_type) => {
-                    let resources = self
-                        .env
+                    let resources = env
                         .resources_by_types
                         .get(&tdef.name)
                         .unwrap()
@@ -112,6 +108,7 @@ impl CallStrategy for StatelessStrategy<'_, '_, '_, '_> {
         &mut self,
         _spec: &Spec,
         _function: &Function,
+        _env: &mut Environment,
         _params: Vec<Option<ResourceIdx>>,
         _results: Vec<Option<ResourceIdx>>,
     ) -> Result<(), eyre::Error> {
@@ -133,12 +130,11 @@ mod tests {
         let ctx = RuntimeContext::new();
         let mut strat = StatelessStrategy {
             u:   &mut u,
-            env: &env,
             ctx: &ctx,
         };
         let strat: &mut dyn CallStrategy = &mut strat;
         let spec = Spec::preview1().unwrap();
 
-        assert!(strat.select_function(&spec).is_err());
+        assert!(strat.select_function(&spec, &env).is_err());
     }
 }

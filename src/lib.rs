@@ -15,7 +15,7 @@ use std::{
     path::PathBuf,
 };
 
-use eyre::{eyre as err, Context};
+use eyre::eyre as err;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use spec::{Function, RecordValue, Spec, TypeDef, WasiType, WasiValue};
@@ -148,6 +148,7 @@ impl Environment {
     }
 
     pub fn call(
+        &self,
         spec: &Spec,
         store: &mut TraceStore<Call>,
         function: &Function,
@@ -160,7 +161,7 @@ impl Environment {
         ),
         eyre::Error,
     > {
-        let params = strategy.prepare_arguments(spec, function)?;
+        let params = strategy.prepare_arguments(spec, function, self)?;
 
         store.begin_call(&Call {
             function: function.name.clone(),
@@ -225,7 +226,7 @@ impl Environment {
         &mut self,
         spec: &Spec,
         function: &Function,
-        params: &[(WasiValue, Option<ResourceIdx>)],
+        _params: &[(WasiValue, Option<ResourceIdx>)],
         results: &Vec<(String, WasiValue)>,
     ) -> Vec<Option<ResourceIdx>> {
         let mut resources: HashMap<&str, ResourceIdx> = Default::default();
