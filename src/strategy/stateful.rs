@@ -110,9 +110,10 @@ impl State {
         &self,
         spec: &Spec,
         ctx: &'ctx z3::Context,
-        types: &StateTypes<'ctx>,
+        types: &'ctx StateTypes<'ctx>,
         env: &Environment,
         function: &Function,
+        contract: Option<&Term>,
     ) -> StateDecls<'ctx> {
         let mut preopens = BTreeMap::default();
         let mut resources = BTreeMap::new();
@@ -140,8 +141,15 @@ impl State {
 
         let mut to_solves = ToSolves::default();
 
-        if let Some(output_contract) = &function.output_contract {
-            fn scan_primed_in_output_contract<'ctx>(term: &Term, to_solves: &mut ToSolves<'ctx>) {
+        if let Some(term) = &contract {
+            fn scan_primed_in_output_contract<'ctx>(
+                ctx: &'ctx z3::Context,
+                types: &'ctx StateTypes<'ctx>,
+                spec: &Spec,
+                function: &Function,
+                term: &Term,
+                to_solves: &mut ToSolves<'ctx>,
+            ) {
                 match term {
                     | Term::Foldl(_t) => todo!(),
                     | Term::Lambda(_t) => todo!(),
@@ -151,58 +159,85 @@ impl State {
                     | Term::Not(_t) => todo!(),
                     | Term::And(t) => {
                         for clause in &t.clauses {
-                            scan_primed_in_output_contract(clause, to_solves);
+                            scan_primed_in_output_contract(
+                                ctx, types, spec, function, clause, to_solves,
+                            );
                         }
                     },
                     | Term::Or(t) => {
                         for clause in &t.clauses {
-                            scan_primed_in_output_contract(clause, to_solves);
+                            scan_primed_in_output_contract(
+                                ctx, types, spec, function, clause, to_solves,
+                            );
                         }
                     },
-                    | Term::RecordField(t) => scan_primed_in_output_contract(&t.target, to_solves),
+                    | Term::RecordField(t) => scan_primed_in_output_contract(
+                        ctx, types, spec, function, &t.target, to_solves,
+                    ),
                     | Term::Param(_t) => (),
-                    | Term::Result(_t) => (),
+                    | Term::Result(t) => {
+                        let function_result = function
+                            .results
+                            .iter()
+                            .find(|result| result.name == t.name.strip_suffix('\'').unwrap())
+                            .unwrap();
+                        let tdef = function_result.tref.resolve(spec);
+                        let datatype = types.resources.get(&tdef.name).unwrap();
+
+                        to_solves.results.insert(
+                            t.name.strip_suffix('\'').unwrap().to_string(),
+                            Dynamic::new_const(ctx, format!("result--{}", t.name), &datatype.sort),
+                        );
+                    },
                     | Term::ResourceId(_) => (),
                     | Term::FlagsGet(_t) => todo!(),
                     | Term::ListLen(_t) => todo!(),
-                    | Term::IntWrap(t) => scan_primed_in_output_contract(&t.op, to_solves),
+                    | Term::IntWrap(t) => {
+                        scan_primed_in_output_contract(ctx, types, spec, function, &t.op, to_solves)
+                    },
                     | Term::IntConst(_t) => (),
                     | Term::IntAdd(_t) => todo!(),
                     | Term::IntGt(_t) => todo!(),
                     | Term::IntLe(_t) => todo!(),
-                    | Term::U64Const(t) => scan_primed_in_output_contract(&t.term, to_solves),
+                    | Term::U64Const(t) => scan_primed_in_output_contract(
+                        ctx, types, spec, function, &t.term, to_solves,
+                    ),
                     | Term::ValueEq(t) => {
-                        scan_primed_in_output_contract(&t.lhs, to_solves);
-                        scan_primed_in_output_contract(&t.rhs, to_solves);
+                        scan_primed_in_output_contract(
+                            ctx, types, spec, function, &t.lhs, to_solves,
+                        );
+                        scan_primed_in_output_contract(
+                            ctx, types, spec, function, &t.rhs, to_solves,
+                        );
                     },
                     | Term::VariantConst(t) => {
                         if let Some(payload) = &t.payload {
-                            scan_primed_in_output_contract(payload, to_solves);
+                            scan_primed_in_output_contract(
+                                ctx, types, spec, function, payload, to_solves,
+                            );
                         }
                     },
                     | Term::NoNonExistentDirBacktrack(_t) => todo!(),
                 }
             }
 
-            scan_primed_in_output_contract(output_contract, &mut to_solves);
+            scan_primed_in_output_contract(ctx, types, spec, function, term, &mut to_solves);
         }
 
-        let mut params = BTreeMap::new();
-        if to_solves.results.is_empty() && to_solves.params.is_empty() {
-            params = function
-                .params
-                .iter()
-                .map(|param| (&param.name, param.tref.resolve(spec)))
-                .map(|(param_name, tdef)| {
-                    let datatype = types.resources.get(&tdef.name).unwrap();
+        let params = function
+            .params
+            .iter()
+            .map(|param| (&param.name, param.tref.resolve(spec)))
+            .filter(|(_param_name, tdef)| tdef.name != "path")
+            .map(|(param_name, tdef)| {
+                let datatype = types.resources.get(&tdef.name).unwrap();
 
-                    (
-                        param_name.to_owned(),
-                        z3::ast::Dynamic::fresh_const(ctx, "param--", &datatype.sort),
-                    )
-                })
-                .collect();
-        }
+                (
+                    param_name.to_owned(),
+                    z3::ast::Dynamic::fresh_const(ctx, "param--", &datatype.sort),
+                )
+            })
+            .collect();
 
         StateDecls {
             fd_file: z3::FuncDecl::new(
@@ -741,7 +776,6 @@ impl State {
             ));
         }
 
-        // Input contract
         if let Some(term) = contract {
             let empty_eval_ctx = BTreeMap::new();
 
@@ -1020,7 +1054,7 @@ impl State {
                 )
             },
             | Term::Param(t) => {
-                let param = decls.params.get(&t.name).unwrap();
+                let param = decls.params.get(&t.name).expect(&format!("{}", t.name));
                 let tdef = function
                     .params
                     .iter()
@@ -1041,7 +1075,12 @@ impl State {
                     let tdef = function_result.tref.resolve(spec);
 
                     (
-                        decls.to_solves.results.get(&t.name).unwrap().clone(),
+                        decls
+                            .to_solves
+                            .results
+                            .get(t.name.strip_suffix('\'').unwrap())
+                            .unwrap()
+                            .clone(),
                         Type::Wasi(tdef.to_owned()),
                     )
                 } else {
@@ -2219,7 +2258,7 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_, '_> {
             }
 
             let types = StateTypes::new(self.z3_ctx, spec);
-            let decls = state.declare(spec, self.z3_ctx, &types, &self.env, function);
+            let decls = state.declare(spec, self.z3_ctx, &types, &self.env, function, None);
             let solver = z3::Solver::new(self.z3_ctx);
 
             solver.assert(&state.encode(
@@ -2285,7 +2324,7 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_, '_> {
         }
 
         let types = StateTypes::new(self.z3_ctx, spec);
-        let decls = state.declare(spec, self.z3_ctx, &types, &self.env, function);
+        let decls = state.declare(spec, self.z3_ctx, &types, &self.env, function, None);
         let solver = z3::Solver::new(self.z3_ctx);
         let mut solutions = Vec::new();
         let mut nsolutions = 0;
@@ -2454,7 +2493,14 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_, '_> {
         }
 
         let types = StateTypes::new(self.z3_ctx, spec);
-        let decls = state.declare(spec, self.z3_ctx, &types, &self.env, function);
+        let decls = state.declare(
+            spec,
+            self.z3_ctx,
+            &types,
+            &self.env,
+            function,
+            function.output_contract.as_ref(),
+        );
         let solver = z3::Solver::new(self.z3_ctx);
 
         solver.assert(&state.encode(
@@ -2475,6 +2521,8 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_, '_> {
 
         let model = solver.get_model().unwrap();
         let mut clauses = Vec::new();
+
+        println!("solve 1 {:#?}", model);
 
         for (name, result) in &decls.to_solves.results {
             let result_value = model.eval(result, true).unwrap().simplify();
@@ -2503,6 +2551,7 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_, '_> {
         match solver.check() {
             | z3::SatResult::Unsat => (),
             | _ => {
+                println!("solve 2 {:#?}", solver.get_model().unwrap());
                 return Err(err!("more than one solution for output contract"));
             },
         }
