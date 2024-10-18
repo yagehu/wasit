@@ -13,11 +13,7 @@ use arbitrary::Unstructured;
 use eyre::{eyre as err, Context};
 use idxspace::IndexSpace;
 use itertools::Itertools;
-use petgraph::{
-    data::{self, DataMap as _},
-    graph::DiGraph,
-    visit::IntoNeighborsDirected,
-};
+use petgraph::{data::DataMap as _, graph::DiGraph, visit::IntoNeighborsDirected};
 use z3::ast::{forall_const, lambda_const, Ast, Bool, Dynamic, Int};
 
 use super::CallStrategy;
@@ -268,6 +264,7 @@ impl State {
 
     fn encode<'ctx>(
         &self,
+        u: &mut Unstructured,
         ctx: &'ctx z3::Context,
         env: &Environment,
         types: &'ctx StateTypes<'ctx>,
@@ -780,6 +777,21 @@ impl State {
                 .find(|param| &param.name == param_name)
                 .unwrap();
             let param_tdef = param.tref.resolve(spec);
+
+            // Special case: Sequence solving is slow. Impose an exact length.
+            if param_tdef.wasi == WasiType::String && params_resources.is_none() {
+                let datatype = types.resources.get(&param_tdef.name).unwrap();
+                let len = u.choose_index(16).unwrap() as u64 + 1;
+
+                clauses.push(
+                    datatype.variants[0].accessors[0]
+                        .apply(&[param_node])
+                        .as_seq()
+                        .unwrap()
+                        .length()
+                        ._eq(&Int::from_u64(ctx, len)),
+                );
+            }
 
             if param_tdef.state.is_none() {
                 continue;
@@ -2737,6 +2749,7 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
             let solver = z3::Solver::new(self.z3_ctx);
 
             solver.assert(&state.encode(
+                self.u,
                 self.z3_ctx,
                 env,
                 &types,
@@ -2797,6 +2810,7 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
 
         solver.push();
         solver.assert(&state.encode(
+            self.u,
             self.z3_ctx,
             &env,
             &types,
@@ -2808,7 +2822,7 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
         ));
 
         loop {
-            if solver.check() != z3::SatResult::Sat || nsolutions == 10 {
+            if solver.check() != z3::SatResult::Sat || nsolutions == 4 {
                 break;
             }
 
@@ -2899,6 +2913,7 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
             .collect_vec();
 
         solver.assert(&state.encode(
+            self.u,
             self.z3_ctx,
             &env,
             &types,
