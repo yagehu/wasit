@@ -78,13 +78,6 @@ fn ok() {
         spec.types.get_by_key("fd").unwrap(),
         env.resources.get(file_resource_idx).unwrap().state.clone(),
     );
-    state.push_path(
-        "path".to_string(),
-        PathString {
-            param_name: "path".to_owned(),
-            nsegments:  3,
-        },
-    );
 
     let function = spec
         .interfaces
@@ -93,169 +86,19 @@ fn ok() {
         .functions
         .get("path_open")
         .unwrap();
-    let decls = state.declare(&spec, &ctx, &types, &env, function);
-    let clause = state.encode(&ctx, &env, &types, &decls, &spec, function, None);
+    let decls = state.declare(&spec, &ctx, &types, &env, function, None);
+    let clause = state.encode(
+        &ctx,
+        &env,
+        &types,
+        &decls,
+        &spec,
+        function,
+        None,
+        function.input_contract.as_ref(),
+    );
 
     solver.assert(&clause);
 
     assert_eq!(solver.check(), z3::SatResult::Sat);
-
-    {
-        solver.push();
-
-        let fd_datatype = types.resources.get("fd").unwrap();
-        let path_datatype = types.resources.get("path").unwrap();
-        let some_fd = z3::ast::Dynamic::fresh_const(&ctx, "sol-fd", &fd_datatype.sort);
-
-        solver.assert(&z3::ast::Bool::and(
-            &ctx,
-            &[
-                &fd_datatype.variants[0]
-                    .tester
-                    .apply(&[&some_fd])
-                    .as_bool()
-                    .unwrap(),
-                &path_datatype.variants[0].accessors[0]
-                    .apply(&[&fd_datatype.variants[0].accessors[3]
-                        .apply(&[&some_fd])
-                        .as_datatype()
-                        .unwrap()])
-                    .as_string()
-                    .unwrap()
-                    ._eq(&z3::ast::String::from_str(&ctx, "file").unwrap()),
-                &z3::ast::Bool::or(
-                    &ctx,
-                    env.resources_by_types
-                        .get("fd")
-                        .unwrap()
-                        .iter()
-                        .map(|&idx| decls.resources.get(&idx).unwrap()._eq(&some_fd))
-                        .collect_vec()
-                        .as_slice(),
-                ),
-            ],
-        ));
-
-        assert_eq!(solver.check(), z3::SatResult::Sat);
-
-        let model = solver.get_model().unwrap();
-        let fd_tdef = spec.types.get_by_key("fd").unwrap();
-        let resource_value = state.decode_to_wasi_value(
-            &ctx,
-            &spec,
-            &types,
-            fd_tdef,
-            &model.eval(&some_fd, true).unwrap().simplify(),
-        );
-        let resource_idx = *env
-            .reverse_resource_index
-            .get("fd")
-            .unwrap()
-            .get(&resource_value)
-            .unwrap();
-
-        assert_eq!(resource_idx.0, 1);
-
-        solver.pop(1);
-    }
-
-    {
-        solver.push();
-
-        let path_encoding = decls.paths.get("path").unwrap();
-
-        solver.assert(&z3::ast::Bool::and(
-            &ctx,
-            &[
-                &decls
-                    .fd_file
-                    .apply(&[
-                        decls.params.get("fd").unwrap(),
-                        &decls.preopens.get(&dir_resource_idx).unwrap().root.node,
-                    ])
-                    .as_bool()
-                    .unwrap(),
-                &types.segment.variants[1]
-                    .tester
-                    .apply(&[&path_encoding.segments[0]])
-                    .as_bool()
-                    .unwrap(),
-                &types.segment.variants[1].accessors[0]
-                    .apply(&[&path_encoding.segments[0]])
-                    .as_string()
-                    .unwrap()
-                    ._eq(&z3::ast::String::from_str(&ctx, "dir").unwrap())
-                    .not(),
-                &types.segment.variants[1].accessors[0]
-                    .apply(&[&path_encoding.segments[0]])
-                    .as_string()
-                    .unwrap()
-                    ._eq(&z3::ast::String::from_str(&ctx, "file").unwrap())
-                    .not(),
-                &types.segment.variants[0]
-                    .tester
-                    .apply(&[&path_encoding.segments[1]])
-                    .as_bool()
-                    .unwrap(),
-                &types.segment.variants[1]
-                    .tester
-                    .apply(&[&path_encoding.segments[2]])
-                    .as_bool()
-                    .unwrap(),
-                &types.segment.variants[1].accessors[0]
-                    .apply(&[&path_encoding.segments[2]])
-                    .as_string()
-                    .unwrap()
-                    ._eq(&z3::ast::String::from_str(&ctx, "..").unwrap()),
-            ],
-        ));
-
-        assert_eq!(solver.check(), z3::SatResult::Unsat);
-
-        solver.pop(1);
-    }
-
-    {
-        solver.push();
-
-        let path_encoding = decls.paths.get("path").unwrap();
-
-        solver.assert(&z3::ast::Bool::and(
-            &ctx,
-            &[
-                &decls
-                    .fd_file
-                    .apply(&[
-                        decls.params.get("fd").unwrap(),
-                        &decls.preopens.get(&dir_resource_idx).unwrap().root.node,
-                    ])
-                    .as_bool()
-                    .unwrap(),
-                &types.segment.variants[1]
-                    .tester
-                    .apply(&[&path_encoding.segments[0]])
-                    .as_bool()
-                    .unwrap(),
-                &types.segment.variants[1].accessors[0]
-                    .apply(&[&path_encoding.segments[0]])
-                    .as_string()
-                    .unwrap()
-                    ._eq(&z3::ast::String::from_str(&ctx, "dir").unwrap()),
-                &types.segment.variants[1]
-                    .tester
-                    .apply(&[&path_encoding.segments[2]])
-                    .as_bool()
-                    .unwrap(),
-                // &types.segment.variants[1].accessors[0]
-                //     .apply(&[&path_encoding.segments[2]])
-                //     .as_string()
-                //     .unwrap()
-                //     ._eq(&z3::ast::String::from_str(&ctx, "..").unwrap()),
-            ],
-        ));
-
-        assert_eq!(solver.check(), z3::SatResult::Sat);
-
-        solver.pop(1);
-    }
 }

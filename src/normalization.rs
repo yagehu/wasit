@@ -117,7 +117,6 @@ fn initialize(
             .unwrap_or(("", full_dir_name.as_str()))
             .1
             .to_string();
-
         let dir = mapped_dirs.iter().find(|dir| dir.name == dir_name).unwrap();
 
         preopens.push((dir_name, dir.host_path.clone(), WasiValue::Handle(fd)));
