@@ -28,7 +28,7 @@ type =
   | pointer
   | const_pointer
   | list
-  | string
+  | string_type
   | expected
   }
 
@@ -41,7 +41,7 @@ u64 = @{ "u64" }
 
 handle = { "(" ~ "handle" ~ ")" }
 
-string = @{ "string" }
+string_type = @{ "string" }
 
 enum =
   { "(" ~ "enum"
@@ -112,7 +112,16 @@ expr =
   | number
   | sexpr
   | comment
+  | string
   }
+
+string = ${ "\"" ~ inner ~ "\"" }
+inner = @{ char* }
+char = {
+    !("\"" | "\\") ~ ANY
+    | "\\" ~ ("\"" | "\\" | "/" | "b" | "f" | "n" | "r" | "t")
+    | "\\" ~ ("u" ~ ASCII_HEX_DIGIT{4})
+}
 
 keyword =
   { "field"

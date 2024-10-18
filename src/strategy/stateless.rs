@@ -109,7 +109,7 @@ impl CallStrategy for StatelessStrategy<'_, '_, '_> {
         _spec: &Spec,
         _function: &Function,
         _env: &mut Environment,
-        _params: Vec<Option<ResourceIdx>>,
+        _params: Vec<(WasiValue, Option<ResourceIdx>)>,
         _results: Vec<Option<ResourceIdx>>,
     ) -> Result<(), eyre::Error> {
         Ok(())

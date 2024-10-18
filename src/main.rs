@@ -503,12 +503,7 @@ impl<'s> Fuzzer<'s> {
                                             &spec,
                                             &function,
                                             &mut env,
-                                            params
-                                                .iter()
-                                                .map(|(_wasi_value, resource_idx)| {
-                                                    resource_idx.to_owned()
-                                                })
-                                                .collect_vec(),
+                                            params,
                                             result_resource_idxs,
                                         )
                                         .unwrap();

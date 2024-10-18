@@ -14,6 +14,7 @@ pub(crate) enum Term {
     Binding(String),
 
     True,
+    String(String),
     Not(Box<Not>),
     And(And),
     Or(Or),
@@ -30,6 +31,7 @@ pub(crate) enum Term {
     IntAdd(Box<IntAdd>),
     IntGt(Box<IntGt>),
     IntLe(Box<IntLe>),
+    StrAt(Box<BinaryTerm>),
     U64Const(Box<UnaryTerm>),
     ValueEq(Box<ValueEq>),
     VariantConst(Box<VariantConst>),
@@ -40,6 +42,12 @@ pub(crate) enum Term {
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub(crate) struct UnaryTerm {
     pub(crate) term: Term,
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub(crate) struct BinaryTerm {
+    pub(crate) lhs: Term,
+    pub(crate) rhs: Term,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -329,9 +337,20 @@ pub(super) fn to_term(pair: Pair<'_, Rule>) -> Result<Term, eyre::Error> {
 
             Term::IntConst(BigInt::from_str(s)?)
         },
+        | Rule::str_at => {
+            let mut pairs = pair.into_inner();
+            let lhs = pairs.next().unwrap();
+            let rhs = pairs.next().unwrap();
+
+            Term::StrAt(Box::new(BinaryTerm {
+                lhs: to_term(lhs)?,
+                rhs: to_term(rhs)?,
+            }))
+        },
         | Rule::u64_const => Term::U64Const(Box::new(UnaryTerm {
             term: to_term(pair.into_inner().next().unwrap())?,
         })),
+        | Rule::string => Term::String(pair.into_inner().as_str().to_string()),
         | Rule::value_eq => {
             let mut pairs = pair.into_inner();
             let lhs = to_term(pairs.next().unwrap())?;

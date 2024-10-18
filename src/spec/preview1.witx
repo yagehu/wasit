@@ -938,15 +938,21 @@
 
   ;;; Create a directory.
   ;;; Note: This is similar to `mkdirat` in POSIX.
-  (@interface func (export "path_create_directory")
-    (param $fd $fd)
-    ;;; The path at which to create the directory.
-    (param $path $path)
-    (result $error (expected (error $errno)))
-    (@input
-      @true
-    )
-  )
+  ;(@interface func (export "path_create_directory")
+  ;  (param $fd $fd)
+  ;  ;;; The path at which to create the directory.
+  ;  (param $path $path)
+  ;  (result $error (expected (error $errno)))
+  ;  (@input
+  ;    (@and
+  ;      ; $path should be non-empty.
+  ;      (@int.gt (@list.len (param $path)) 0)
+
+  ;      ; $path should not be absolute (begin with a `/`).
+  ;      (@not (@value.eq (@str.at (param $path) 0) "/"))
+  ;    )
+  ;  )
+  ;)
 
   (@interface func (export "path_open")
     (param $fd $fd)
@@ -965,6 +971,12 @@
           (@not (@flags.get (param $oflags) $creat))
           (@flags.get (param $oflags) $excl)
         ))
+
+        ; $path should be non-empty.
+        (@int.gt (@list.len (param $path)) 0)
+
+        ; $path should not be absolute (begin with a `/`).
+        (@not (@value.eq (@str.at (param $path) 0) "/"))
 
         ; When generating path segments, if we generate one corresponding to a
         ; non-existent directory, the next segment shall not be `..`.

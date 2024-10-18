@@ -399,7 +399,7 @@ fn preview1_wasi_type(spec: &Spec, pair: Pair<'_, Rule>) -> Result<WasiType, eyr
 
             WasiType::Record(RecordType { members })
         },
-        | Rule::string => WasiType::String,
+        | Rule::string_type => WasiType::String,
         | Rule::pointer => {
             let tref_pair = pair.into_inner().next().unwrap();
             let item = preview1_tref(spec, tref_pair).wrap_err("failed to pointer type ref")?;

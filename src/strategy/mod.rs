@@ -29,7 +29,7 @@ pub trait CallStrategy {
         spec: &Spec,
         function: &Function,
         env: &mut Environment,
-        params: Vec<Option<ResourceIdx>>,
+        params: Vec<(WasiValue, Option<ResourceIdx>)>,
         results: Vec<Option<ResourceIdx>>,
     ) -> Result<(), eyre::Error>;
 }
