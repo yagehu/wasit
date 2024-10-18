@@ -949,7 +949,7 @@
         (@int.gt (@list.len (param $path)) 0)
 
         ; $path should not be absolute (begin with a `/`).
-        ;(@not (@value.eq (@str.at (param $path) 0) "/"))
+        (@not (@value.eq (@str.at (param $path) 0) "/"))
       )
     )
   )

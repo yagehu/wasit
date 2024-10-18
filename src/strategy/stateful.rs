@@ -778,11 +778,11 @@ impl State {
                 .unwrap();
             let param_tdef = param.tref.resolve(spec);
 
-            // Special case: Sequence solving is slow. Impose an exact length.
             if param_tdef.wasi == WasiType::String && params_resources.is_none() {
                 let datatype = types.resources.get(&param_tdef.name).unwrap();
                 let len = u.choose_index(16).unwrap() as u64 + 1;
 
+                // Special case: Sequence solving is slow. Impose an exact length.
                 clauses.push(
                     datatype.variants[0].accessors[0]
                         .apply(&[param_node])
@@ -791,6 +791,41 @@ impl State {
                         .length()
                         ._eq(&Int::from_u64(ctx, len)),
                 );
+
+                // Special case: constraint characters in path string.
+                {
+                    let some_idx = Int::fresh_const(ctx, "");
+
+                    clauses.push(forall_const(
+                        ctx,
+                        &[&some_idx],
+                        &[],
+                        &Bool::and(
+                            ctx,
+                            &[
+                                &Int::from_u64(ctx, 0).le(&some_idx),
+                                &some_idx.lt(&Int::from_u64(ctx, len)),
+                            ],
+                        )
+                        .implies(&Bool::or(
+                            ctx,
+                            &[
+                                &datatype.variants[0].accessors[0]
+                                    .apply(&[param_node])
+                                    .as_string()
+                                    .unwrap()
+                                    .at(&some_idx)
+                                    ._eq(&z3::ast::String::from_str(ctx, "a").unwrap()),
+                                &datatype.variants[0].accessors[0]
+                                    .apply(&[param_node])
+                                    .as_string()
+                                    .unwrap()
+                                    .at(&some_idx)
+                                    ._eq(&z3::ast::String::from_str(ctx, "/").unwrap()),
+                            ],
+                        )),
+                    ));
+                }
             }
 
             if param_tdef.state.is_none() {
