@@ -296,6 +296,10 @@ impl<'s> Fuzzer<'s> {
                                         return Err(FuzzError::DiffFound);
                                     }
 
+                                    if u.is_empty() {
+                                        panic!("data exhausted");
+                                    }
+
                                     let mut strategy =
                                         strategy.into_call_strategy(&mut u, &ctx, &z3_ctx);
                                     let function =
