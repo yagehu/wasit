@@ -20,6 +20,7 @@
 [submodule "runtimes/node"]
 	path = runtimes/node
 	url = git@github.com:yagehu/node.git
+	branch = wazzi
 [submodule "runtimes/wazero"]
 	path = runtimes/wazero
 	url = git@github.com:yagehu/wazero.git
