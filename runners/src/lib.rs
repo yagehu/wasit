@@ -229,6 +229,54 @@ impl WasiRunner for Wasmer<'_> {
 }
 
 #[derive(Clone, Debug)]
+pub struct Wasmtime<'p> {
+    pub path: &'p Path,
+}
+
+impl Default for Wasmtime<'_> {
+    fn default() -> Self {
+        Self::new(Path::new("wasmtime"))
+    }
+}
+
+impl<'p> Wasmtime<'p> {
+    pub fn new(path: &'p Path) -> Self {
+        Self { path }
+    }
+}
+
+impl WasiRunner for Wasmtime<'_> {
+    fn run(
+        &self,
+        wasm_path: &Path,
+        working_dir: &Path,
+        preopens: Vec<MappedDir>,
+    ) -> Result<process::Child, eyre::Error> {
+        let mut command = process::Command::new(self.path);
+
+        command.arg("run");
+
+        for dir in preopens {
+            let mut mapdir = OsString::new();
+
+            mapdir.push(&dir.host_path);
+            mapdir.push("::");
+            mapdir.push(&dir.name);
+            command.arg("--dir").arg(mapdir);
+        }
+
+        command
+            .arg(wasm_path)
+            .current_dir(working_dir)
+            .stdin(process::Stdio::piped())
+            .stdout(process::Stdio::piped())
+            .stderr(process::Stdio::piped())
+            .spawn()
+            .wrap_err("failed to spawn command")
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct Wamr<'p> {
     path: &'p Path,
 }
