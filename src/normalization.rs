@@ -178,6 +178,7 @@ impl InitializeState for Wasmer<'_> {
                 [
                     "fd_read",
                     "fd_seek",
+                    "fd_fdstat_set_flags",
                     "fd_tell",
                     "path_create_directory",
                     "path_create_file",
@@ -201,6 +202,7 @@ impl InitializeState for Wasmer<'_> {
                     "fd_read",
                     "fd_seek",
                     "fd_tell",
+                    "fd_fdstat_set_flags",
                     "fd_write",
                     "path_create_directory",
                     "path_create_file",

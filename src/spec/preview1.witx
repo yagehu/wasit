@@ -777,6 +777,29 @@
 )
 
 (module $wasi_snapshot_preview1
+  ;;; Adjust the flags associated with a file descriptor.
+  ;;; Note: This is similar to `fcntl(fd, F_SETFL, flags)` in POSIX.
+  (@interface func (export "fd_fdstat_set_flags")
+    (param $fd $fd)
+    ;;; The desired values of the file descriptor flags.
+    (param $flags $fdflags)
+    (result $error (expected (error $errno)))
+    (@input
+      (@and
+        ; Must be a regular file.
+        (@value.eq
+          (@record.field (param $fd) $type)
+          (@variant.const $filetype $regular_file)
+        )
+
+        ; Not widely supported.
+        (@not (@flags.get (param $flags) $dsync))
+        (@not (@flags.get (param $flags) $rsync))
+        (@not (@flags.get (param $flags) $sync))
+      )
+    )
+  )
+
   ;;; Read from a file descriptor.
   ;;; Note: This is similar to `readv` in POSIX.
   (@interface func (export "fd_read")
