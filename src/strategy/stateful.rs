@@ -1834,34 +1834,8 @@ impl<'ctx> StateTypes<'ctx> {
             resource_types.insert(tdef.name.clone(), datatype.finish());
         }
 
-        // let segment_datatype = z3::DatatypeBuilder::new(ctx, "segment")
-        //     .variant("separator", vec![])
-        //     .variant(
-        //         "component",
-        //         vec![("string", z3::DatatypeAccessor::Sort(z3::Sort::string(ctx)))],
-        //     )
-        //     .finish();
-
         for (name, tdef) in spec.types.iter() {
-            // if name == "path" {
-            //     resources.insert(
-            //         "path".to_string(),
-            //         z3::DatatypeBuilder::new(ctx, "path")
-            //             .variant(
-            //                 "path",
-            //                 vec![(
-            //                     "segments",
-            //                     z3::DatatypeAccessor::Sort(z3::Sort::seq(
-            //                         ctx,
-            //                         &segment_datatype.sort,
-            //                     )),
-            //                 )],
-            //             )
-            //             .finish(),
-            //     );
-            // } else {
             encode_type(ctx, spec, name, tdef, &mut resources);
-            // }
         }
 
         Self {
@@ -1969,82 +1943,11 @@ impl<'ctx> StateTypes<'ctx> {
                     .as_slice(),
             ),
             | (_, WasiValue::Flags(_)) => unreachable!(),
-            | (_, WasiValue::String(string)) => {
-                datatype.variants[0].accessors[0]
-                    .apply(&[node])
-                    .as_string()
-                    .unwrap()
-                    ._eq(&z3::ast::String::from_str(ctx, str::from_utf8(string).unwrap()).unwrap())
-
-                // let s = String::from_utf8(string.to_owned()).unwrap();
-                // let mut segments = Vec::new();
-                // let mut component = String::new();
-
-                // for c in s.chars() {
-                //     if c == '/' {
-                //         if !component.is_empty() {
-                //             segments.push(Segment::Component(component));
-                //             component = String::new();
-                //         }
-
-                //         segments.push(Segment::Separator);
-                //         continue;
-                //     }
-
-                //     component.push(c);
-                // }
-
-                // if !component.is_empty() {
-                //     segments.push(Segment::Component(component));
-                // }
-
-                // let seq = datatype.variants[0].accessors[0]
-                //     .apply(&[node])
-                //     .as_seq()
-                //     .unwrap();
-                // let clauses = vec![
-                //     datatype.variants[0]
-                //         .tester
-                //         .apply(&[node])
-                //         .as_bool()
-                //         .unwrap(),
-                //     seq.length()._eq(&Int::from_u64(ctx, segments.len() as u64)),
-                //     Bool::and(
-                //         ctx,
-                //         segments
-                //             .iter()
-                //             .enumerate()
-                //             .map(|(i, segment)| match segment {
-                //                 | Segment::Separator => self.segment.variants[0]
-                //                     .tester
-                //                     .apply(&[&seq.nth(&Int::from_u64(ctx, i as u64))])
-                //                     .as_bool()
-                //                     .unwrap(),
-                //                 | Segment::Component(component) => Bool::and(
-                //                     ctx,
-                //                     &[
-                //                         self.segment.variants[1]
-                //                             .tester
-                //                             .apply(&[&seq.nth(&Int::from_u64(ctx, i as u64))])
-                //                             .as_bool()
-                //                             .unwrap(),
-                //                         self.segment.variants[1].accessors[0]
-                //                             .apply(&[&seq.nth(&Int::from_u64(ctx, i as u64))])
-                //                             .as_string()
-                //                             .unwrap()
-                //                             ._eq(
-                //                                 &z3::ast::String::from_str(ctx, component).unwrap(),
-                //                             ),
-                //                     ],
-                //                 ),
-                //             })
-                //             .collect_vec()
-                //             .as_slice(),
-                //     ),
-                // ];
-
-                // Bool::and(ctx, &clauses)
-            },
+            | (_, WasiValue::String(string)) => datatype.variants[0].accessors[0]
+                .apply(&[node])
+                .as_string()
+                .unwrap()
+                ._eq(&z3::ast::String::from_str(ctx, str::from_utf8(string).unwrap()).unwrap()),
             | (WasiType::Variant(variant), WasiValue::Variant(variant_value)) => {
                 match &variant_value.payload {
                     | Some(payload) => {
