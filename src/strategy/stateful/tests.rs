@@ -87,7 +87,9 @@ fn ok() {
         .get("path_open")
         .unwrap();
     let decls = state.declare(&spec, &ctx, &types, &env, function, None);
+    let data = vec![];
     let clause = state.encode(
+        &mut Unstructured::new(data.as_slice()),
         &ctx,
         &env,
         &types,
