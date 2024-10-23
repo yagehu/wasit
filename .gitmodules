@@ -4,9 +4,11 @@
 [submodule "executor/protobuf-c/upstream"]
 	path = executor/protobuf-c/upstream
 	url = https://github.com/protobuf-c/protobuf-c.git
+	branch = edmonds/google-protobuf-26-fixes
 [submodule "wasi-sdk/upstream"]
 	path = wasi-sdk/upstream
 	url = https://github.com/yagehu/wasi-sdk
+	branch = main
 [submodule "runtimes/wasm-micro-runtime"]
 	path = runtimes/wasm-micro-runtime
 	url = git@github.com:yagehu/wasm-micro-runtime.git

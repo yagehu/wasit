@@ -11,20 +11,27 @@
 ;; Return a manifest containing that one package plus Git.
 (specifications->manifest
   (list
+    "autoconf"
+    "automake"
     "bash"
     "coreutils"
+    "clang"
     "cmake"
     "curl"
+    "diffutils"
     "gawk"
-    "gcc"
     "gcc-toolchain"
     "git"
     "grep"
+    "libtool"
     "make"
     "ninja"
     "nss-certs"
+    "pkg-config"
     "python"
+    "sed"
     "which"
+    "z3"
     "zlib"
     "zsh"
   )
