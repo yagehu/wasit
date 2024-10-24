@@ -25,3 +25,6 @@
 [submodule "executor/protobuf/upstream"]
 	path = executor/protobuf/upstream
 	url = https://github.com/protocolbuffers/protobuf.git
+[submodule "wasi-sdk/upstream"]
+	path = wasi-sdk/upstream
+	url = https://github.com/WebAssembly/wasi-sdk.git
