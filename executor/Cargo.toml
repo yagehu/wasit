@@ -6,10 +6,10 @@ publish.workspace = true
 
 [dependencies]
 wazzi-executor-pb-rust.workspace = true
-wazzi-executor-protobuf-c-wasm.workspace = true
 
 protobuf.workspace = true
 wasi = "0.11"
 
 [build-dependencies]
 wazzi-executor-pb-c.workspace = true
+wazzi-executor-protobuf-c-wasm.workspace = true

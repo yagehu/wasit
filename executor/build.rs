@@ -23,11 +23,14 @@ fn main() {
         .join("upstream")
         .canonicalize()
         .unwrap();
-    let wasi_sdk_build_dir = root_dir.join("wasi-sdk").join("upstream").join("build");
+    let wasi_sdk_build_dir = root_dir
+        .join("target")
+        .join(env::var("PROFILE").unwrap())
+        .join("wasi-sdk")
+        .canonicalize()
+        .unwrap();
     let clang = wasi_sdk_build_dir
         .join("install")
-        .join("opt")
-        .join("wasi-sdk")
         .join("bin")
         .join("clang")
         .canonicalize()
@@ -37,10 +40,10 @@ fn main() {
         .arg(
             wasi_sdk_build_dir
                 .join("install")
-                .join("opt")
-                .join("wasi-sdk")
                 .join("share")
-                .join("wasi-sysroot"),
+                .join("wasi-sysroot")
+                .canonicalize()
+                .unwrap(),
         )
         .args([src_dir.join("main.c")])
         .args(["-Wall", "-Werror", "-Wpedantic"])

@@ -83,4 +83,31 @@ fn main() {
         .unwrap();
 
     assert!(status.success());
+
+    fs::create_dir_all(
+        install_dir
+            .join("lib")
+            .join("clang")
+            .join("18")
+            .join("lib")
+            .join("wasi"),
+    )
+    .unwrap();
+    fs::copy(
+        install_dir
+            .join("clang-resource-dir")
+            .join("lib")
+            .join("wasi")
+            .join("libclang_rt.builtins-wasm32.a")
+            .canonicalize()
+            .unwrap(),
+        install_dir
+            .join("lib")
+            .join("clang")
+            .join("18")
+            .join("lib")
+            .join("wasi")
+            .join("libclang_rt.builtins-wasm32.a"),
+    )
+    .unwrap();
 }

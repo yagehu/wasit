@@ -1,5 +1,7 @@
 use std::{env, fs, path::PathBuf, process};
 
+use wazzi_compile_time::root;
+
 fn main() {
     let schema_dir = PathBuf::from("..").join("..").canonicalize().unwrap();
     let pb_c_dir = schema_dir
@@ -14,7 +16,7 @@ fn main() {
 
     println!("cargo:rerun-if-changed={}", schema_path.display());
 
-    let root_dir = schema_dir.join("..").canonicalize().unwrap();
+    let root_dir = root();
     let target_dir = root_dir
         .join("target")
         .join(env::var("PROFILE").unwrap())
@@ -24,23 +26,19 @@ fn main() {
         .canonicalize()
         .unwrap();
     let wasi_sdk_build_dir = root_dir
+        .join("target")
+        .join(env::var("PROFILE").unwrap())
         .join("wasi-sdk")
-        .join("upstream")
-        .join("build")
         .canonicalize()
         .unwrap();
     let clang_path = wasi_sdk_build_dir
         .join("install")
-        .join("opt")
-        .join("wasi-sdk")
         .join("bin")
         .join("clang")
         .canonicalize()
         .unwrap();
     let ar_path = wasi_sdk_build_dir
         .join("install")
-        .join("opt")
-        .join("wasi-sdk")
         .join("bin")
         .join("llvm-ar")
         .canonicalize()
@@ -53,7 +51,14 @@ fn main() {
                 &format!("--c_out={}", out_dir.display()),
                 schema_path.to_string_lossy().as_ref(),
             ])
-            .arg(&format!("--plugin=protoc-gen-c={}", target_dir.join("protoc-c").join("bin").join("protoc-gen-c").display()))
+            .arg(&format!(
+                "--plugin=protoc-gen-c={}",
+                target_dir
+                    .join("protoc-c")
+                    .join("bin")
+                    .join("protoc-gen-c")
+                    .display()
+            ))
             .spawn()
             .unwrap()
             .wait()
@@ -72,10 +77,10 @@ fn main() {
         .arg(
             wasi_sdk_build_dir
                 .join("install")
-                .join("opt")
-                .join("wasi-sdk")
                 .join("share")
-                .join("wasi-sysroot"),
+                .join("wasi-sysroot")
+                .canonicalize()
+                .unwrap(),
         )
         .args([pb_file_c])
         .arg("-I")

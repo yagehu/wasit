@@ -1584,6 +1584,7 @@ name = "wazzi-executor-pb-c"
 version = "0.1.0"
 dependencies = [
  "wasi-sdk",
+ "wazzi-compile-time",
  "wazzi-executor-protobuf",
  "wazzi-executor-protobuf-c",
 ]

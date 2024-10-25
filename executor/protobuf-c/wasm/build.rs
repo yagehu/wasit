@@ -28,15 +28,13 @@ fn main() {
     assert!(status.success());
 
     let wasi_sdk_build_dir = root
+        .join("target")
+        .join(env::var("PROFILE").unwrap())
         .join("wasi-sdk")
-        .join("upstream")
-        .join("build")
         .canonicalize()
         .unwrap();
     let wasi_sdk_bin_dir = wasi_sdk_build_dir
         .join("install")
-        .join("opt")
-        .join("wasi-sdk")
         .join("bin")
         .canonicalize()
         .unwrap();
@@ -45,7 +43,7 @@ fn main() {
 
     let protobuf_install_dir = target_dir.join("protobuf");
     let status = process::Command::new(upstream_dir.join("configure").canonicalize().unwrap())
-        .args(["--host=wasm32-wasi", "--disable-strip"])
+        .args(["--host=wasm32-wasi"])
         .env(
             "protobuf_CFLAGS",
             format!("-I{}", protobuf_install_dir.join("include").display()),
@@ -60,6 +58,7 @@ fn main() {
         .env("PROTOC", protobuf_install_dir.join("bin").join("protoc"))
         .env("CC", &wasi_sdk_bin_dir.join("clang"))
         .env("AR", &wasi_sdk_bin_dir.join("ar"))
+        .env("LD", &wasi_sdk_bin_dir.join("wasm-ld"))
         .env("NM", &wasi_sdk_bin_dir.join("nm"))
         .env("RANLIB", &wasi_sdk_bin_dir.join("ranlib"))
         .env(
@@ -68,11 +67,11 @@ fn main() {
                 "--sysroot={}",
                 wasi_sdk_build_dir
                     .join("install")
-                    .join("opt")
-                    .join("wasi-sdk")
                     .join("share")
                     .join("wasi-sysroot")
-                    .display()
+                    .canonicalize()
+                    .unwrap()
+                    .display(),
             ),
         )
         .spawn()
