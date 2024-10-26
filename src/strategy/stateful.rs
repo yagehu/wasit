@@ -221,6 +221,14 @@ impl State {
                             );
                         }
                     },
+                    | Term::FsFileTypeGet(t) => {
+                        scan_primed_in_output_contract(
+                            ctx, types, spec, function, &t.lhs, to_solves,
+                        );
+                        scan_primed_in_output_contract(
+                            ctx, types, spec, function, &t.rhs, to_solves,
+                        );
+                    },
                     | Term::NoNonExistentDirBacktrack(_t) => todo!(),
                 }
             }
@@ -1473,6 +1481,55 @@ impl State {
                     ),
                     Type::Wasi(variant_tdef.to_owned()),
                 )
+            },
+            | Term::FsFileTypeGet(t) => {
+                let (fd_node, fd_type) = self.term_to_z3_ast(
+                    ctx,
+                    eval_ctx,
+                    spec,
+                    types,
+                    decls,
+                    &t.lhs,
+                    function,
+                    params_resources,
+                );
+                let (path_node, path_type) = self.term_to_z3_ast(
+                    ctx,
+                    eval_ctx,
+                    spec,
+                    types,
+                    decls,
+                    &t.rhs,
+                    function,
+                    params_resources,
+                );
+                let filetype_tdef = spec.types.get_by_key("filetype").unwrap();
+                let mut dirs = decls
+                    .preopens
+                    .values()
+                    .map(|preopen| &preopen.root)
+                    .collect_vec();
+
+                println!(
+                    "whoa `{:#?}`",
+                    types.resources.get("path").unwrap().variants[0].accessors[0]
+                        .apply(&[&path_node])
+                        .as_string()
+                        .unwrap()
+                );
+
+                while let Some(dir) = dirs.pop() {
+                    for (filename, child) in dir.children.iter() {
+                        match child {
+                            | FileEncoding::Directory(d) => dirs.push(d),
+                            | FileEncoding::RegularFile(_f) => (),
+                        }
+                    }
+                }
+
+                todo!()
+
+                // (todo!(), Type::Wasi(filetype_tdef))
             },
             | Term::NoNonExistentDirBacktrack(_t) => (
                 no_nonexistent_dir_backtrack(ctx, types, decls /*t*/),

@@ -1766,7 +1766,7 @@ checksum = "dff9641d1cd4be8d1a070daf9e3773c5f67e78b4d9d42263020c057706765c04"
 [[package]]
 name = "z3"
 version = "0.12.1"
-source = "git+https://github.com/yagehu/z3.rs.git?branch=wazzi#0d0ba5094fe90be3a13f3ec4f0b7e54845e1aed3"
+source = "git+https://github.com/yagehu/z3.rs.git?branch=wazzi#dd93cc360f69d2ec52c8e4dbdbe055480c61476d"
 dependencies = [
  "log",
  "num",
@@ -1776,7 +1776,7 @@ dependencies = [
 [[package]]
 name = "z3-sys"
 version = "0.8.1"
-source = "git+https://github.com/yagehu/z3.rs.git?branch=wazzi#0d0ba5094fe90be3a13f3ec4f0b7e54845e1aed3"
+source = "git+https://github.com/yagehu/z3.rs.git?branch=wazzi#dd93cc360f69d2ec52c8e4dbdbe055480c61476d"
 dependencies = [
  "bindgen",
  "pkg-config",

@@ -1075,9 +1075,22 @@
     (@output
       (@or
         (@and
+          ; Frame condition: The file opened is a directory.
+          (@value.eq (@variant.const $filetype $directory) (@fs.file.type.get (param $fd) (param $path)))
+
           (@value.eq (@int.const (@record.field (result $ok') $offset)) (@int.const (@u64.const 0)))
           (@value.eq (@record.field (result $ok') $flags) (param $fdflags))
-            ;;; TODO @fs.file_type
+          (@value.eq (@record.field (result $ok') $type) (@variant.const $filetype $directory))
+          (@value.eq (@record.field (result $ok') $path) (param $path))
+          (@value.eq (@int.const (@record.field (result $ok') $parent)) (@resource-id $fd))
+        )
+
+        (@and
+          ; Frame condition: The file opened is a regular file.
+          (@value.eq (@variant.const $filetype $regular_file) (@fs.file.type.get (param $fd) (param $path)))
+
+          (@value.eq (@int.const (@record.field (result $ok') $offset)) (@int.const (@u64.const 0)))
+          (@value.eq (@record.field (result $ok') $flags) (param $fdflags))
           (@value.eq (@record.field (result $ok') $type) (@variant.const $filetype $regular_file))
           (@value.eq (@record.field (result $ok') $path) (param $path))
           (@value.eq (@int.const (@record.field (result $ok') $parent)) (@resource-id $fd))

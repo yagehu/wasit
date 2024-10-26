@@ -36,6 +36,7 @@ pub(crate) enum Term {
     ValueEq(Box<ValueEq>),
     VariantConst(Box<VariantConst>),
 
+    FsFileTypeGet(Box<BinaryTerm>),
     NoNonExistentDirBacktrack(Box<NoNonExistentDirBacktrack>),
 }
 
@@ -380,6 +381,13 @@ pub(super) fn to_term(pair: Pair<'_, Rule>) -> Result<Term, eyre::Error> {
             };
 
             Term::VariantConst(Box::new(VariantConst { ty, case, payload }))
+        },
+        | Rule::fs_file_type_get => {
+            let mut pairs = pair.into_inner();
+            let lhs = to_term(pairs.next().unwrap())?;
+            let rhs = to_term(pairs.next().unwrap())?;
+
+            Term::FsFileTypeGet(Box::new(BinaryTerm { lhs, rhs }))
         },
         | Rule::no_nonexistent_dir_backtrack => {
             let mut pairs = pair.into_inner();
