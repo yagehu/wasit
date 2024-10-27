@@ -36,7 +36,7 @@ pub(crate) enum Term {
     ValueEq(Box<ValueEq>),
     VariantConst(Box<VariantConst>),
 
-    FsFileTypeGet(Box<BinaryTerm>),
+    FsFileTypeGet(FsFileTypeGet),
     NoNonExistentDirBacktrack(Box<NoNonExistentDirBacktrack>),
 }
 
@@ -49,6 +49,12 @@ pub(crate) struct UnaryTerm {
 pub(crate) struct BinaryTerm {
     pub(crate) lhs: Term,
     pub(crate) rhs: Term,
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub(crate) struct FsFileTypeGet {
+    pub(crate) fd:   String,
+    pub(crate) path: String,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -384,10 +390,22 @@ pub(super) fn to_term(pair: Pair<'_, Rule>) -> Result<Term, eyre::Error> {
         },
         | Rule::fs_file_type_get => {
             let mut pairs = pair.into_inner();
-            let lhs = to_term(pairs.next().unwrap())?;
-            let rhs = to_term(pairs.next().unwrap())?;
+            let fd = pairs
+                .next()
+                .unwrap()
+                .as_str()
+                .strip_prefix('$')
+                .unwrap()
+                .to_string();
+            let path = pairs
+                .next()
+                .unwrap()
+                .as_str()
+                .strip_prefix('$')
+                .unwrap()
+                .to_string();
 
-            Term::FsFileTypeGet(Box::new(BinaryTerm { lhs, rhs }))
+            Term::FsFileTypeGet(FsFileTypeGet { fd, path })
         },
         | Rule::no_nonexistent_dir_backtrack => {
             let mut pairs = pair.into_inner();

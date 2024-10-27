@@ -222,12 +222,12 @@ impl State {
                         }
                     },
                     | Term::FsFileTypeGet(t) => {
-                        scan_primed_in_output_contract(
-                            ctx, types, spec, function, &t.lhs, to_solves,
-                        );
-                        scan_primed_in_output_contract(
-                            ctx, types, spec, function, &t.rhs, to_solves,
-                        );
+                        // scan_primed_in_output_contract(
+                        //     ctx, types, spec, function, &t.lhs, to_solves,
+                        // );
+                        // scan_primed_in_output_contract(
+                        //     ctx, types, spec, function, &t.rhs, to_solves,
+                        // );
                     },
                     | Term::NoNonExistentDirBacktrack(_t) => todo!(),
                 }
@@ -279,7 +279,7 @@ impl State {
         decls: &'ctx StateDecls<'ctx>,
         spec: &Spec,
         function: &Function,
-        params_resources: Option<&[Option<ResourceIdx>]>,
+        params: Option<&[(WasiValue, Option<ResourceIdx>)]>,
         contract: Option<&Term>,
     ) -> Bool<'ctx> {
         let mut clauses = Vec::new();
@@ -786,7 +786,7 @@ impl State {
                 .unwrap();
             let param_tdef = param.tref.resolve(spec);
 
-            if param_tdef.wasi == WasiType::String && params_resources.is_none() {
+            if param_tdef.wasi == WasiType::String && params.is_none() {
                 let datatype = types.resources.get(&param_tdef.name).unwrap();
                 let len = u.choose_index(16).unwrap() as u64 + 1;
 
@@ -866,13 +866,14 @@ impl State {
             clauses.push(
                 self.term_to_z3_ast(
                     ctx,
+                    env,
                     &empty_eval_ctx,
                     spec,
                     types,
                     decls,
                     term,
                     function,
-                    params_resources,
+                    params,
                 )
                 .0
                 .as_bool()
@@ -886,45 +887,25 @@ impl State {
     fn term_to_z3_ast<'ctx, 'spec>(
         &self,
         ctx: &'ctx z3::Context,
+        env: &Environment,
         eval_ctx: &BTreeMap<String, (Dynamic<'ctx>, Type)>,
         spec: &'spec Spec,
         types: &'ctx StateTypes<'ctx>,
         decls: &'ctx StateDecls<'ctx>,
         term: &Term,
         function: &Function,
-        params_resources: Option<&[Option<ResourceIdx>]>,
+        params: Option<&[(WasiValue, Option<ResourceIdx>)]>,
     ) -> (Dynamic<'ctx>, Type) {
         match term {
             | Term::Foldl(t) => {
                 let (target, target_type) = self.term_to_z3_ast(
-                    ctx,
-                    eval_ctx,
-                    spec,
-                    types,
-                    decls,
-                    &t.target,
-                    function,
-                    params_resources,
+                    ctx, env, eval_ctx, spec, types, decls, &t.target, function, params,
                 );
                 let (acc, acc_type) = self.term_to_z3_ast(
-                    ctx,
-                    eval_ctx,
-                    spec,
-                    types,
-                    decls,
-                    &t.acc,
-                    function,
-                    params_resources,
+                    ctx, env, eval_ctx, spec, types, decls, &t.acc, function, params,
                 );
                 let (func, _func_type) = self.term_to_z3_ast(
-                    ctx,
-                    eval_ctx,
-                    spec,
-                    types,
-                    decls,
-                    &t.func,
-                    function,
-                    params_resources,
+                    ctx, env, eval_ctx, spec, types, decls, &t.func, function, params,
                 );
 
                 (
@@ -970,14 +951,7 @@ impl State {
                     .map(|b| (b.0.to_owned(), (b.1.clone(), b.2.clone())))
                     .collect();
                 let (body, r#type) = self.term_to_z3_ast(
-                    ctx,
-                    &eval_ctx,
-                    spec,
-                    types,
-                    decls,
-                    &t.body,
-                    function,
-                    params_resources,
+                    ctx, env, &eval_ctx, spec, types, decls, &t.body, function, params,
                 );
 
                 (
@@ -987,24 +961,10 @@ impl State {
             },
             | Term::Map(t) => {
                 let (target, target_type) = self.term_to_z3_ast(
-                    ctx,
-                    eval_ctx,
-                    spec,
-                    types,
-                    decls,
-                    &t.target,
-                    function,
-                    params_resources,
+                    ctx, env, eval_ctx, spec, types, decls, &t.target, function, params,
                 );
                 let (func, func_type) = self.term_to_z3_ast(
-                    ctx,
-                    eval_ctx,
-                    spec,
-                    types,
-                    decls,
-                    &t.func,
-                    function,
-                    params_resources,
+                    ctx, env, eval_ctx, spec, types, decls, &t.func, function, params,
                 );
                 let range = match &func_type {
                     | Type::Wasi(_type_def) => panic!(),
@@ -1042,14 +1002,7 @@ impl State {
             ),
             | Term::Not(t) => {
                 let (term, r#type) = self.term_to_z3_ast(
-                    ctx,
-                    eval_ctx,
-                    spec,
-                    types,
-                    decls,
-                    &t.term,
-                    function,
-                    params_resources,
+                    ctx, env, eval_ctx, spec, types, decls, &t.term, function, params,
                 );
 
                 (Dynamic::from_ast(&term.as_bool().unwrap().not()), r#type)
@@ -1061,14 +1014,7 @@ impl State {
                         .iter()
                         .map(|clause| {
                             self.term_to_z3_ast(
-                                ctx,
-                                eval_ctx,
-                                spec,
-                                types,
-                                decls,
-                                clause,
-                                function,
-                                params_resources,
+                                ctx, env, eval_ctx, spec, types, decls, clause, function, params,
                             )
                             .0
                             .simplify()
@@ -1087,14 +1033,7 @@ impl State {
                         .iter()
                         .map(|clause| {
                             self.term_to_z3_ast(
-                                ctx,
-                                eval_ctx,
-                                spec,
-                                types,
-                                decls,
-                                clause,
-                                function,
-                                params_resources,
+                                ctx, env, eval_ctx, spec, types, decls, clause, function, params,
                             )
                             .0
                             .as_bool()
@@ -1107,14 +1046,7 @@ impl State {
             ),
             | Term::RecordField(t) => {
                 let (target, target_type) = self.term_to_z3_ast(
-                    ctx,
-                    eval_ctx,
-                    spec,
-                    types,
-                    decls,
-                    &t.target,
-                    function,
-                    params_resources,
+                    ctx, env, eval_ctx, spec, types, decls, &t.target, function, params,
                 );
                 let target_tdef = target_type.wasi().unwrap();
                 let target_datatype = types.resources.get(&target_tdef.name).unwrap();
@@ -1176,7 +1108,7 @@ impl State {
                     .enumerate()
                     .find(|(_, param)| &param.name == name)
                     .unwrap();
-                let resource_idx = params_resources.unwrap().get(param_idx).unwrap().unwrap();
+                let resource_idx = params.unwrap().get(param_idx).unwrap().1.unwrap();
 
                 (
                     Dynamic::from_ast(&Int::from_u64(ctx, resource_idx.0 as u64)),
@@ -1185,14 +1117,7 @@ impl State {
             },
             | Term::FlagsGet(t) => {
                 let (target, target_type) = self.term_to_z3_ast(
-                    ctx,
-                    eval_ctx,
-                    spec,
-                    types,
-                    decls,
-                    &t.target,
-                    function,
-                    params_resources,
+                    ctx, env, eval_ctx, spec, types, decls, &t.target, function, params,
                 );
                 let target_tdef = target_type.wasi().unwrap();
                 let target_datatype = types.resources.get(&target_tdef.name).unwrap();
@@ -1219,14 +1144,7 @@ impl State {
             ),
             | Term::IntWrap(t) => {
                 let (op, op_type) = self.term_to_z3_ast(
-                    ctx,
-                    eval_ctx,
-                    spec,
-                    types,
-                    decls,
-                    &t.op,
-                    function,
-                    params_resources,
+                    ctx, env, eval_ctx, spec, types, decls, &t.op, function, params,
                 );
 
                 (
@@ -1236,24 +1154,10 @@ impl State {
             },
             | Term::IntAdd(t) => {
                 let (lhs, lhs_type) = self.term_to_z3_ast(
-                    ctx,
-                    eval_ctx,
-                    spec,
-                    types,
-                    decls,
-                    &t.lhs,
-                    function,
-                    params_resources,
+                    ctx, env, eval_ctx, spec, types, decls, &t.lhs, function, params,
                 );
                 let (rhs, rhs_type) = self.term_to_z3_ast(
-                    ctx,
-                    eval_ctx,
-                    spec,
-                    types,
-                    decls,
-                    &t.rhs,
-                    function,
-                    params_resources,
+                    ctx, env, eval_ctx, spec, types, decls, &t.rhs, function, params,
                 );
 
                 (
@@ -1269,24 +1173,10 @@ impl State {
             },
             | Term::IntGt(t) => {
                 let (lhs, _lhs_type) = self.term_to_z3_ast(
-                    ctx,
-                    eval_ctx,
-                    spec,
-                    types,
-                    decls,
-                    &t.lhs,
-                    function,
-                    params_resources,
+                    ctx, env, eval_ctx, spec, types, decls, &t.lhs, function, params,
                 );
                 let (rhs, _rhs_type) = self.term_to_z3_ast(
-                    ctx,
-                    eval_ctx,
-                    spec,
-                    types,
-                    decls,
-                    &t.rhs,
-                    function,
-                    params_resources,
+                    ctx, env, eval_ctx, spec, types, decls, &t.rhs, function, params,
                 );
 
                 (
@@ -1296,24 +1186,10 @@ impl State {
             },
             | Term::IntLe(t) => {
                 let (lhs, lhs_type) = self.term_to_z3_ast(
-                    ctx,
-                    eval_ctx,
-                    spec,
-                    types,
-                    decls,
-                    &t.lhs,
-                    function,
-                    params_resources,
+                    ctx, env, eval_ctx, spec, types, decls, &t.lhs, function, params,
                 );
                 let (rhs, rhs_type) = self.term_to_z3_ast(
-                    ctx,
-                    eval_ctx,
-                    spec,
-                    types,
-                    decls,
-                    &t.rhs,
-                    function,
-                    params_resources,
+                    ctx, env, eval_ctx, spec, types, decls, &t.rhs, function, params,
                 );
 
                 (
@@ -1327,14 +1203,7 @@ impl State {
             },
             | Term::ListLen(t) => {
                 let (op, op_type) = self.term_to_z3_ast(
-                    ctx,
-                    eval_ctx,
-                    spec,
-                    types,
-                    decls,
-                    &t.op,
-                    function,
-                    params_resources,
+                    ctx, env, eval_ctx, spec, types, decls, &t.op, function, params,
                 );
                 let tdef = op_type.wasi().unwrap();
                 let datatype = types.resources.get(&tdef.name).unwrap();
@@ -1366,14 +1235,7 @@ impl State {
             },
             | Term::U64Const(t) => {
                 let (value, _type) = self.term_to_z3_ast(
-                    ctx,
-                    eval_ctx,
-                    spec,
-                    types,
-                    decls,
-                    &t.term,
-                    function,
-                    params_resources,
+                    ctx, env, eval_ctx, spec, types, decls, &t.term, function, params,
                 );
 
                 let datatype = types.resources.get("u64").unwrap();
@@ -1385,24 +1247,10 @@ impl State {
             },
             | Term::StrAt(t) => {
                 let (mut s, s_type) = self.term_to_z3_ast(
-                    ctx,
-                    eval_ctx,
-                    spec,
-                    types,
-                    decls,
-                    &t.lhs,
-                    function,
-                    params_resources,
+                    ctx, env, eval_ctx, spec, types, decls, &t.lhs, function, params,
                 );
                 let (i, _type) = self.term_to_z3_ast(
-                    ctx,
-                    eval_ctx,
-                    spec,
-                    types,
-                    decls,
-                    &t.rhs,
-                    function,
-                    params_resources,
+                    ctx, env, eval_ctx, spec, types, decls, &t.rhs, function, params,
                 );
 
                 if let Type::Wasi(tdef) = s_type {
@@ -1418,24 +1266,10 @@ impl State {
             },
             | Term::ValueEq(t) => {
                 let (lhs, _lhs_type) = self.term_to_z3_ast(
-                    ctx,
-                    eval_ctx,
-                    spec,
-                    types,
-                    decls,
-                    &t.lhs,
-                    function,
-                    params_resources,
+                    ctx, env, eval_ctx, spec, types, decls, &t.lhs, function, params,
                 );
                 let (rhs, _rhs_type) = self.term_to_z3_ast(
-                    ctx,
-                    eval_ctx,
-                    spec,
-                    types,
-                    decls,
-                    &t.rhs,
-                    function,
-                    params_resources,
+                    ctx, env, eval_ctx, spec, types, decls, &t.rhs, function, params,
                 );
 
                 (
@@ -1457,13 +1291,14 @@ impl State {
                     | Some(payload_term) => {
                         let (payload, _payload_tdef) = self.term_to_z3_ast(
                             ctx,
+                            env,
                             eval_ctx,
                             spec,
                             types,
                             decls,
                             payload_term,
                             function,
-                            params_resources,
+                            params,
                         );
 
                         vec![payload]
@@ -1483,53 +1318,143 @@ impl State {
                 )
             },
             | Term::FsFileTypeGet(t) => {
-                let (fd_node, fd_type) = self.term_to_z3_ast(
-                    ctx,
-                    eval_ctx,
-                    spec,
-                    types,
-                    decls,
-                    &t.lhs,
-                    function,
-                    params_resources,
-                );
-                let (path_node, path_type) = self.term_to_z3_ast(
-                    ctx,
-                    eval_ctx,
-                    spec,
-                    types,
-                    decls,
-                    &t.rhs,
-                    function,
-                    params_resources,
-                );
-                let filetype_tdef = spec.types.get_by_key("filetype").unwrap();
-                let mut dirs = decls
+                let (fd_param_idx, _fd_function_param) = function
+                    .params
+                    .iter()
+                    .enumerate()
+                    .find(|(_, param)| param.name == t.fd)
+                    .unwrap();
+                let (path_param_idx, _path_function_param) = function
+                    .params
+                    .iter()
+                    .enumerate()
+                    .find(|(_, param)| param.name == t.path)
+                    .unwrap();
+                let (fd_value, fd_resource_idx) = params.unwrap().get(fd_param_idx).unwrap();
+                let (path_value, _path_resource_idx) = params.unwrap().get(path_param_idx).unwrap();
+                let fd_resource_idx = fd_resource_idx.unwrap();
+                let mut fd_resource = env.resources.get(fd_resource_idx).unwrap();
+                let fd_tdef = spec.types.get_by_key("fd").unwrap();
+                let fd_type = fd_tdef.state.as_ref().unwrap().record().unwrap();
+                let (parent_member_idx, parent_member_type) = fd_type
+                    .members
+                    .iter()
+                    .enumerate()
+                    .find(|(_i, member)| member.name == "parent")
+                    .unwrap();
+                let (path_member_idx, path_member_type) = fd_type
+                    .members
+                    .iter()
+                    .enumerate()
+                    .find(|(_i, member)| member.name == "path")
+                    .unwrap();
+                let mut curr_fd_resource_idx = fd_resource_idx;
+                let mut paths =
+                    vec![String::from_utf8(path_value.string().unwrap().to_vec()).unwrap()];
+
+                loop {
+                    let parent_resource_idx = ResourceIdx(
+                        fd_resource
+                            .state
+                            .record()
+                            .unwrap()
+                            .members
+                            .get(parent_member_idx)
+                            .unwrap()
+                            .u64()
+                            .unwrap() as usize,
+                    );
+
+                    if curr_fd_resource_idx == parent_resource_idx {
+                        break;
+                    }
+
+                    paths.push(
+                        String::from_utf8(
+                            fd_resource
+                                .state
+                                .record()
+                                .unwrap()
+                                .members
+                                .get(path_member_idx)
+                                .unwrap()
+                                .string()
+                                .unwrap()
+                                .to_vec(),
+                        )
+                        .unwrap(),
+                    );
+                    curr_fd_resource_idx = parent_resource_idx;
+                    fd_resource = env.resources.get(curr_fd_resource_idx).unwrap();
+                }
+
+                let preopen_fd_resource_idx = curr_fd_resource_idx;
+                let (_preopen_resource_idx, preopen) = decls
                     .preopens
-                    .values()
-                    .map(|preopen| &preopen.root)
-                    .collect_vec();
+                    .iter()
+                    .find(|&(&resource_idx, preopen)| resource_idx == preopen_fd_resource_idx)
+                    .unwrap();
+                let file = FileEncodingRef::Directory(&preopen.root);
+                let mut files = vec![file];
 
-                println!(
-                    "whoa `{:#?}`",
-                    types.resources.get("path").unwrap().variants[0].accessors[0]
-                        .apply(&[&path_node])
-                        .as_string()
-                        .unwrap()
-                );
+                for path in paths.iter() {
+                    let path = Path::new(path);
 
-                while let Some(dir) = dirs.pop() {
-                    for (filename, child) in dir.children.iter() {
-                        match child {
-                            | FileEncoding::Directory(d) => dirs.push(d),
-                            | FileEncoding::RegularFile(_f) => (),
+                    for component in path.components() {
+                        let filename =
+                            String::from_utf8(component.as_os_str().as_encoded_bytes().to_vec())
+                                .unwrap();
+                        let f = files.last().unwrap();
+
+                        match filename.as_str() {
+                            | ".." => {
+                                files.pop();
+                            },
+                            | "." => (),
+                            | filename => match f {
+                                | FileEncodingRef::Directory(d) => {
+                                    files.push(d.children.get(filename).unwrap().as_ref())
+                                },
+                                | FileEncodingRef::RegularFile(_f) => unreachable!(),
+                            },
                         }
                     }
                 }
 
-                todo!()
+                let filetype_tdef = spec.types.get_by_key("filetype").unwrap();
+                let case_idx = match files.last().unwrap() {
+                    | FileEncodingRef::Directory(_d) => {
+                        filetype_tdef
+                            .wasi
+                            .variant()
+                            .unwrap()
+                            .cases
+                            .iter()
+                            .enumerate()
+                            .find(|(_i, case)| case.name == "directory")
+                            .unwrap()
+                            .0
+                    },
+                    | FileEncodingRef::RegularFile(_f) => {
+                        filetype_tdef
+                            .wasi
+                            .variant()
+                            .unwrap()
+                            .cases
+                            .iter()
+                            .enumerate()
+                            .find(|(_i, case)| case.name == "regular_file")
+                            .unwrap()
+                            .0
+                    },
+                };
 
-                // (todo!(), Type::Wasi(filetype_tdef))
+                (
+                    types.resources.get("filetype").unwrap().variants[case_idx]
+                        .constructor
+                        .apply(&[]),
+                    Type::Wasi(filetype_tdef.to_owned()),
+                )
             },
             | Term::NoNonExistentDirBacktrack(_t) => (
                 no_nonexistent_dir_backtrack(ctx, types, decls /*t*/),
@@ -2902,10 +2827,6 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
             function.output_contract.as_ref(),
         );
         let solver = z3::Solver::new(self.z3_ctx);
-        let params_resources = params
-            .iter()
-            .map(|(_value, idx)| idx.to_owned())
-            .collect_vec();
 
         solver.assert(&state.encode(
             self.u,
@@ -2915,7 +2836,7 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
             &decls,
             spec,
             function,
-            Some(&params_resources),
+            Some(&params),
             function.output_contract.as_ref(),
         ));
 
@@ -3051,6 +2972,13 @@ impl<'ctx> FileEncoding<'ctx> {
         match self {
             | FileEncoding::Directory(d) => &d.node,
             | FileEncoding::RegularFile(f) => &f.node,
+        }
+    }
+
+    fn as_ref(&self) -> FileEncodingRef<'ctx, '_> {
+        match self {
+            | FileEncoding::Directory(d) => FileEncodingRef::Directory(d),
+            | FileEncoding::RegularFile(f) => FileEncodingRef::RegularFile(f),
         }
     }
 }

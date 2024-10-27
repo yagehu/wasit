@@ -107,8 +107,8 @@ variant_const = { "(" ~ "@variant.const" ~ id ~ id ~ term? ~ ")" }
 fs_file_type_get =
   { "("
   ~ "@fs.file.type.get"
-  ~ term
-  ~ term
+  ~ "(" ~ "param" ~ id ~ ")"
+  ~ "(" ~ "param" ~ id ~ ")"
   ~ ")"
   }
 
