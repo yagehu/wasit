@@ -221,14 +221,7 @@ impl State {
                             );
                         }
                     },
-                    | Term::FsFileTypeGet(t) => {
-                        // scan_primed_in_output_contract(
-                        //     ctx, types, spec, function, &t.lhs, to_solves,
-                        // );
-                        // scan_primed_in_output_contract(
-                        //     ctx, types, spec, function, &t.rhs, to_solves,
-                        // );
-                    },
+                    | Term::FsFileTypeGet(_t) => (),
                     | Term::NoNonExistentDirBacktrack(_t) => todo!(),
                 }
             }
@@ -1330,19 +1323,19 @@ impl State {
                     .enumerate()
                     .find(|(_, param)| param.name == t.path)
                     .unwrap();
-                let (fd_value, fd_resource_idx) = params.unwrap().get(fd_param_idx).unwrap();
+                let (_fd_value, fd_resource_idx) = params.unwrap().get(fd_param_idx).unwrap();
                 let (path_value, _path_resource_idx) = params.unwrap().get(path_param_idx).unwrap();
                 let fd_resource_idx = fd_resource_idx.unwrap();
                 let mut fd_resource = env.resources.get(fd_resource_idx).unwrap();
                 let fd_tdef = spec.types.get_by_key("fd").unwrap();
                 let fd_type = fd_tdef.state.as_ref().unwrap().record().unwrap();
-                let (parent_member_idx, parent_member_type) = fd_type
+                let (parent_member_idx, _parent_member_type) = fd_type
                     .members
                     .iter()
                     .enumerate()
                     .find(|(_i, member)| member.name == "parent")
                     .unwrap();
-                let (path_member_idx, path_member_type) = fd_type
+                let (path_member_idx, _path_member_type) = fd_type
                     .members
                     .iter()
                     .enumerate()
@@ -1392,7 +1385,7 @@ impl State {
                 let (_preopen_resource_idx, preopen) = decls
                     .preopens
                     .iter()
-                    .find(|&(&resource_idx, preopen)| resource_idx == preopen_fd_resource_idx)
+                    .find(|&(&resource_idx, _preopen)| resource_idx == preopen_fd_resource_idx)
                     .unwrap();
                 let file = FileEncodingRef::Directory(&preopen.root);
                 let mut files = vec![file];
