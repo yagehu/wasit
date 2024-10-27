@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, HashSet};
 
 use arbitrary::Unstructured;
 use idxspace::IndexSpace;
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use witx::slang;
 
@@ -245,13 +246,32 @@ impl WasiType {
                         .transpose()?,
                 }))
             },
-            | WasiType::Record(record) => WasiValue::Record(RecordValue {
-                members: record
-                    .members
-                    .iter()
-                    .map(|member| member.tref.resolve_wasi(spec).arbitrary_value(spec, u))
-                    .collect::<Result<Vec<_>, _>>()?,
-            }),
+            | WasiType::Record(record) => {
+                // Special case: buf and buf_len in the same record.
+                if record.members.len() == 2
+                    && record.members[0].name == "buf"
+                    && record.members[1].name == "buf_len"
+                {
+                    let buf_len = u.choose_index(4096)?;
+                    let buf = u.bytes(buf_len)?;
+                    let buf = buf.iter().map(|&b| WasiValue::U8(b)).collect_vec();
+
+                    WasiValue::Record(RecordValue {
+                        members: vec![
+                            WasiValue::Pointer(PointerValue { items: buf }),
+                            WasiValue::U32(buf_len as u32),
+                        ],
+                    })
+                } else {
+                    WasiValue::Record(RecordValue {
+                        members: record
+                            .members
+                            .iter()
+                            .map(|member| member.tref.resolve_wasi(spec).arbitrary_value(spec, u))
+                            .collect::<Result<Vec<_>, _>>()?,
+                    })
+                }
+            },
             | WasiType::String => {
                 let n = u.choose_index(16)?;
                 let mut bytes = Vec::with_capacity(n);

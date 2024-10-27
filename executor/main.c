@@ -221,7 +221,7 @@ static void free_ptr_value(void * ptr, const Value * value) {
                     value->const_pointer->items[i]
                 );
 
-            free(ptr);
+            // free(ptr);
 
             break;
         }
@@ -232,7 +232,7 @@ static void free_ptr_value(void * ptr, const Value * value) {
                     value->pointer->items[i]
                 );
 
-            free(ptr);
+            // free(ptr);
 
             break;
         }
