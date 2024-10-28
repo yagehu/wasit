@@ -252,7 +252,7 @@ impl WasiType {
                     && record.members[0].name == "buf"
                     && record.members[1].name == "buf_len"
                 {
-                    let buf_len = u.choose_index(4096)?;
+                    let buf_len = u.choose_index(64)?;
                     let buf = u.bytes(buf_len)?;
                     let buf = buf.iter().map(|&b| WasiValue::U8(b)).collect_vec();
 

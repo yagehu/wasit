@@ -2,7 +2,7 @@
 
 use std::{
     fs,
-    io,
+    io::{self, stderr, IsTerminal},
     ops::Deref,
     panic,
     path::{Path, PathBuf},
@@ -79,6 +79,15 @@ impl Strategy {
 
 fn main() -> Result<(), eyre::Error> {
     color_eyre::install()?;
+
+    let mut subscriber = tracing_subscriber::fmt::layer()
+        .with_thread_names(true)
+        .with_writer(io::stderr);
+
+    if !stderr().is_terminal() {
+        subscriber.set_ansi(false);
+    }
+
     tracing::subscriber::set_global_default(
         tracing_subscriber::Registry::default()
             .with(
@@ -88,12 +97,7 @@ fn main() -> Result<(), eyre::Error> {
                     .from_env_lossy(),
             )
             .with(ErrorLayer::default())
-            .with(
-                tracing_subscriber::fmt::layer()
-                    .with_thread_names(true)
-                    .with_writer(io::stderr)
-                    .pretty(),
-            ),
+            .with(subscriber),
     )
     .wrap_err("failed to configure tracing")?;
 
