@@ -16,6 +16,7 @@ use std::{
         RwLock,
     },
     thread,
+    time::Duration,
 };
 
 use arbitrary::Unstructured;
@@ -51,6 +52,9 @@ struct Cmd {
 
     #[arg(long)]
     max_epochs: Option<usize>,
+
+    #[arg(long, value_parser = humantime::parse_duration)]
+    duration: Option<Duration>,
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
@@ -132,6 +136,7 @@ fn main() -> Result<(), eyre::Error> {
                 Box::new(Wazero::default()) as Box<dyn InitializeState>,
             ),
         ],
+        cmd.duration,
     );
     let data = cmd
         .data
@@ -150,6 +155,7 @@ struct Fuzzer<'s> {
     strategy: Strategy,
     store:    &'s mut FuzzStore,
     runtimes: Vec<(&'static str, Box<dyn InitializeState>)>,
+    duration: Option<Duration>,
 }
 
 impl<'s> Fuzzer<'s> {
@@ -157,11 +163,13 @@ impl<'s> Fuzzer<'s> {
         strategy: Strategy,
         store: &'s mut FuzzStore,
         runtimes: impl IntoIterator<Item = (&'static str, Box<dyn InitializeState>)>,
+        duration: Option<Duration>,
     ) -> Self {
         Self {
             strategy,
             store,
             runtimes: runtimes.into_iter().collect(),
+            duration,
         }
     }
 
@@ -172,8 +180,32 @@ impl<'s> Fuzzer<'s> {
     ) -> Result<(), eyre::Error> {
         let mut data = data;
         let mut epoch = 0;
+        let cancel = Arc::new(AtomicBool::new(false));
+
+        if let Some(duration) = self.duration.clone() {
+            thread::Builder::new()
+                .name("timer".to_owned())
+                .spawn({
+                    let cancel = cancel.clone();
+
+                    move || {
+                        thread::sleep(duration);
+                        cancel.store(true, atomic::Ordering::SeqCst);
+                        tracing::warn!(
+                            duration = humantime::Duration::from(duration).to_string(),
+                            "Time's up. Cancelling."
+                        );
+                    }
+                })
+                .wrap_err("failed to spawn timer thread")?;
+        }
 
         loop {
+            if cancel.load(atomic::Ordering::SeqCst) {
+                tracing::info!("Fuzz loop cancelled.");
+                break;
+            }
+
             if let Some(max_epochs) = max_epochs {
                 if epoch == max_epochs {
                     break;
@@ -182,7 +214,7 @@ impl<'s> Fuzzer<'s> {
 
             epoch += 1;
 
-            match self.fuzz(epoch, data.take()) {
+            match self.fuzz(epoch, data.take(), cancel.clone()) {
                 | Ok(_) => continue,
                 | Err(FuzzError::DiffFound) => continue,
                 | Err(err) => return Err(err!(err)),
@@ -192,7 +224,12 @@ impl<'s> Fuzzer<'s> {
         Ok(())
     }
 
-    pub fn fuzz(&mut self, epoch: usize, data: Option<Vec<u8>>) -> Result<(), FuzzError> {
+    pub fn fuzz(
+        &mut self,
+        epoch: usize,
+        data: Option<Vec<u8>>,
+        cancel_loop: Arc<AtomicBool>,
+    ) -> Result<(), FuzzError> {
         let mut run_store = self
             .store
             .new_run()
@@ -256,11 +293,11 @@ impl<'s> Fuzzer<'s> {
 
         thread::scope(|scope| -> Result<_, FuzzError> {
             let (tx, rx) = mpsc::channel();
-            let cancel = Arc::new(AtomicBool::new(false));
             let pause_pair = Arc::new((Mutex::new((0, 0usize)), Condvar::new()));
             let resume_pair = Arc::new((Mutex::new((true, 0usize)), Condvar::new()));
             let n_live_threads = Arc::new(AtomicUsize::new(self.runtimes.len()));
             let mut runtime_threads = Vec::with_capacity(self.runtimes.len());
+            let cancel = Arc::new(AtomicBool::new(false));
 
             for ((runtime_name, mut store, executor), mut ctx) in runtimes.into_iter().zip(ctxs) {
                 runtime_threads.push(
@@ -271,6 +308,7 @@ impl<'s> Fuzzer<'s> {
                             let env = env.clone();
                             let tx = tx.clone();
                             let cancel = cancel.clone();
+                            let cancel_loop = cancel_loop.clone();
                             let pause_pair = pause_pair.clone();
                             let resume_pair = resume_pair.clone();
                             let n_live_threads = n_live_threads.clone();
@@ -299,6 +337,12 @@ impl<'s> Fuzzer<'s> {
                                     if cancel.load(atomic::Ordering::SeqCst) {
                                         return Err(FuzzError::DiffFound);
                                     }
+
+                                    // if cancel_loop.load(atomic::Ordering::SeqCst) {
+                                    //     return Err(FuzzError::Unknown(err!(
+                                    //         "fuzz epoch cancelled"
+                                    //     )));
+                                    // }
 
                                     if u.is_empty() {
                                         panic!("data exhausted");
@@ -391,6 +435,7 @@ impl<'s> Fuzzer<'s> {
             thread::Builder::new()
                 .name("wazzi-differ".to_string())
                 .spawn_scoped(scope, {
+                    let cancel = cancel.clone();
                     let mut u = Unstructured::new(&data);
 
                     move || -> Result<(), FuzzError> {
