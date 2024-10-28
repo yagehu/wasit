@@ -338,11 +338,11 @@ impl<'s> Fuzzer<'s> {
                                         return Err(FuzzError::DiffFound);
                                     }
 
-                                    // if cancel_loop.load(atomic::Ordering::SeqCst) {
-                                    //     return Err(FuzzError::Unknown(err!(
-                                    //         "fuzz epoch cancelled"
-                                    //     )));
-                                    // }
+                                    if cancel_loop.load(atomic::Ordering::SeqCst) {
+                                        return Err(FuzzError::Unknown(err!(
+                                            "fuzz epoch cancelled"
+                                        )));
+                                    }
 
                                     if u.is_empty() {
                                         panic!("data exhausted");
