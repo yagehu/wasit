@@ -75,7 +75,7 @@ def main [] {
         (build_wasmer $wasmer_path),
         (build_wasmtime $wasmtime_path),
         (build_wazero $wazero_path),
-    ] | path expand
+    ]
     let source_path = $"($root)/tools/activate.nu"
 
     cat (std null-device) out> $source_path

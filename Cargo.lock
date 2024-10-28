@@ -1581,6 +1581,7 @@ version = "0.1.0"
 dependencies = [
  "protobuf",
  "wasi",
+ "wasi-sdk",
  "wazzi-executor-pb-c",
  "wazzi-executor-pb-rust",
  "wazzi-executor-protobuf-c-wasm",

@@ -29,9 +29,17 @@ fn main() {
 
     env::set_current_dir(&out_dir).unwrap();
 
+    #[cfg(feature = "build-protobuf")]
     let protobuf_install_dir = target_dir.join("protobuf");
+
+    #[cfg(feature = "build-protobuf")]
+    let protoc = protobuf_install_dir.join("bin").join("protoc");
+    #[cfg(not(feature = "build-protobuf"))]
+    let protoc = PathBuf::from("protoc");
+
     let mut command = process::Command::new(upstream_dir.join("configure").canonicalize().unwrap());
 
+    #[cfg(feature = "build-protobuf")]
     command
         .env(
             "protobuf_CFLAGS",
@@ -53,7 +61,7 @@ fn main() {
     command.env("LDFLAGS", "-framework CoreFoundation");
 
     let status = command
-        .env("PROTOC", protobuf_install_dir.join("bin").join("protoc"))
+        .env("PROTOC", &protoc)
         .arg("--prefix")
         .arg(target_dir.join("protoc-c"))
         .spawn()

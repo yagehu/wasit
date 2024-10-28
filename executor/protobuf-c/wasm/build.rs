@@ -19,25 +19,30 @@ fn main() {
 
     env::set_current_dir(&upstream_dir).unwrap();
 
-    let status = process::Command::new("./autogen.sh")
+    assert!(process::Command::new("./autogen.sh")
         .spawn()
         .unwrap()
         .wait()
-        .unwrap();
+        .unwrap()
+        .success());
 
-    assert!(status.success());
-
-    let wasi_sdk_build_dir = root
+    #[cfg(feature = "build-wasi-sdk")]
+    let wasi_sdk = root
         .join("target")
         .join(env::var("PROFILE").unwrap())
         .join("wasi-sdk")
-        .canonicalize()
-        .unwrap();
-    let wasi_sdk_bin_dir = wasi_sdk_build_dir
         .join("install")
-        .join("bin")
         .canonicalize()
         .unwrap();
+    #[cfg(not(feature = "build-wasi-sdk"))]
+    let wasi_sdk = PathBuf::from(env::var("WASI_SDK").unwrap());
+
+    let wasi_sdk_bin_dir = wasi_sdk.join("bin").canonicalize().unwrap();
+
+    #[cfg(feature = "build-protobuf")]
+    let protoc = protobuf_install_dir.join("bin").join("protoc");
+    #[cfg(not(feature = "build-protobuf"))]
+    let protoc = PathBuf::from("protoc");
 
     env::set_current_dir(&out_dir).unwrap();
 
@@ -55,7 +60,7 @@ fn main() {
                 protobuf_install_dir.join("lib").display()
             ),
         )
-        .env("PROTOC", protobuf_install_dir.join("bin").join("protoc"))
+        .env("PROTOC", &protoc)
         .env("CC", &wasi_sdk_bin_dir.join("clang"))
         .env("AR", &wasi_sdk_bin_dir.join("ar"))
         .env("LD", &wasi_sdk_bin_dir.join("wasm-ld"))
@@ -65,8 +70,7 @@ fn main() {
             "CFLAGS",
             format!(
                 "--sysroot={}",
-                wasi_sdk_build_dir
-                    .join("install")
+                wasi_sdk
                     .join("share")
                     .join("wasi-sysroot")
                     .canonicalize()

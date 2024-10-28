@@ -7,6 +7,10 @@ publish = false
 [dependencies]
 
 [build-dependencies]
-wasi-sdk.workspace = true
+wasi-sdk = { workspace = true, optional = true }
 wazzi-compile-time.workspace = true
-wazzi-executor-protobuf.workspace = true
+wazzi-executor-protobuf = { workspace = true, optional = true }
+
+[features]
+build-protobuf = ["wazzi-executor-protobuf"]
+build-wasi-sdk = ["wasi-sdk"]

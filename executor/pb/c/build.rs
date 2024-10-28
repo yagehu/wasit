@@ -25,46 +25,45 @@ fn main() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap())
         .canonicalize()
         .unwrap();
-    let wasi_sdk_build_dir = root_dir
+
+    #[cfg(feature = "build-wasi-sdk")]
+    let wasi_sdk = root_dir
         .join("target")
         .join(env::var("PROFILE").unwrap())
         .join("wasi-sdk")
         .canonicalize()
         .unwrap();
-    let clang_path = wasi_sdk_build_dir
-        .join("install")
-        .join("bin")
-        .join("clang")
-        .canonicalize()
-        .unwrap();
-    let ar_path = wasi_sdk_build_dir
-        .join("install")
-        .join("bin")
-        .join("llvm-ar")
-        .canonicalize()
-        .unwrap();
 
-    assert!(
-        process::Command::new(target_dir.join("protobuf").join("bin").join("protoc"))
-            .args([
-                &format!("--proto_path={}", schema_dir.display()),
-                &format!("--c_out={}", out_dir.display()),
-                schema_path.to_string_lossy().as_ref(),
-            ])
-            .arg(&format!(
-                "--plugin=protoc-gen-c={}",
-                target_dir
-                    .join("protoc-c")
-                    .join("bin")
-                    .join("protoc-gen-c")
-                    .display()
-            ))
-            .spawn()
-            .unwrap()
-            .wait()
-            .unwrap()
-            .success()
-    );
+    #[cfg(not(feature = "build-wasi-sdk"))]
+    let wasi_sdk = PathBuf::from(env::var("WASI_SDK").unwrap());
+
+    #[cfg(feature = "build-protobuf")]
+    let protoc = target_dir.join("protobuf").join("bin").join("protoc");
+    #[cfg(not(feature = "build-protobuf"))]
+    let protoc = PathBuf::from("protoc");
+
+    let clang_path = wasi_sdk.join("bin").join("clang").canonicalize().unwrap();
+    let ar_path = wasi_sdk.join("bin").join("llvm-ar").canonicalize().unwrap();
+
+    assert!(process::Command::new(&protoc)
+        .args([
+            &format!("--proto_path={}", schema_dir.display()),
+            &format!("--c_out={}", out_dir.display()),
+            schema_path.to_string_lossy().as_ref(),
+        ])
+        .arg(&format!(
+            "--plugin=protoc-gen-c={}",
+            target_dir
+                .join("protoc-c")
+                .join("bin")
+                .join("protoc-gen-c")
+                .display()
+        ))
+        .spawn()
+        .unwrap()
+        .wait()
+        .unwrap()
+        .success());
 
     let pb_file_c = target_dir.join("wazzi-executor.pb-c.c");
     let pb_file_h = target_dir.join("wazzi-executor.pb-c.h");
@@ -75,8 +74,7 @@ fn main() {
     assert!(process::Command::new(clang_path)
         .arg("--sysroot")
         .arg(
-            wasi_sdk_build_dir
-                .join("install")
+            wasi_sdk
                 .join("share")
                 .join("wasi-sysroot")
                 .canonicalize()
