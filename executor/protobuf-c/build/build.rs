@@ -29,33 +29,38 @@ fn main() {
 
     env::set_current_dir(&out_dir).unwrap();
 
-    #[cfg(feature = "build-protobuf")]
-    let protobuf_install_dir = target_dir.join("protobuf");
+    let mut protobuf = None;
+
+    if cfg!(feature = "build-protobuf") {
+        protobuf = Some(target_dir.join("protobuf"));
+    }
+
+    if let Ok(p) = env::var("PROTOBUF") {
+        protobuf = Some(PathBuf::from(p));
+    }
 
     #[cfg(feature = "build-protobuf")]
-    let protoc = protobuf_install_dir.join("bin").join("protoc");
+    let protoc = protobuf.join("bin").join("protoc");
     #[cfg(not(feature = "build-protobuf"))]
     let protoc = PathBuf::from("protoc");
 
     let mut command = process::Command::new(upstream_dir.join("configure").canonicalize().unwrap());
 
-    #[cfg(feature = "build-protobuf")]
-    command
-        .env(
-            "protobuf_CFLAGS",
-            format!("-I{}", protobuf_install_dir.join("include").display()),
-        )
-        .env(
-            "PKG_CONFIG_PATH",
-            format!(
-                "{}:{}",
-                protobuf_install_dir.join("lib").join("pkgconfig").display(),
-                protobuf_install_dir
-                    .join("lib64")
-                    .join("pkgconfig")
-                    .display(),
-            ),
-        );
+    if let Some(protobuf) = protobuf {
+        command
+            .env(
+                "protobuf_CFLAGS",
+                format!("-I{}", protobuf.join("include").display()),
+            )
+            .env(
+                "PKG_CONFIG_PATH",
+                format!(
+                    "{}:{}",
+                    protobuf.join("lib").join("pkgconfig").display(),
+                    protobuf.join("lib64").join("pkgconfig").display(),
+                ),
+            );
+    }
 
     #[cfg(target_os = "macos")]
     command.env("LDFLAGS", "-framework CoreFoundation");

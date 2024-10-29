@@ -35,6 +35,9 @@ z3-sys = { git = "https://github.com/yagehu/z3.rs.git", branch = "wazzi" }
 
 [build-dependencies]
 
+[features]
+build-protobuf = ["wazzi-executor-pb-rust/build-protobuf"]
+
 [workspace.package]
 edition = "2021"
 publish = false
