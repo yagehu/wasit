@@ -150,6 +150,7 @@ impl Environment {
     pub fn call(
         &self,
         spec: &Spec,
+        ctx: &RuntimeContext,
         store: &mut TraceStore<Call>,
         function: &Function,
         strategy: &mut dyn CallStrategy,
@@ -157,7 +158,7 @@ impl Environment {
     ) -> Result<
         (
             Vec<(WasiValue, Option<ResourceIdx>)>,
-            Option<Vec<WasiValue>>,
+            Option<Vec<MaybeResourceValue>>,
         ),
         eyre::Error,
     > {
@@ -166,7 +167,14 @@ impl Environment {
         store.begin_call(&Call {
             function: function.name.clone(),
             errno:    None,
-            params:   params.clone().into_iter().map(|p| p.0).collect_vec(),
+            params:   params
+                .clone()
+                .into_iter()
+                .map(|(value, resource_idx)| MaybeResourceValue {
+                    value,
+                    resource_idx,
+                })
+                .collect_vec(),
             results:  None,
         })?;
 
@@ -211,15 +219,63 @@ impl Environment {
                     .collect_vec(),
             ),
         };
+        let results = match results {
+            | Some(results) => {
+                let mut ctx = ctx.to_owned();
+                let mut v = vec![];
+                let mut prev_env = self.clone();
+
+                for (value, result) in results.iter().zip(function.results.iter()) {
+                    v.push((
+                        value.clone(),
+                        prev_env.add_resources_to_ctx_recursively(
+                            &spec,
+                            &mut ctx,
+                            result.tref.resolve(&spec),
+                            &value,
+                        ),
+                    ));
+                }
+
+                Some(v)
+            },
+            | None => None,
+        };
 
         store.end_call(&Call {
             function: function.name.clone(),
             errno,
-            params: params.clone().into_iter().map(|p| p.0).collect_vec(),
-            results: results.clone(),
+            params: params
+                .clone()
+                .into_iter()
+                .map(|(value, resource_idx)| MaybeResourceValue {
+                    value,
+                    resource_idx,
+                })
+                .collect_vec(),
+            results: results.as_ref().map(|results| {
+                results
+                    .iter()
+                    .map(|(value, resource_idx)| MaybeResourceValue {
+                        value:        value.to_owned(),
+                        resource_idx: resource_idx.to_owned(),
+                    })
+                    .collect_vec()
+            }),
         })?;
 
-        Ok((params, results))
+        Ok((
+            params,
+            results.map(|results| {
+                results
+                    .iter()
+                    .map(|(value, resource_idx)| MaybeResourceValue {
+                        value:        value.to_owned(),
+                        resource_idx: resource_idx.to_owned(),
+                    })
+                    .collect_vec()
+            }),
+        ))
     }
 
     pub fn execute_function_effects(
@@ -227,7 +283,7 @@ impl Environment {
         spec: &Spec,
         function: &Function,
         _params: &[(WasiValue, Option<ResourceIdx>)],
-        results: &Vec<(String, WasiValue)>,
+        results: &Vec<(String, MaybeResourceValue)>,
     ) -> Vec<Option<ResourceIdx>> {
         let mut resources: HashMap<&str, ResourceIdx> = Default::default();
         let mut result_resource_idxs = Vec::new();
@@ -236,7 +292,7 @@ impl Environment {
             if let Some(id) = self.register_result_value_resource_recursively(
                 spec,
                 result.tref.resolve(spec),
-                result_value,
+                &result_value.value,
             ) {
                 result_resource_idxs.push(Some(id));
                 resources.insert(name, id);
@@ -254,7 +310,7 @@ impl Environment {
         ctx: &mut RuntimeContext,
         tdef: &TypeDef,
         value: &WasiValue,
-    ) {
+    ) -> Option<ResourceIdx> {
         match (&tdef.wasi, value) {
             | (WasiType::Handle, _)
             | (WasiType::S64, _)
@@ -319,7 +375,11 @@ impl Environment {
             );
 
             ctx.resources.insert(resource_id, value.to_owned());
+
+            return Some(resource_id);
         }
+
+        None
     }
 
     fn register_result_value_resource_recursively(
@@ -404,8 +464,14 @@ impl Environment {
 pub struct Call {
     pub function: String,
     pub errno:    Option<i32>,
-    pub params:   Vec<WasiValue>,
-    pub results:  Option<Vec<WasiValue>>,
+    pub params:   Vec<MaybeResourceValue>,
+    pub results:  Option<Vec<MaybeResourceValue>>,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
+pub struct MaybeResourceValue {
+    pub value:        WasiValue,
+    pub resource_idx: Option<ResourceIdx>,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]

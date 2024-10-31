@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use crate::spec::WasiValue;
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -34,5 +36,5 @@ impl Default for Resources {
     }
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
 pub struct ResourceIdx(pub(crate) usize);

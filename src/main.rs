@@ -55,6 +55,9 @@ struct Cmd {
 
     #[arg(long, value_parser = humantime::parse_duration)]
     duration: Option<Duration>,
+
+    #[arg()]
+    path: PathBuf,
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
@@ -110,7 +113,7 @@ fn main() -> Result<(), eyre::Error> {
     }));
 
     let cmd = Cmd::parse();
-    let mut store = FuzzStore::new(Path::new("abc")).wrap_err("failed to init fuzz store")?;
+    let mut store = FuzzStore::new(&cmd.path).wrap_err("failed to init fuzz store")?;
     let mut fuzzer = Fuzzer::new(
         cmd.strategy,
         &mut store,
@@ -369,6 +372,7 @@ impl<'s> Fuzzer<'s> {
 
                                     let (params, results) = match env.read().unwrap().call(
                                         &spec,
+                                        &ctx,
                                         store.trace_mut(),
                                         function,
                                         strategy.as_mut(),
@@ -399,7 +403,7 @@ impl<'s> Fuzzer<'s> {
                                                 &spec,
                                                 &mut ctx,
                                                 result.tref.resolve(&spec),
-                                                &result_value,
+                                                &result_value.value,
                                             );
                                         }
                                     }
