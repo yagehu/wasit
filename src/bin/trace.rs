@@ -40,11 +40,12 @@ fn main() -> Result<(), eyre::Error> {
     let mut runs = 0;
     let mut total_num_calls = 0;
     let mut max_trace_len = 0;
+    let mut max_trace_len_idx = 0;
     let mut runtimes = None;
     let mut total_max_calls = 0;
     let mut total_max_resource_depth = 0;
 
-    for (path, _run_idx) in entries {
+    for (path, run_idx) in entries {
         let runtimes_dir = path.join("runtimes");
 
         if runtimes.is_none() {
@@ -191,6 +192,11 @@ fn main() -> Result<(), eyre::Error> {
             format!("{:?}", Dot::with_config(&graph, &[])),
         )
         .unwrap();
+
+        if trace_len > max_trace_len {
+            max_trace_len_idx = run_idx;
+        }
+
         max_trace_len = max_trace_len.max(trace_len);
         total_max_calls += most_calls;
         total_max_resource_depth += max_resource_depth;
@@ -199,6 +205,7 @@ fn main() -> Result<(), eyre::Error> {
 
     println!("# runs: {runs}");
     println!("max trace len: {max_trace_len}");
+    println!("max trace len idx: {max_trace_len_idx}");
     println!(
         "average trace len: {:.2}",
         total_num_calls as f64 / runs as f64

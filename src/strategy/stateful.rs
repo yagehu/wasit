@@ -781,7 +781,7 @@ impl State {
 
             if param_tdef.wasi == WasiType::String && params.is_none() {
                 let datatype = types.resources.get(&param_tdef.name).unwrap();
-                let len = u.choose_index(16).unwrap() as u64 + 1;
+                let len = u.choose_index(64).unwrap() as u64 + 1;
 
                 // Special case: Sequence solving is slow. Impose an exact length.
                 clauses.push(
