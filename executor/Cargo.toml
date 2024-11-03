@@ -16,4 +16,5 @@ wazzi-executor-pb-c.workspace = true
 wazzi-executor-protobuf-c-wasm.workspace = true
 
 [features]
+build-protobuf = ["wazzi-executor-pb-c/build-protobuf"]
 build-wasi-sdk = ["wasi-sdk"]

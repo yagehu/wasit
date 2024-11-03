@@ -40,7 +40,7 @@ fn main() {
     }
 
     #[cfg(feature = "build-protobuf")]
-    let protoc = protobuf.join("bin").join("protoc");
+    let protoc = protobuf.as_ref().unwrap().join("bin").join("protoc");
     #[cfg(not(feature = "build-protobuf"))]
     let protoc = PathBuf::from("protoc");
 
@@ -50,7 +50,7 @@ fn main() {
         command
             .env(
                 "protobuf_CFLAGS",
-                format!("-I{}", protobuf.join("include").display()),
+                format!("-I{}", protobuf.join("include").display(),),
             )
             .env(
                 "PKG_CONFIG_PATH",

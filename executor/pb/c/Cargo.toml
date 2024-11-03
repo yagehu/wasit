@@ -13,5 +13,8 @@ wazzi-executor-protobuf = { workspace = true, optional = true }
 wazzi-executor-protobuf-c.workspace = true
 
 [features]
-build-protobuf = ["wazzi-executor-protobuf"]
+build-protobuf = [
+    "wazzi-executor-protobuf",
+    "wazzi-executor-protobuf-c/build-protobuf",
+]
 build-wasi-sdk = ["wasi-sdk"]
