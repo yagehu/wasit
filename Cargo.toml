@@ -18,6 +18,7 @@ eyre.workspace = true
 humantime = "2"
 idxspace.workspace = true
 itertools = "0.12"
+memmap = "0.7.0"
 num-bigint = "0.4"
 pest = "2"
 pest_derive = "2"

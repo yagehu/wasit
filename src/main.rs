@@ -23,6 +23,7 @@ use arbitrary::Unstructured;
 use clap::Parser;
 use eyre::{eyre as err, Context as _};
 use itertools::{EitherOrBoth, Itertools as _};
+use memmap::MmapOptions;
 use rand::{thread_rng, RngCore};
 use tracing::level_filters::LevelFilter;
 use tracing_error::ErrorLayer;
@@ -237,14 +238,17 @@ impl<'s> Fuzzer<'s> {
         data: Option<Vec<u8>>,
         cancel_loop: Arc<AtomicBool>,
     ) -> Result<(), FuzzError> {
-        let mut run_store = self
-            .store
-            .new_run()
-            .wrap_err("failed to init new run store")?;
+        const BUF_SIZE: usize = 131072;
+
+        let run_store = Arc::new(Mutex::new(
+            self.store
+                .new_run()
+                .wrap_err("failed to init new run store")?,
+        ));
         let data = match data {
             | Some(d) => d,
             | None => {
-                let mut data = vec![0u8; 131072];
+                let mut data = vec![0u8; BUF_SIZE];
 
                 thread_rng().fill_bytes(&mut data);
 
@@ -257,6 +261,8 @@ impl<'s> Fuzzer<'s> {
 
         for (runtime_name, runtime) in &self.runtimes {
             let store = run_store
+                .lock()
+                .unwrap()
                 .new_runtime(runtime_name.to_string(), "-")
                 .wrap_err("failed to init runtime store")?;
             let stderr = fs::OpenOptions::new()
@@ -297,16 +303,57 @@ impl<'s> Fuzzer<'s> {
         let env = Arc::new(RwLock::new(env));
 
         run_store
+            .lock()
+            .unwrap()
             .write_data(&data)
             .wrap_err("failed to write data")?;
+
+        let mut mmap = MmapOptions::new().len(BUF_SIZE).map_anon().unwrap();
+        let buf_ptr = mmap.as_ptr();
+
+        #[derive(Copy, Clone)]
+        struct ShareablePtr(*const u8);
+
+        // SAFETY: We never alias data when writing from multiple threads.
+        // Writer threads finish before unmapping.
+        unsafe impl Send for ShareablePtr {
+        }
+
+        let buf_ptr = ShareablePtr(buf_ptr);
 
         thread::scope(|scope| -> Result<_, FuzzError> {
             let (tx, rx) = mpsc::channel();
             let pause_pair = Arc::new((Mutex::new((0, 0usize)), Condvar::new()));
             let resume_pair = Arc::new((Mutex::new((true, 0usize)), Condvar::new()));
+            let (fill_tx, fill_rx) = mpsc::channel();
+            let filled_pair = Arc::new((Mutex::new((false, 0usize)), Condvar::new()));
             let n_live_threads = Arc::new(AtomicUsize::new(self.runtimes.len()));
             let mut runtime_threads = Vec::with_capacity(self.runtimes.len());
             let cancel = Arc::new(AtomicBool::new(false));
+            let refill_buffer = Arc::new(AtomicBool::new(false));
+
+            thread::Builder::new()
+                .name("arbitrary-buf-filler".to_string())
+                .spawn_scoped(scope, {
+                    let filled_pair = filled_pair.clone();
+                    let run_store = run_store.clone();
+
+                    move || {
+                        while let Ok(()) = fill_rx.recv() {
+                            thread_rng().fill_bytes(&mut mmap);
+                            run_store.lock().unwrap().write_data(&mmap).unwrap();
+
+                            let (filled_mu, filled_cond) = &*filled_pair;
+                            let mut filled_state = filled_mu.lock().unwrap();
+
+                            filled_state.0 = true;
+                            filled_state.1 = filled_state.1.wrapping_add(1);
+                            filled_cond.notify_all();
+                            drop(filled_state);
+                        }
+                    }
+                })
+                .wrap_err("failed to spawn arbitrary-buf-filler thread")?;
 
             for ((runtime_name, mut store, executor), mut ctx) in runtimes.into_iter().zip(ctxs) {
                 runtime_threads.push(
@@ -316,18 +363,23 @@ impl<'s> Fuzzer<'s> {
                             let mut u = Unstructured::new(&data);
                             let env = env.clone();
                             let tx = tx.clone();
+                            let fill_tx = fill_tx.clone();
                             let cancel = cancel.clone();
                             let cancel_loop = cancel_loop.clone();
                             let pause_pair = pause_pair.clone();
                             let resume_pair = resume_pair.clone();
+                            let filled_pair = filled_pair.clone();
                             let n_live_threads = n_live_threads.clone();
                             let strategy = self.strategy;
+                            let refill_buffer = refill_buffer.clone();
 
                             move || -> Result<(), FuzzError> {
                                 let z3_cfg = z3::Config::new();
                                 let z3_ctx = z3::Context::new(&z3_cfg);
                                 let spec = Spec::preview1()?;
                                 let mut iteration = 0;
+                                let buf_ptr = buf_ptr;
+                                let buf_ptr = buf_ptr.0;
 
                                 loop {
                                     let env = env.clone();
@@ -351,10 +403,6 @@ impl<'s> Fuzzer<'s> {
                                         return Err(FuzzError::Unknown(err!(
                                             "fuzz epoch cancelled"
                                         )));
-                                    }
-
-                                    if u.is_empty() {
-                                        panic!("data exhausted");
                                     }
 
                                     let mut strategy =
@@ -420,6 +468,15 @@ impl<'s> Fuzzer<'s> {
                                     if pause_state.0
                                         == n_live_threads.load(atomic::Ordering::SeqCst)
                                     {
+                                        if u.is_empty() {
+                                            let (filled_mu, _filled_cond) = &*filled_pair;
+                                            let mut filled_state = filled_mu.lock().unwrap();
+
+                                            refill_buffer.store(true, atomic::Ordering::SeqCst);
+                                            filled_state.0 = false;
+                                            fill_tx.send(()).unwrap();
+                                        }
+
                                         resume_mu.lock().unwrap().0 = false;
                                         pause_state.0 = 0;
                                         pause_state.1 = pause_state.1.wrapping_add(1);
@@ -435,6 +492,26 @@ impl<'s> Fuzzer<'s> {
                                             })
                                             .unwrap(),
                                     );
+
+                                    if refill_buffer.load(atomic::Ordering::SeqCst) {
+                                        let (filled_mu, filled_cond) = &*filled_pair;
+                                        let filled_state = filled_mu.lock().unwrap();
+                                        let filled_gen = filled_state.1;
+
+                                        drop(
+                                            filled_cond
+                                                .wait_while(filled_state, |(filled, gen)| {
+                                                    !*filled && *gen == filled_gen
+                                                })
+                                                .unwrap(),
+                                        );
+
+                                        let data = unsafe {
+                                            std::slice::from_raw_parts(buf_ptr, BUF_SIZE)
+                                        };
+
+                                        u = Unstructured::new(data);
+                                    }
                                 }
                             }
                         })
@@ -453,6 +530,8 @@ impl<'s> Fuzzer<'s> {
 
                         while let Ok((function, params, results, ctx)) = rx.recv() {
                             let runtimes = run_store
+                                .lock()
+                                .unwrap()
                                 .runtimes::<Call>()
                                 .wrap_err("failed to resume runtimes")?
                                 .collect::<Vec<_>>();

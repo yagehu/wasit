@@ -38,28 +38,35 @@ fn main() {
     let wasi_sdk = PathBuf::from(env::var("WASI_SDK").unwrap());
 
     let wasi_sdk_bin_dir = wasi_sdk.join("bin").canonicalize().unwrap();
+    let mut protobuf = None;
+
+    if cfg!(feature = "build-protobuf") {
+        protobuf = Some(target_dir.join("protobuf"));
+    }
 
     #[cfg(feature = "build-protobuf")]
-    let protoc = protobuf_install_dir.join("bin").join("protoc");
+    let protoc = protobuf.as_ref().unwrap().join("bin").join("protoc");
     #[cfg(not(feature = "build-protobuf"))]
     let protoc = PathBuf::from("protoc");
 
     env::set_current_dir(&out_dir).unwrap();
 
-    let protobuf_install_dir = target_dir.join("protobuf");
-    let status = process::Command::new(upstream_dir.join("configure").canonicalize().unwrap())
-        .args(["--host=wasm32-wasi"])
-        .env(
+    let mut cmd = process::Command::new(upstream_dir.join("configure").canonicalize().unwrap());
+
+    cmd.args(["--host=wasm32-wasi"]);
+
+    if let Some(protobuf) = protobuf {
+        cmd.env(
             "protobuf_CFLAGS",
-            format!("-I{}", protobuf_install_dir.join("include").display()),
+            format!("-I{}", protobuf.join("include").display()),
         )
         .env(
             "protobuf_LIBS",
-            format!(
-                "-lprotobuf -L{}",
-                protobuf_install_dir.join("lib").display()
-            ),
-        )
+            format!("-lprotobuf -L{}", protobuf.join("lib").display()),
+        );
+    }
+
+    let status = cmd
         .env("PROTOC", &protoc)
         .env("CC", &wasi_sdk_bin_dir.join("clang"))
         .env("AR", &wasi_sdk_bin_dir.join("ar"))

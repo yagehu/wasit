@@ -35,15 +35,16 @@ impl FuzzStore {
 
 #[derive(Clone, Debug)]
 pub struct RunStore {
-    data:         PathBuf,
-    runtimes_dir: PathBuf,
-    runtimes:     HashSet<String>,
+    data_next_idx: usize,
+    data_dir:      PathBuf,
+    runtimes_dir:  PathBuf,
+    runtimes:      HashSet<String>,
 }
 
 impl RunStore {
     pub fn resume(path: &Path) -> Result<Self, io::Error> {
         let path = path.canonicalize()?;
-        let data = path.join("data");
+        let data_dir = path.join("data");
         let runtimes_dir = path.join("runtimes");
         let mut runtimes = HashSet::new();
 
@@ -54,7 +55,8 @@ impl RunStore {
         }
 
         Ok(Self {
-            data,
+            data_next_idx: 0,
+            data_dir,
             runtimes_dir,
             runtimes,
         })
@@ -64,13 +66,15 @@ impl RunStore {
         fs::create_dir(path)?;
 
         let path = path.canonicalize()?;
-        let data = path.join("data");
+        let data_dir = path.join("data");
         let runtimes_dir = path.join("runtimes");
 
+        fs::create_dir(&data_dir)?;
         fs::create_dir(&runtimes_dir)?;
 
         Ok(Self {
-            data,
+            data_next_idx: 0,
+            data_dir,
             runtimes_dir,
             runtimes: Default::default(),
         })
@@ -88,12 +92,11 @@ impl RunStore {
         Ok(store)
     }
 
-    pub fn write_data(&self, data: &[u8]) -> Result<(), io::Error> {
-        fs::write(&self.data, data)
-    }
+    pub fn write_data(&mut self, data: &[u8]) -> Result<(), io::Error> {
+        fs::write(&self.data_dir.join(format!("{}", self.data_next_idx)), data)?;
+        self.data_next_idx += 1;
 
-    pub fn data(&self) -> Result<Vec<u8>, io::Error> {
-        fs::read(&self.data)
+        Ok(())
     }
 
     pub fn runtimes<'a, T: Serialize + DeserializeOwned + 'a>(
