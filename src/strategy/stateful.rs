@@ -816,6 +816,12 @@ impl State {
                                     .as_string()
                                     .unwrap()
                                     .at(&some_idx)
+                                    ._eq(&z3::ast::String::from_str(ctx, ".").unwrap()),
+                                &datatype.variants[0].accessors[0]
+                                    .apply(&[param_node])
+                                    .as_string()
+                                    .unwrap()
+                                    .at(&some_idx)
                                     ._eq(&z3::ast::String::from_str(ctx, "a").unwrap()),
                                 &datatype.variants[0].accessors[0]
                                     .apply(&[param_node])

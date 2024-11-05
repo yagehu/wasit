@@ -112,11 +112,15 @@ pub fn apply_env_initializers(
     )
 }
 
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(Serialize, PartialEq, Eq, Clone, Debug)]
 pub struct Environment {
-    resources:              Resources,
-    resources_by_types:     BTreeMap<String, BTreeSet<ResourceIdx>>,
-    resources_types:        HashMap<ResourceIdx, String>,
+    resources:          Resources,
+    resources_by_types: BTreeMap<String, BTreeSet<ResourceIdx>>,
+
+    #[serde(skip)]
+    resources_types: HashMap<ResourceIdx, String>,
+
+    #[serde(skip)]
     reverse_resource_index: HashMap<String, HashMap<WasiValue, ResourceIdx>>,
 }
 

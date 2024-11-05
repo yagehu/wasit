@@ -2,12 +2,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::spec::WasiValue;
 
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 pub struct Resource {
     pub state: WasiValue,
 }
 
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 pub struct Resources(Vec<Resource>);
 
 impl Resources {
