@@ -1,11 +1,11 @@
 #[cfg(test)]
 mod tests;
 
-use core::str;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
     io,
+    ops::Sub as _,
     path::{Path, PathBuf},
 };
 
@@ -103,6 +103,7 @@ impl State {
 
     fn declare<'ctx>(
         &self,
+        mut aop: ArbitraryOrPresolved<'_, '_>,
         spec: &Spec,
         ctx: &'ctx z3::Context,
         types: &'ctx StateTypes<'ctx>,
@@ -236,10 +237,35 @@ impl State {
             .map(|(param_name, tdef)| {
                 let datatype = types.resources.get(&tdef.name).unwrap();
 
-                (
-                    param_name.to_owned(),
-                    Dynamic::fresh_const(ctx, "param--", &datatype.sort),
-                )
+                match tdef.name.as_str() {
+                    | "path" => {
+                        let len = match &mut aop {
+                            | ArbitraryOrPresolved::Arbitrary(u) => u.choose_index(16).unwrap(),
+                            | ArbitraryOrPresolved::Presolved(lens) => {
+                                *lens.get(param_name).unwrap()
+                            },
+                        };
+
+                        (
+                            param_name.to_owned(),
+                            ParamDecl::Path {
+                                segments: (0..len)
+                                    .map(|_i| {
+                                        Dynamic::fresh_const(
+                                            ctx,
+                                            "param-segment--",
+                                            &types.segment.sort,
+                                        )
+                                    })
+                                    .collect_vec(),
+                            },
+                        )
+                    },
+                    | _ => (
+                        param_name.to_owned(),
+                        ParamDecl::Node(Dynamic::fresh_const(ctx, "param--", &datatype.sort)),
+                    ),
+                }
             })
             .collect();
 
@@ -265,7 +291,6 @@ impl State {
 
     fn encode<'ctx>(
         &self,
-        u: &mut Unstructured,
         ctx: &'ctx z3::Context,
         env: &Environment,
         types: &'ctx StateTypes<'ctx>,
@@ -656,7 +681,6 @@ impl State {
         // let path_datatype = types.resources.get("path").unwrap();
         // let segments_accessor = &path_datatype.variants[0].accessors[0];
 
-        // TODO(yage)
         // Adjacent segments can't both be components.
         // {
         //     let some_path = Dynamic::fresh_const(ctx, "", &path_datatype.sort);
@@ -780,59 +804,61 @@ impl State {
             let param_tdef = param.tref.resolve(spec);
 
             if param_tdef.wasi == WasiType::String && params.is_none() {
-                let datatype = types.resources.get(&param_tdef.name).unwrap();
-                let len = u.choose_index(64).unwrap() as u64 + 1;
+                // let datatype = types.resources.get(&param_tdef.name).unwrap();
+                // let len = u.choose_index(64).unwrap() as u64 + 1;
 
+                // TODO(yage)
                 // Special case: Sequence solving is slow. Impose an exact length.
-                clauses.push(
-                    datatype.variants[0].accessors[0]
-                        .apply(&[param_node])
-                        .as_seq()
-                        .unwrap()
-                        .length()
-                        ._eq(&Int::from_u64(ctx, len)),
-                );
+                // clauses.push(
+                //     datatype.variants[0].accessors[0]
+                //         .apply(&[param_node])
+                //         .as_seq()
+                //         .unwrap()
+                //         .length()
+                //         ._eq(&Int::from_u64(ctx, len)),
+                // );
 
+                // TODO(yage)
                 // Special case: constraint characters in path string.
-                {
-                    let some_idx = Int::fresh_const(ctx, "");
+                // {
+                //     let some_idx = Int::fresh_const(ctx, "");
 
-                    clauses.push(forall_const(
-                        ctx,
-                        &[&some_idx],
-                        &[],
-                        &Bool::and(
-                            ctx,
-                            &[
-                                &Int::from_u64(ctx, 0).le(&some_idx),
-                                &some_idx.lt(&Int::from_u64(ctx, len)),
-                            ],
-                        )
-                        .implies(&Bool::or(
-                            ctx,
-                            &[
-                                &datatype.variants[0].accessors[0]
-                                    .apply(&[param_node])
-                                    .as_string()
-                                    .unwrap()
-                                    .at(&some_idx)
-                                    ._eq(&z3::ast::String::from_str(ctx, ".").unwrap()),
-                                &datatype.variants[0].accessors[0]
-                                    .apply(&[param_node])
-                                    .as_string()
-                                    .unwrap()
-                                    .at(&some_idx)
-                                    ._eq(&z3::ast::String::from_str(ctx, "a").unwrap()),
-                                &datatype.variants[0].accessors[0]
-                                    .apply(&[param_node])
-                                    .as_string()
-                                    .unwrap()
-                                    .at(&some_idx)
-                                    ._eq(&z3::ast::String::from_str(ctx, "/").unwrap()),
-                            ],
-                        )),
-                    ));
-                }
+                //     clauses.push(forall_const(
+                //         ctx,
+                //         &[&some_idx],
+                //         &[],
+                //         &Bool::and(
+                //             ctx,
+                //             &[
+                //                 &Int::from_u64(ctx, 0).le(&some_idx),
+                //                 &some_idx.lt(&Int::from_u64(ctx, len)),
+                //             ],
+                //         )
+                //         .implies(&Bool::or(
+                //             ctx,
+                //             &[
+                //                 &datatype.variants[0].accessors[0]
+                //                     .apply(&[param_node])
+                //                     .as_string()
+                //                     .unwrap()
+                //                     .at(&some_idx)
+                //                     ._eq(&z3::ast::String::from_str(ctx, ".").unwrap()),
+                //                 &datatype.variants[0].accessors[0]
+                //                     .apply(&[param_node])
+                //                     .as_string()
+                //                     .unwrap()
+                //                     .at(&some_idx)
+                //                     ._eq(&z3::ast::String::from_str(ctx, "a").unwrap()),
+                //                 &datatype.variants[0].accessors[0]
+                //                     .apply(&[param_node])
+                //                     .as_string()
+                //                     .unwrap()
+                //                     .at(&some_idx)
+                //                     ._eq(&z3::ast::String::from_str(ctx, "/").unwrap()),
+                //             ],
+                //         )),
+                //     ));
+                // }
             }
 
             if param_tdef.state.is_none() {
@@ -852,7 +878,7 @@ impl State {
                     .map(|&idx| {
                         let resource_node = decls.resources.get(&idx).unwrap();
 
-                        param_node._eq(resource_node)
+                        param_node.node()._eq(resource_node)
                     })
                     .collect_vec()
                     .as_slice(),
@@ -1076,7 +1102,7 @@ impl State {
                     .resolve(spec);
                 let param = decls.params.get(&t.name).expect(&format!("{}", t.name));
 
-                (param.clone(), Type::Wasi(tdef.to_owned()))
+                (param.node().to_owned(), Type::Wasi(tdef.to_owned()))
             },
             | Term::Result(t) => {
                 if t.name.ends_with('\'') {
@@ -1213,7 +1239,7 @@ impl State {
                         Dynamic::from_ast(
                             &datatype.variants[0].accessors[0]
                                 .apply(&[&op])
-                                .as_string()
+                                .as_seq()
                                 .unwrap()
                                 .length(),
                         ),
@@ -1468,7 +1494,8 @@ impl State {
         spec: &Spec,
         types: &StateTypes,
         tdef: &TypeDef,
-        node: &Dynamic,
+        decl: &ParamDecl<'ctx>,
+        model: &z3::Model<'ctx>,
     ) -> WasiValue {
         let datatype = types.resources.get(&tdef.name).unwrap();
         let wasi_type = match &tdef.state {
@@ -1479,7 +1506,7 @@ impl State {
         match wasi_type {
             | WasiType::S64 => WasiValue::S64(
                 datatype.variants[0].accessors[0]
-                    .apply(&[node])
+                    .apply(&[decl.node()])
                     .simplify()
                     .as_int()
                     .unwrap()
@@ -1488,7 +1515,7 @@ impl State {
             ),
             | WasiType::U8 => WasiValue::U8(
                 datatype.variants[0].accessors[0]
-                    .apply(&[node])
+                    .apply(&[decl.node()])
                     .simplify()
                     .as_int()
                     .unwrap()
@@ -1500,7 +1527,7 @@ impl State {
             | WasiType::U16 => todo!(),
             | WasiType::U32 => {
                 let i = datatype.variants[0].accessors[0]
-                    .apply(&[node])
+                    .apply(&[decl.node()])
                     .simplify()
                     .as_int()
                     .unwrap();
@@ -1508,9 +1535,12 @@ impl State {
                 WasiValue::U32(i.as_u64().unwrap() as u32)
             },
             | WasiType::U64 => WasiValue::U64(
-                datatype.variants[0].accessors[0]
-                    .apply(&[node])
-                    .simplify()
+                model
+                    .eval(
+                        &datatype.variants[0].accessors[0].apply(&[decl.node()]),
+                        true,
+                    )
+                    .unwrap()
                     .as_int()
                     .unwrap()
                     .as_u64()
@@ -1523,9 +1553,12 @@ impl State {
                     .iter()
                     .enumerate()
                     .map(|(i, _field)| {
-                        datatype.variants[0].accessors[i]
-                            .apply(&[node])
-                            .simplify()
+                        model
+                            .eval(
+                                &datatype.variants[0].accessors[i].apply(&[decl.node()]),
+                                true,
+                            )
+                            .unwrap()
                             .as_bool()
                             .unwrap()
                             .as_bool()
@@ -1537,10 +1570,9 @@ impl State {
                 let mut case_idx = 0;
 
                 for (i, variant) in datatype.variants.iter().enumerate() {
-                    if variant
-                        .tester
-                        .apply(&[node])
-                        .simplify()
+                    if model
+                        .eval(&variant.tester.apply(&[decl.node()]), true)
+                        .unwrap()
                         .as_bool()
                         .unwrap()
                         .as_bool()
@@ -1557,7 +1589,10 @@ impl State {
                         spec,
                         types,
                         payload_tref.resolve(spec),
-                        &datatype.variants[case_idx].accessors[0].apply(&[node]),
+                        &ParamDecl::Node(
+                            datatype.variants[case_idx].accessors[0].apply(&[decl.node()]),
+                        ),
+                        model,
                     )),
                     | None => None,
                 };
@@ -1575,57 +1610,100 @@ impl State {
                             spec,
                             types,
                             member.tref.resolve(spec),
-                            &datatype.variants[0].accessors[i].apply(&[node]),
+                            &ParamDecl::Node(
+                                datatype.variants[0].accessors[i].apply(&[decl.node()]),
+                            ),
+                            model,
                         )
                     })
                     .collect_vec(),
             }),
             | WasiType::String => {
-                // let mut string = String::new();
-                // let segments = datatype.variants[0].accessors[0]
-                //     .apply(&[node])
-                //     .as_seq()
-                //     .unwrap();
+                let mut string = String::new();
+                let segments = match decl {
+                    | ParamDecl::Path { segments } => segments,
+                    | ParamDecl::Node(node) => {
+                        let seq = model
+                            .eval(
+                                &types.resources.get("path").unwrap().variants[0].accessors[0]
+                                    .apply(&[node]),
+                                true,
+                            )
+                            .unwrap()
+                            .as_seq()
+                            .unwrap();
+                        let mut s = String::new();
 
-                // for i in 0..segments.length().simplify().as_u64().unwrap() {
-                //     let segment = segments.nth(&Int::from_u64(ctx, i));
+                        for i in 0..model.eval(&seq.length(), true).unwrap().as_u64().unwrap() {
+                            let seg = seq.nth(&Int::from_u64(ctx, i));
 
-                //     if types.segment.variants[0]
-                //         .tester
-                //         .apply(&[&segment])
-                //         .as_bool()
-                //         .unwrap()
-                //         .simplify()
-                //         .as_bool()
-                //         .unwrap()
-                //     {
-                //         string.push('/');
-                //     } else {
-                //         string.push_str(
-                //             &types.segment.variants[1].accessors[0]
-                //                 .apply(&[&segment])
-                //                 .as_string()
-                //                 .unwrap()
-                //                 .as_string()
-                //                 .unwrap(),
-                //         );
-                //     }
-                // }
+                            if types.segment.variants[0]
+                                .tester
+                                .apply(&[&seg])
+                                .as_bool()
+                                .unwrap()
+                                .as_bool()
+                                .unwrap()
+                            {
+                                s.push('/');
+                            } else if types.segment.variants[1]
+                                .tester
+                                .apply(&[&seg])
+                                .as_bool()
+                                .unwrap()
+                                .as_bool()
+                                .unwrap()
+                            {
+                                s.push_str(
+                                    types.segment.variants[1].accessors[0]
+                                        .apply(&[&seg])
+                                        .as_string()
+                                        .unwrap()
+                                        .as_string()
+                                        .unwrap()
+                                        .as_str(),
+                                );
+                            }
+                        }
 
-                WasiValue::String(
-                    datatype.variants[0].accessors[0]
-                        .apply(&[node])
-                        .as_string()
+                        return WasiValue::String(s.into_bytes());
+                    },
+                };
+
+                for i in 0..segments.len() {
+                    let segment = &segments[i];
+
+                    if model
+                        .eval(
+                            &types.segment.variants[0]
+                                .tester
+                                .apply(&[segment])
+                                .as_bool()
+                                .unwrap(),
+                            true,
+                        )
                         .unwrap()
-                        .simplify()
-                        .as_string()
+                        .as_bool()
                         .unwrap()
-                        .into_bytes(),
-                )
+                    {
+                        string.push('/');
+                    } else {
+                        string.push_str(
+                            &types.segment.variants[1].accessors[0]
+                                .apply(&[segment])
+                                .as_string()
+                                .unwrap()
+                                .as_string()
+                                .unwrap(),
+                        );
+                    }
+                }
+
+                WasiValue::String(string.into_bytes())
             },
             | WasiType::Pointer(pointer) => {
                 let seq = datatype.variants[0].accessors[0]
-                    .apply(&[node])
+                    .apply(&[decl.node()])
                     .simplify()
                     .as_seq()
                     .unwrap();
@@ -1638,7 +1716,8 @@ impl State {
                         spec,
                         types,
                         &pointer.item.resolve(spec),
-                        &seq.nth(&Int::from_u64(ctx, i)).simplify(),
+                        &ParamDecl::Node(seq.nth(&Int::from_u64(ctx, i)).simplify()),
+                        model,
                     ));
                 }
 
@@ -1646,7 +1725,7 @@ impl State {
             },
             | WasiType::List(list_type) => {
                 let seq = datatype.variants[0].accessors[0]
-                    .apply(&[node])
+                    .apply(&[decl.node()])
                     .simplify()
                     .as_seq()
                     .unwrap();
@@ -1659,7 +1738,8 @@ impl State {
                         spec,
                         types,
                         &list_type.item.resolve(spec),
-                        &seq.nth(&Int::from_u64(ctx, i)).simplify(),
+                        &ParamDecl::Node(seq.nth(&Int::from_u64(ctx, i)).simplify()),
+                        model,
                     ));
                 }
 
@@ -1669,11 +1749,16 @@ impl State {
     }
 }
 
+enum ArbitraryOrPresolved<'u, 'data> {
+    Arbitrary(&'u mut Unstructured<'data>),
+    Presolved(BTreeMap<String, usize>),
+}
+
 #[derive(Debug)]
 pub(crate) struct StateTypes<'ctx> {
     resources: BTreeMap<String, z3::DatatypeSort<'ctx>>,
     file:      z3::DatatypeSort<'ctx>,
-    // segment:   z3::DatatypeSort<'ctx>,
+    segment:   z3::DatatypeSort<'ctx>,
 }
 
 impl<'ctx> StateTypes<'ctx> {
@@ -1778,10 +1863,7 @@ impl<'ctx> StateTypes<'ctx> {
                         })
                         .collect_vec(),
                 ),
-                | WasiType::String => datatype.variant(
-                    name,
-                    vec![(name, z3::DatatypeAccessor::Sort(z3::Sort::string(ctx)))],
-                ),
+                | WasiType::String => unimplemented!(),
                 | WasiType::Pointer(pointer) => {
                     let tdef = pointer.item.resolve(spec);
 
@@ -1815,7 +1897,35 @@ impl<'ctx> StateTypes<'ctx> {
             resource_types.insert(tdef.name.clone(), datatype.finish());
         }
 
+        let segment_type = z3::DatatypeBuilder::new(ctx, "segment")
+            .variant("separator", vec![])
+            .variant(
+                "component",
+                vec![(
+                    "component-str",
+                    z3::DatatypeAccessor::Sort(z3::Sort::string(ctx)),
+                )],
+            )
+            .finish();
+
         for (name, tdef) in spec.types.iter() {
+            if name == "path" {
+                resources.insert(
+                    "path".to_string(),
+                    z3::DatatypeBuilder::new(ctx, "path")
+                        .variant(
+                            "path",
+                            vec![(
+                                "segments",
+                                z3::DatatypeAccessor::Sort(z3::Sort::seq(ctx, &segment_type.sort)),
+                            )],
+                        )
+                        .finish(),
+                );
+
+                continue;
+            }
+
             encode_type(ctx, spec, name, tdef, &mut resources);
         }
 
@@ -1837,7 +1947,7 @@ impl<'ctx> StateTypes<'ctx> {
                     )],
                 )
                 .finish(),
-            // segment: segment_datatype,
+            segment: segment_type,
         }
     }
 
@@ -1845,7 +1955,8 @@ impl<'ctx> StateTypes<'ctx> {
         &self,
         ctx: &'ctx z3::Context,
         spec: &Spec,
-        node: &dyn z3::ast::Ast<'ctx>,
+        // node: &dyn z3::ast::Ast<'ctx>,
+        param: &ParamDecl<'ctx>,
         tdef: &TypeDef,
         value: &WasiValue,
     ) -> Bool<'ctx> {
@@ -1857,32 +1968,32 @@ impl<'ctx> StateTypes<'ctx> {
 
         match (ty, value) {
             | (_, &WasiValue::U8(i)) => datatype.variants[0].accessors[0]
-                .apply(&[node])
+                .apply(&[param.node()])
                 .as_int()
                 .unwrap()
                 ._eq(&Int::from_u64(ctx, i.into())),
             | (_, &WasiValue::U16(i)) => datatype.variants[0].accessors[0]
-                .apply(&[node])
+                .apply(&[param.node()])
                 .as_int()
                 .unwrap()
                 ._eq(&Int::from_u64(ctx, i.into())),
             | (_, &WasiValue::U32(i)) => datatype.variants[0].accessors[0]
-                .apply(&[node])
+                .apply(&[param.node()])
                 .as_int()
                 .unwrap()
                 ._eq(&Int::from_u64(ctx, i.into())),
             | (_, &WasiValue::U64(i)) => datatype.variants[0].accessors[0]
-                .apply(&[node])
+                .apply(&[param.node()])
                 .as_int()
                 .unwrap()
                 ._eq(&Int::from_u64(ctx, i)),
             | (_, &WasiValue::S64(i)) => datatype.variants[0].accessors[0]
-                .apply(&[node])
+                .apply(&[param.node()])
                 .as_int()
                 .unwrap()
                 ._eq(&Int::from_i64(ctx, i)),
             | (_, &WasiValue::Handle(handle)) => datatype.variants[0].accessors[0]
-                .apply(&[node])
+                .apply(&[param.node()])
                 .as_int()
                 .unwrap()
                 ._eq(&Int::from_u64(ctx, handle.into())),
@@ -1897,7 +2008,9 @@ impl<'ctx> StateTypes<'ctx> {
                         self.encode_wasi_value(
                             ctx,
                             spec,
-                            &datatype.variants[0].accessors[i].apply(&[node]),
+                            &ParamDecl::Node(
+                                datatype.variants[0].accessors[i].apply(&[param.node()]),
+                            ),
                             member.tref.resolve(spec),
                             member_value,
                         )
@@ -1915,7 +2028,7 @@ impl<'ctx> StateTypes<'ctx> {
                     .zip(flags_value.fields.iter())
                     .map(|((i, _name), &value)| {
                         datatype.variants[0].accessors[i]
-                            .apply(&[node])
+                            .apply(&[param.node()])
                             .as_bool()
                             .unwrap()
                             ._eq(&Bool::from_bool(ctx, value))
@@ -1924,11 +2037,64 @@ impl<'ctx> StateTypes<'ctx> {
                     .as_slice(),
             ),
             | (_, WasiValue::Flags(_)) => unreachable!(),
-            | (_, WasiValue::String(string)) => datatype.variants[0].accessors[0]
-                .apply(&[node])
-                .as_string()
-                .unwrap()
-                ._eq(&z3::ast::String::from_str(ctx, str::from_utf8(string).unwrap()).unwrap()),
+            | (_, WasiValue::String(string)) => {
+                let seq = datatype.variants[0].accessors[0]
+                    .apply(&[param.node()])
+                    .as_seq()
+                    .unwrap();
+                let s = String::from_utf8(string.to_owned()).unwrap();
+                let mut segments = Vec::new();
+                let mut i = 0;
+                let mut last_i = 0;
+
+                while i < s.len() {
+                    if s.as_bytes()[i] != b'/' {
+                        last_i = i;
+                        i += 1;
+                        continue;
+                    }
+
+                    if last_i < i {
+                        segments.push(Segment::Component(&s[last_i..i]));
+                    }
+
+                    segments.push(Segment::Separator);
+                    last_i = i;
+                    i += 1;
+                }
+
+                if last_i < i {
+                    segments.push(Segment::Component(&s[last_i..i]));
+                }
+
+                Bool::and(
+                    ctx,
+                    &[
+                        seq.length()._eq(&Int::from_u64(ctx, segments.len() as u64)),
+                        Bool::and(
+                            ctx,
+                            segments
+                                .into_iter()
+                                .enumerate()
+                                .map(|(i, segment)| match segment {
+                                    | Segment::Separator => self.segment.variants[0]
+                                        .tester
+                                        .apply(&[&seq.nth(&Int::from_u64(ctx, i as u64))])
+                                        .as_bool()
+                                        .unwrap(),
+                                    | Segment::Component(s) => self.segment.variants[1].accessors
+                                        [0]
+                                    .apply(&[&seq.nth(&Int::from_u64(ctx, i as u64))])
+                                    .as_string()
+                                    .unwrap()
+                                    ._eq(&z3::ast::String::from_str(ctx, s).unwrap()),
+                                })
+                                .collect_vec()
+                                .as_slice(),
+                        ),
+                    ],
+                )
+            },
             | (WasiType::Variant(variant), WasiValue::Variant(variant_value)) => {
                 match &variant_value.payload {
                     | Some(payload) => {
@@ -1943,14 +2109,16 @@ impl<'ctx> StateTypes<'ctx> {
                             &[
                                 datatype.variants[variant_value.case_idx]
                                     .tester
-                                    .apply(&[node])
+                                    .apply(&[param.node()])
                                     .as_bool()
                                     .unwrap(),
                                 self.encode_wasi_value(
                                     ctx,
                                     spec,
-                                    &datatype.variants[variant_value.case_idx].accessors[0]
-                                        .apply(&[node]),
+                                    &ParamDecl::Node(
+                                        datatype.variants[variant_value.case_idx].accessors[0]
+                                            .apply(&[param.node()]),
+                                    ),
                                     payload_tdef,
                                     payload,
                                 ),
@@ -1959,7 +2127,7 @@ impl<'ctx> StateTypes<'ctx> {
                     },
                     | None => datatype.variants[variant_value.case_idx]
                         .tester
-                        .apply(&[node])
+                        .apply(&[param.node()])
                         .as_bool()
                         .unwrap(),
                 }
@@ -1987,11 +2155,13 @@ impl<'ctx> StateTypes<'ctx> {
                                     &self.encode_wasi_value(
                                         ctx,
                                         spec,
-                                        &datatype.variants[0].accessors[0]
-                                            .apply(&[node])
-                                            .as_seq()
-                                            .unwrap()
-                                            .nth(&idx),
+                                        &ParamDecl::Node(
+                                            datatype.variants[0].accessors[0]
+                                                .apply(&[param.node()])
+                                                .as_seq()
+                                                .unwrap()
+                                                .nth(&idx),
+                                        ),
                                         &pointer.item.resolve(spec),
                                         pointer_value.items.get(i).unwrap(),
                                     ),
@@ -2025,11 +2195,13 @@ impl<'ctx> StateTypes<'ctx> {
                                     &self.encode_wasi_value(
                                         ctx,
                                         spec,
-                                        &datatype.variants[0].accessors[0]
-                                            .apply(&[node])
-                                            .as_seq()
-                                            .unwrap()
-                                            .nth(&idx),
+                                        &ParamDecl::Node(
+                                            datatype.variants[0].accessors[0]
+                                                .apply(&[param.node()])
+                                                .as_seq()
+                                                .unwrap()
+                                                .nth(&idx),
+                                        ),
                                         &list.item.resolve(spec),
                                         list_value.items.get(i).unwrap(),
                                     ),
@@ -2614,8 +2786,23 @@ struct StateDecls<'ctx> {
     children:  z3::FuncDecl<'ctx>,
     preopens:  BTreeMap<ResourceIdx, PreopenFsEncoding<'ctx>>,
     resources: BTreeMap<ResourceIdx, Dynamic<'ctx>>,
-    params:    BTreeMap<String, Dynamic<'ctx>>,
+    params:    BTreeMap<String, ParamDecl<'ctx>>,
     to_solves: ToSolves<'ctx>,
+}
+
+#[derive(Debug)]
+enum ParamDecl<'ctx> {
+    Node(Dynamic<'ctx>),
+    Path { segments: Vec<Dynamic<'ctx>> },
+}
+
+impl<'ctx> ParamDecl<'ctx> {
+    fn node(&self) -> &Dynamic<'ctx> {
+        match self {
+            | ParamDecl::Node(n) => n,
+            | ParamDecl::Path { .. } => panic!(),
+        }
+    }
 }
 
 pub struct StatefulStrategy<'u, 'data, 'ctx, 'zctx> {
@@ -2664,11 +2851,18 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
             }
 
             let types = StateTypes::new(self.z3_ctx, spec);
-            let decls = state.declare(spec, self.z3_ctx, &types, env, function, None);
+            let decls = state.declare(
+                ArbitraryOrPresolved::Arbitrary(self.u),
+                spec,
+                self.z3_ctx,
+                &types,
+                env,
+                function,
+                None,
+            );
             let solver = z3::Solver::new(self.z3_ctx);
 
             solver.assert(&state.encode(
-                self.u,
                 self.z3_ctx,
                 env,
                 &types,
@@ -2716,7 +2910,15 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
         }
 
         let types = StateTypes::new(self.z3_ctx, spec);
-        let decls = state.declare(spec, self.z3_ctx, &types, env, function, None);
+        let decls = state.declare(
+            ArbitraryOrPresolved::Arbitrary(self.u),
+            spec,
+            self.z3_ctx,
+            &types,
+            env,
+            function,
+            None,
+        );
         let solver = z3::Solver::new(self.z3_ctx);
         let mut solver_params = z3::Params::new(self.z3_ctx);
 
@@ -2729,7 +2931,6 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
 
         solver.push();
         solver.assert(&state.encode(
-            self.u,
             self.z3_ctx,
             &env,
             &types,
@@ -2748,10 +2949,28 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
             let model = solver.get_model().unwrap();
             let mut clauses = Vec::new();
 
-            for (_param_name, param_node) in decls.params.iter() {
-                let p = model.eval(param_node, true).unwrap().simplify();
+            for (_param_name, param_decl) in decls.params.iter() {
+                match param_decl {
+                    | ParamDecl::Node(node) => {
+                        let p = model.eval(node, true).unwrap().simplify();
 
-                clauses.push(param_node._eq(&p).not());
+                        clauses.push(node._eq(&p).not());
+                    },
+                    | ParamDecl::Path { segments } => {
+                        clauses.push(Bool::or(
+                            self.z3_ctx,
+                            segments
+                                .iter()
+                                .map(|segment| {
+                                    let p = model.eval(segment, true).unwrap().simplify();
+
+                                    segment._eq(&p).not()
+                                })
+                                .collect_vec()
+                                .as_slice(),
+                        ));
+                    },
+                }
             }
 
             solutions.push(model);
@@ -2764,12 +2983,15 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
 
         for param in function.params.iter() {
             let tdef = param.tref.resolve(spec);
-            let param_node_value = model
-                .eval(decls.params.get(&param.name).unwrap(), true)
-                .unwrap()
-                .simplify();
-            let wasi_value =
-                state.decode_to_wasi_value(self.z3_ctx, spec, &types, &tdef, &param_node_value);
+            let param_node_value = decls.params.get(&param.name).unwrap();
+            let wasi_value = state.decode_to_wasi_value(
+                self.z3_ctx,
+                spec,
+                &types,
+                &tdef,
+                &param_node_value,
+                &model,
+            );
 
             match &tdef.state {
                 | Some(_state) => {
@@ -2816,8 +3038,44 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
             }
         }
 
+        let lens = function
+            .params
+            .iter()
+            .zip(params.iter())
+            .filter(|(function_param, _param)| function_param.tref.resolve(spec).name == "path")
+            .map(|(function_param, param)| {
+                let s = String::from_utf8(param.0.string().unwrap().to_vec()).unwrap();
+                let mut segments = Vec::new();
+                let mut i = 0;
+                let mut last_i = 0;
+
+                while i < s.len() {
+                    if s.as_bytes()[i] != b'/' {
+                        last_i = i;
+                        i += 1;
+                        continue;
+                    }
+
+                    if last_i < i {
+                        segments.push(Segment::Component(&s[last_i..i]));
+                    }
+
+                    segments.push(Segment::Separator);
+                    last_i = i;
+                    i += 1;
+                }
+
+                if last_i < i {
+                    segments.push(Segment::Component(&s[last_i..i]));
+                }
+
+                (function_param.name.clone(), segments.len())
+            })
+            .collect();
+
         let types = StateTypes::new(self.z3_ctx, spec);
         let decls = state.declare(
+            ArbitraryOrPresolved::Presolved(lens),
             spec,
             self.z3_ctx,
             &types,
@@ -2828,7 +3086,6 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
         let solver = z3::Solver::new(self.z3_ctx);
 
         solver.assert(&state.encode(
-            self.u,
             self.z3_ctx,
             &env,
             &types,
@@ -2873,8 +3130,14 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
                 .find(|(_, result)| &result.name == name)
                 .unwrap();
             let tdef = function_result.tref.resolve(spec);
-            let wasi_value =
-                state.decode_to_wasi_value(self.z3_ctx, spec, &types, &tdef, &result_value);
+            let wasi_value = state.decode_to_wasi_value(
+                self.z3_ctx,
+                spec,
+                &types,
+                &tdef,
+                &ParamDecl::Node(result_value.clone()),
+                &model,
+            );
             let result_resource_idx = results.get(result_idx).unwrap().unwrap();
             let resource = env.resources.get_mut(result_resource_idx).unwrap();
             let idx = env
@@ -2903,6 +3166,12 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
 
         Ok(())
     }
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+enum Segment<'a> {
+    Separator,
+    Component(&'a str),
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]

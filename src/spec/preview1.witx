@@ -969,10 +969,10 @@
     (@input
       (@and
         ; $path should be non-empty.
-        (@int.gt (@list.len (param $path)) 0)
+        ;(@int.gt (@list.len (param $path)) 0)
 
         ; $path should not be absolute (begin with a `/`).
-        (@not (@value.eq (@str.at (param $path) 0) "/"))
+        ;(@not (@value.eq (@str.at (param $path) 0) "/"))
       )
     )
   )
@@ -996,10 +996,10 @@
         ))
 
         ; $path should be non-empty.
-        (@int.gt (@list.len (param $path)) 0)
+        ;(@int.gt (@list.len (param $path)) 0)
 
         ; $path should not be absolute (begin with a `/`).
-        (@not (@value.eq (@str.at (param $path) 0) "/"))
+        ;(@not (@value.eq (@str.at (param $path) 0) "/"))
 
         ; When generating path segments, if we generate one corresponding to a
         ; non-existent directory, the next segment shall not be `..`.
