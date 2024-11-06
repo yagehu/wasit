@@ -1,3 +1,5 @@
+use std::ops::{Add, Sub};
+
 use z3::ast::{forall_const, Ast, Bool, Int, String};
 
 fn main() {
@@ -8,20 +10,84 @@ fn main() {
 
     solver.assert(&path.length()._eq(&Int::from_u64(&ctx, 10)));
 
-    let idx = Int::fresh_const(&ctx, "");
+    let i = Int::fresh_const(&ctx, "");
+    let j = Int::fresh_const(&ctx, "");
 
     solver.assert(&forall_const(
         &ctx,
-        &[&idx],
+        &[&i, &j],
         &[],
         &Bool::and(
             &ctx,
-            &[&Int::from_u64(&ctx, 0).le(&idx), &idx.lt(&path.length())],
+            &[
+                &Int::from_u64(&ctx, 0).le(&i),
+                &Int::from_u64(&ctx, 0).le(&j),
+                &i.lt(&path.length()),
+                &j.le(&path.length()),
+                &Bool::or(
+                    &ctx,
+                    &[
+                        &Bool::and(
+                            &ctx,
+                            &[
+                                &i.ge(&Int::from_u64(&ctx, 1)),
+                                &path
+                                    .at(&i.clone().sub(Int::from_u64(&ctx, 1)))
+                                    ._eq(&String::from_str(&ctx, "/").unwrap()),
+                            ],
+                        ),
+                        &i._eq(&Int::from_u64(&ctx, 0)),
+                    ],
+                ),
+                &Bool::or(
+                    &ctx,
+                    &[
+                        &Bool::and(
+                            &ctx,
+                            &[
+                                &j.lt(&path.length()),
+                                &path.at(&j)._eq(&String::from_str(&ctx, "/").unwrap()),
+                            ],
+                        ),
+                        &j._eq(&path.length()),
+                    ],
+                ),
+                &path
+                    .substr(&i, &j.clone().sub(i.clone()))
+                    .contains(&String::from_str(&ctx, "/").unwrap())
+                    .not(),
+            ],
         )
         .implies(&Bool::and(
             &ctx,
-            &[idx.ge(&Int::from_u64(&ctx, 1)), path.at(idx - 1)],
+            &[Bool::or(
+                &ctx,
+                &[
+                    path.substr(&i, &j.clone().sub(i.clone()))
+                        ._eq(&String::from_str(&ctx, "..").unwrap()),
+                    path.substr(&i, &j.clone().sub(i.clone()))
+                        .contains(&String::from_str(&ctx, ".").unwrap())
+                        .not(),
+                ],
+            )],
         )),
+    ));
+    solver.assert(&path.contains(&String::from_str(&ctx, "/").unwrap()));
+    solver.assert(&path.contains(&String::from_str(&ctx, ".").unwrap()));
+    solver.assert(&forall_const(
+        &ctx,
+        &[&i],
+        &[],
+        &Bool::and(&ctx, &[Int::from_u64(&ctx, 0).le(&i), i.lt(&path.length())]).implies(
+            &Bool::or(
+                &ctx,
+                &[
+                    path.at(&i)._eq(&String::from_str(&ctx, "/").unwrap()),
+                    path.at(&i)._eq(&String::from_str(&ctx, ".").unwrap()),
+                    path.at(&i)._eq(&String::from_str(&ctx, "a").unwrap()),
+                ],
+            ),
+        ),
     ));
 
     assert_eq!(solver.check(), z3::SatResult::Sat);
