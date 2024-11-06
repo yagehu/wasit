@@ -1,4 +1,4 @@
-use std::ops::{Add, Sub};
+use std::ops::Sub;
 
 use z3::ast::{forall_const, Ast, Bool, Int, String};
 
@@ -7,8 +7,6 @@ fn main() {
     let ctx = z3::Context::new(&cfg);
     let solver = z3::Solver::new(&ctx);
     let path = String::new_const(&ctx, "path");
-
-    solver.assert(&path.length()._eq(&Int::from_u64(&ctx, 10)));
 
     let i = Int::fresh_const(&ctx, "");
     let j = Int::fresh_const(&ctx, "");
@@ -72,8 +70,10 @@ fn main() {
             )],
         )),
     ));
-    solver.assert(&path.contains(&String::from_str(&ctx, "/").unwrap()));
-    solver.assert(&path.contains(&String::from_str(&ctx, ".").unwrap()));
+    // solver.assert(&path.contains(&String::from_str(&ctx, "/").unwrap()));
+    // solver.assert(&path.contains(&String::from_str(&ctx, ".").unwrap()));
+    // solver.assert(&path.contains(&String::from_str(&ctx, "a").unwrap()));
+    solver.assert(&path.length()._eq(&Int::from_u64(&ctx, 8)));
     solver.assert(&forall_const(
         &ctx,
         &[&i],
@@ -90,9 +90,21 @@ fn main() {
         ),
     ));
 
-    assert_eq!(solver.check(), z3::SatResult::Sat);
+    for _i in 0..10 {
+        assert_eq!(solver.check(), z3::SatResult::Sat);
 
-    let model = solver.get_model();
+        let model = solver.get_model().unwrap();
 
-    println!("{:#?}", model);
+        println!(
+            "{}",
+            model
+                .eval(&path, true)
+                .unwrap()
+                .as_string()
+                .unwrap()
+                .as_str()
+        );
+
+        solver.assert(&path._eq(&model.eval(&path, true).unwrap()).not());
+    }
 }
