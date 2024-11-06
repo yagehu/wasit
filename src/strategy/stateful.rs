@@ -5,7 +5,6 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
     io,
-    ops::Sub as _,
     path::{Path, PathBuf},
 };
 
@@ -678,8 +677,41 @@ impl State {
             ));
         }
 
-        // let path_datatype = types.resources.get("path").unwrap();
-        // let segments_accessor = &path_datatype.variants[0].accessors[0];
+        let separator = types.segment.variants.first().unwrap();
+        let component = types.segment.variants.get(1).unwrap();
+        let paths = decls
+            .params
+            .iter()
+            .filter_map(|(_param_name, decl)| match decl {
+                | ParamDecl::Node(_) => None,
+                | ParamDecl::Path { segments } => Some(segments),
+            })
+            .collect_vec();
+
+        // Segment components cannot be empty.
+        for &path in paths.iter() {
+            clauses.push(Bool::and(
+                &ctx,
+                path.iter()
+                    .map(|segment| {
+                        component
+                            .tester
+                            .apply(&[segment])
+                            .as_bool()
+                            .unwrap()
+                            .implies(
+                                &component.accessors[0]
+                                    .apply(&[segment])
+                                    .as_string()
+                                    .unwrap()
+                                    .length()
+                                    .gt(&Int::from_u64(ctx, 0)),
+                            )
+                    })
+                    .collect_vec()
+                    .as_slice(),
+            ));
+        }
 
         // Adjacent segments can't both be components.
         // {
