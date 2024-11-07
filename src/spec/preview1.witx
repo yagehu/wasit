@@ -975,6 +975,14 @@
         ;(@not (@value.eq (@str.at (param $path) 0) "/"))
       )
     )
+    (@output
+      (@or
+        @true
+        (@and
+          (@value.eq (param $fd') (param $fd))
+        )
+      )
+    )
   )
 
   (@interface func (export "path_open")

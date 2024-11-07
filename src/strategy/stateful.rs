@@ -150,7 +150,7 @@ impl State {
                     | Term::Lambda(_t) => todo!(),
                     | Term::Map(_t) => todo!(),
                     | Term::Binding(_) => todo!(),
-                    | Term::True => todo!(),
+                    | Term::True => (),
                     | Term::String(_) => (),
                     | Term::Not(_t) => todo!(),
                     | Term::And(t) => {
@@ -170,7 +170,26 @@ impl State {
                     | Term::RecordField(t) => scan_primed_in_output_contract(
                         ctx, types, spec, function, &t.target, to_solves,
                     ),
-                    | Term::Param(_t) => (),
+                    | Term::Param(t) => {
+                        if let Some(name) = t.name.strip_suffix('\'') {
+                            let function_param = function
+                                .params
+                                .iter()
+                                .find(|param| param.name == name)
+                                .unwrap();
+                            let tdef = function_param.tref.resolve(spec);
+                            let datatype = types.resources.get(&tdef.name).unwrap();
+
+                            to_solves.params.insert(
+                                name.to_string(),
+                                Dynamic::new_const(
+                                    ctx,
+                                    format!("result--{}", t.name),
+                                    &datatype.sort,
+                                ),
+                            );
+                        }
+                    },
                     | Term::Result(t) => {
                         let function_result = function
                             .results
@@ -764,22 +783,22 @@ impl State {
         }
 
         // Constrain non-resource param values.
-        if let Some(params) = params {
-            for (function_param, (param_value, _idx)) in function.params.iter().zip(params.iter()) {
-                let param_decl = decls.params.get(&function_param.name).unwrap();
-                let tdef = function_param.tref.resolve(spec);
+        // if let Some(params) = params {
+        //     for (function_param, (param_value, _idx)) in function.params.iter().zip(params.iter()) {
+        //         let param_decl = decls.params.get(&function_param.name).unwrap();
+        //         let tdef = function_param.tref.resolve(spec);
 
-                if tdef.state.is_some() {
-                    continue;
-                }
+        //         if tdef.state.is_some() {
+        //             continue;
+        //         }
 
-                if tdef.name == "path" {
-                    println!("{:?} {:?}", param_decl, param_value);
-                }
+        //         if tdef.name == "path" {
+        //             println!("{:?} {:?}", param_decl, param_value);
+        //         }
 
-                clauses.push(types.encode_wasi_value(ctx, spec, param_decl, tdef, param_value));
-            }
-        }
+        //         clauses.push(types.encode_wasi_value(ctx, spec, param_decl, tdef, param_value));
+        //     }
+        // }
 
         // Constrain param resources.
         for (param_name, param_node) in decls.params.iter() {
@@ -1080,14 +1099,20 @@ impl State {
                 )
             },
             | Term::Param(t) => {
+                let param_name = if t.name.ends_with('\'') {
+                    t.name.strip_suffix('\'').unwrap()
+                } else {
+                    t.name.as_str()
+                };
+
                 let tdef = function
                     .params
                     .iter()
-                    .find(|p| p.name == t.name)
+                    .find(|p| p.name == param_name)
                     .unwrap()
                     .tref
                     .resolve(spec);
-                let param = decls.params.get(&t.name).expect(&format!("{}", t.name));
+                let param = decls.params.get(param_name).expect(&format!("{}", t.name));
                 let node = match param {
                     | ParamDecl::Node(node) => node.to_owned(),
                     | ParamDecl::Path { segments } => {
@@ -1505,10 +1530,14 @@ impl State {
 
         match wasi_type {
             | WasiType::S64 => WasiValue::S64(
-                datatype.variants[0].accessors[0]
-                    .apply(&[decl.node()])
-                    .simplify()
-                    .as_int()
+                model
+                    .eval(
+                        &datatype.variants[0].accessors[0]
+                            .apply(&[decl.node()])
+                            .as_int()
+                            .unwrap(),
+                        true,
+                    )
                     .unwrap()
                     .as_i64()
                     .unwrap(),
@@ -1646,23 +1675,23 @@ impl State {
                                 .unwrap()
                             {
                                 s.push('/');
-                            } else if model
-                                .eval(&types.segment.variants[1].tester.apply(&[&seg]), true)
-                                .unwrap()
-                                .as_bool()
-                                .unwrap()
-                                .as_bool()
-                                .unwrap()
-                            {
+                            } else {
                                 s.push_str(
-                                    types.segment.variants[1].accessors[0]
-                                        .apply(&[&seg])
-                                        .as_string()
+                                    model
+                                        .eval(
+                                            &types.segment.variants[1].accessors[0]
+                                                .apply(&[&seg])
+                                                .as_string()
+                                                .unwrap(),
+                                            true,
+                                        )
                                         .unwrap()
                                         .as_string()
                                         .unwrap()
                                         .as_str(),
                                 );
+
+                                println!("pushing `{s}`");
                             }
                         }
 
@@ -2059,7 +2088,7 @@ impl<'ctx> StateTypes<'ctx> {
                     }
 
                     segments.push(Segment::Separator);
-                    last_i = i;
+                    last_i = i + 1;
                     i += 1;
                 }
 
@@ -3151,11 +3180,12 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
 
         match solver.check() {
             | z3::SatResult::Sat => (),
-            | _ => return Err(err!("failed to solve output contract")),
+            | _ => {
+                return Err(err!("failed to solve output contract"));
+            },
         }
 
         let model = solver.get_model().unwrap();
-        println!("----------\n{:#?}", model);
         let mut clauses = Vec::new();
 
         for (name, result) in &decls.to_solves.results {
@@ -3199,7 +3229,6 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
         match solver.check() {
             | z3::SatResult::Unsat => (),
             | _ => {
-                println!("----------\n{:#?}", solver.get_model().unwrap());
                 return Err(err!("more than one solution for output contract"));
             },
         }
@@ -3357,6 +3386,7 @@ impl Directory {
 
 #[derive(Default, Debug)]
 struct ToSolves<'ctx> {
+    params:  BTreeMap<String, Dynamic<'ctx>>,
     results: BTreeMap<String, Dynamic<'ctx>>,
 }
 

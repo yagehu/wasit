@@ -274,7 +274,7 @@ impl<'s> Fuzzer<'s> {
             let executor = RunningExecutor::from_wasi_runner(
                 runtime.as_ref(),
                 Path::new("target")
-                    .join("release")
+                    .join("debug")
                     .join("wazzi-executor.wasm")
                     .canonicalize()
                     .unwrap()
