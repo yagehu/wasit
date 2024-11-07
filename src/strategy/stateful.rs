@@ -699,66 +699,69 @@ impl State {
                             .apply(&[segment])
                             .as_bool()
                             .unwrap()
-                            .implies(
-                                &component.accessors[0]
-                                    .apply(&[segment])
-                                    .as_string()
-                                    .unwrap()
-                                    .length()
-                                    .gt(&Int::from_u64(ctx, 0)),
-                            )
+                            .implies(&Bool::and(
+                                ctx,
+                                &[
+                                    &component.accessors[0]
+                                        .apply(&[segment])
+                                        .as_string()
+                                        .unwrap()
+                                        .length()
+                                        .gt(&Int::from_u64(ctx, 0)),
+                                    &Bool::or(
+                                        ctx,
+                                        &[
+                                            &component.accessors[0]
+                                                .apply(&[segment])
+                                                .as_string()
+                                                .unwrap()
+                                                ._eq(&z3::ast::String::from_str(ctx, "a").unwrap()),
+                                            &component.accessors[0]
+                                                .apply(&[segment])
+                                                .as_string()
+                                                .unwrap()
+                                                ._eq(&z3::ast::String::from_str(ctx, ".").unwrap()),
+                                            &component.accessors[0]
+                                                .apply(&[segment])
+                                                .as_string()
+                                                .unwrap()
+                                                ._eq(
+                                                    &z3::ast::String::from_str(ctx, "..").unwrap(),
+                                                ),
+                                        ],
+                                    ),
+                                ],
+                            ))
                     })
                     .collect_vec()
                     .as_slice(),
             ));
         }
 
-        // Adjacent segments can't both be components.
-        // {
-        //     let some_path = Dynamic::fresh_const(ctx, "", &path_datatype.sort);
-        //     let some_idx = Int::fresh_const(ctx, "");
+        // Adjacent segments can't both be components or separators.
+        for path in paths.iter() {
+            for (i, segment) in path.iter().enumerate().skip(1) {
+                let prev = path.get(i - 1).unwrap();
 
-        //     clauses.push(forall_const(
-        //         ctx,
-        //         &[&some_idx, &some_path],
-        //         &[],
-        //         &Bool::and(
-        //             ctx,
-        //             &[
-        //                 // The index is in the range [1, segments.len())
-        //                 Int::from_u64(ctx, 1).le(&some_idx),
-        //                 some_idx.lt(&segments_accessor
-        //                     .apply(&[&some_path])
-        //                     .as_seq()
-        //                     .unwrap()
-        //                     .length()),
-        //                 // Segment[i] is a component.
-        //                 types.segment.variants[1]
-        //                     .tester
-        //                     .apply(&[&segments_accessor
-        //                         .apply(&[&some_path])
-        //                         .as_seq()
-        //                         .unwrap()
-        //                         .nth(&some_idx)])
-        //                     .as_bool()
-        //                     .unwrap(),
-        //             ],
-        //         )
-        //         .implies(
-        //             // segment[i - 1] is not a component.
-        //             &types.segment.variants[1]
-        //                 .tester
-        //                 .apply(&[&segments_accessor
-        //                     .apply(&[&some_path])
-        //                     .as_seq()
-        //                     .unwrap()
-        //                     .nth(&some_idx.clone().sub(Int::from_u64(ctx, 1)))])
-        //                 .as_bool()
-        //                 .unwrap()
-        //                 .not(),
-        //         ),
-        //     ));
-        // }
+                clauses.push(Bool::and(
+                    ctx,
+                    &[
+                        separator
+                            .tester
+                            .apply(&[segment])
+                            .as_bool()
+                            .unwrap()
+                            .implies(&separator.tester.apply(&[prev]).as_bool().unwrap().not()),
+                        component
+                            .tester
+                            .apply(&[segment])
+                            .as_bool()
+                            .unwrap()
+                            .implies(&component.tester.apply(&[prev]).as_bool().unwrap().not()),
+                    ],
+                ));
+            }
+        }
 
         // The first segment must be a component.
         // {
@@ -1721,12 +1724,17 @@ impl State {
                         string.push('/');
                     } else {
                         string.push_str(
-                            &types.segment.variants[1].accessors[0]
-                                .apply(&[segment])
+                            model
+                                .eval(
+                                    &types.segment.variants[1].accessors[0].apply(&[segment]),
+                                    true,
+                                )
+                                .unwrap()
                                 .as_string()
                                 .unwrap()
                                 .as_string()
-                                .unwrap(),
+                                .unwrap()
+                                .as_str(),
                         );
                     }
                 }
@@ -1987,7 +1995,6 @@ impl<'ctx> StateTypes<'ctx> {
         &self,
         ctx: &'ctx z3::Context,
         spec: &Spec,
-        // node: &dyn z3::ast::Ast<'ctx>,
         param: &ParamDecl<'ctx>,
         tdef: &TypeDef,
         value: &WasiValue,
@@ -2974,7 +2981,7 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
         ));
 
         loop {
-            if solver.check() != z3::SatResult::Sat || nsolutions == 4 {
+            if solver.check() != z3::SatResult::Sat || nsolutions == 10 {
                 break;
             }
 
@@ -3029,12 +3036,10 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
                 | Some(_state) => {
                     let x = env.reverse_resource_index.get(&tdef.name).unwrap();
                     let resource_idx = x.get(&wasi_value);
-
                     let resource_idx = match resource_idx {
                         | Some(resource_idx) => *resource_idx,
                         | None => panic!("{:#?} -> {:#?}", wasi_value, x),
                     };
-
                     let value = self.ctx.resources.get(&resource_idx).unwrap();
 
                     params.push((value.to_owned(), Some(resource_idx)));
