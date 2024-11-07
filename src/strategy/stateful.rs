@@ -13,7 +13,7 @@ use eyre::{eyre as err, Context};
 use idxspace::IndexSpace;
 use itertools::Itertools;
 use petgraph::{data::DataMap as _, graph::DiGraph, visit::IntoNeighborsDirected};
-use z3::ast::{forall_const, lambda_const, Ast, Bool, Dynamic, Int};
+use z3::ast::{forall_const, lambda_const, Ast, Bool, Dynamic, Int, Seq};
 
 use super::CallStrategy;
 use crate::{
@@ -763,71 +763,23 @@ impl State {
             }
         }
 
-        // The first segment must be a component.
-        // {
-        //     let some_path = Dynamic::fresh_const(ctx, "", &path_datatype.sort);
-        //     let segments = segments_accessor.apply(&[&some_path]).as_seq().unwrap();
+        // Constrain non-resource param values.
+        if let Some(params) = params {
+            for (function_param, (param_value, _idx)) in function.params.iter().zip(params.iter()) {
+                let param_decl = decls.params.get(&function_param.name).unwrap();
+                let tdef = function_param.tref.resolve(spec);
 
-        //     clauses.push(forall_const(
-        //         ctx,
-        //         &[&some_path],
-        //         &[&z3::Pattern::new(ctx, &[&segments])],
-        //         &segments.length().gt(&Int::from_u64(ctx, 0)).implies(
-        //             &types.segment.variants[1]
-        //                 .tester
-        //                 .apply(&[&segments.nth(&Int::from_u64(ctx, 0))])
-        //                 .as_bool()
-        //                 .unwrap(),
-        //         ),
-        //     ));
-        // }
+                if tdef.state.is_some() {
+                    continue;
+                }
 
-        // Components cannot contain slash "/".
-        // {
-        //     let some_path = Dynamic::fresh_const(ctx, "", &path_datatype.sort);
-        //     let some_idx = Int::fresh_const(ctx, "");
+                if tdef.name == "path" {
+                    println!("{:?} {:?}", param_decl, param_value);
+                }
 
-        //     clauses.push(forall_const(
-        //         ctx,
-        //         &[&some_idx, &some_path],
-        //         &[],
-        //         &Bool::and(
-        //             ctx,
-        //             &[
-        //                 // The index is in the range [0, segments.len())
-        //                 Int::from_u64(ctx, 0).le(&some_idx),
-        //                 some_idx.lt(&segments_accessor
-        //                     .apply(&[&some_path])
-        //                     .as_seq()
-        //                     .unwrap()
-        //                     .length()),
-        //                 // Segment[i] is a component.
-        //                 types.segment.variants[1]
-        //                     .tester
-        //                     .apply(&[&segments_accessor
-        //                         .apply(&[&some_path])
-        //                         .as_seq()
-        //                         .unwrap()
-        //                         .nth(&some_idx)])
-        //                     .as_bool()
-        //                     .unwrap(),
-        //             ],
-        //         )
-        //         .implies(
-        //             // segment[i] cannot contain `/`,
-        //             &types.segment.variants[1].accessors[0]
-        //                 .apply(&[&segments_accessor
-        //                     .apply(&[&some_path])
-        //                     .as_seq()
-        //                     .unwrap()
-        //                     .nth(&some_idx)])
-        //                 .as_string()
-        //                 .unwrap()
-        //                 .contains(&z3::ast::String::from_str(ctx, "/").unwrap())
-        //                 .not(),
-        //         ),
-        //     ));
-        // }
+                clauses.push(types.encode_wasi_value(ctx, spec, param_decl, tdef, param_value));
+            }
+        }
 
         // Constrain param resources.
         for (param_name, param_node) in decls.params.iter() {
@@ -1136,8 +1088,21 @@ impl State {
                     .tref
                     .resolve(spec);
                 let param = decls.params.get(&t.name).expect(&format!("{}", t.name));
+                let node = match param {
+                    | ParamDecl::Node(node) => node.to_owned(),
+                    | ParamDecl::Path { segments } => {
+                        let path_type = types.resources.get("path").unwrap();
+                        let segments = segments
+                            .iter()
+                            .map(|segment| Seq::unit(ctx, segment))
+                            .collect_vec();
+                        let segments = Seq::concat(ctx, &segments);
 
-                (param.node().to_owned(), Type::Wasi(tdef.to_owned()))
+                        path_type.variants[0].constructor.apply(&[&segments])
+                    },
+                };
+
+                (node, Type::Wasi(tdef.to_owned()))
             },
             | Term::Result(t) => {
                 if t.name.ends_with('\'') {
@@ -1672,18 +1637,18 @@ impl State {
                         for i in 0..model.eval(&seq.length(), true).unwrap().as_u64().unwrap() {
                             let seg = seq.nth(&Int::from_u64(ctx, i));
 
-                            if types.segment.variants[0]
-                                .tester
-                                .apply(&[&seg])
+                            if model
+                                .eval(&types.segment.variants[0].tester.apply(&[&seg]), true)
+                                .unwrap()
                                 .as_bool()
                                 .unwrap()
                                 .as_bool()
                                 .unwrap()
                             {
                                 s.push('/');
-                            } else if types.segment.variants[1]
-                                .tester
-                                .apply(&[&seg])
+                            } else if model
+                                .eval(&types.segment.variants[1].tester.apply(&[&seg]), true)
+                                .unwrap()
                                 .as_bool()
                                 .unwrap()
                                 .as_bool()
@@ -2077,10 +2042,6 @@ impl<'ctx> StateTypes<'ctx> {
             ),
             | (_, WasiValue::Flags(_)) => unreachable!(),
             | (_, WasiValue::String(string)) => {
-                let seq = datatype.variants[0].accessors[0]
-                    .apply(&[param.node()])
-                    .as_seq()
-                    .unwrap();
                 let s = String::from_utf8(string.to_owned()).unwrap();
                 let mut segments = Vec::new();
                 let mut i = 0;
@@ -2106,33 +2067,71 @@ impl<'ctx> StateTypes<'ctx> {
                     segments.push(Segment::Component(&s[last_i..i]));
                 }
 
-                Bool::and(
-                    ctx,
-                    &[
-                        seq.length()._eq(&Int::from_u64(ctx, segments.len() as u64)),
+                match param {
+                    | ParamDecl::Node(dynamic) => {
+                        let seq = datatype.variants[0].accessors[0]
+                            .apply(&[dynamic])
+                            .as_seq()
+                            .unwrap();
                         Bool::and(
                             ctx,
-                            segments
-                                .into_iter()
-                                .enumerate()
-                                .map(|(i, segment)| match segment {
-                                    | Segment::Separator => self.segment.variants[0]
-                                        .tester
-                                        .apply(&[&seq.nth(&Int::from_u64(ctx, i as u64))])
-                                        .as_bool()
-                                        .unwrap(),
-                                    | Segment::Component(s) => self.segment.variants[1].accessors
-                                        [0]
-                                    .apply(&[&seq.nth(&Int::from_u64(ctx, i as u64))])
-                                    .as_string()
-                                    .unwrap()
-                                    ._eq(&z3::ast::String::from_str(ctx, s).unwrap()),
-                                })
-                                .collect_vec()
-                                .as_slice(),
-                        ),
-                    ],
-                )
+                            &[
+                                seq.length()._eq(&Int::from_u64(ctx, segments.len() as u64)),
+                                Bool::and(
+                                    ctx,
+                                    segments
+                                        .into_iter()
+                                        .enumerate()
+                                        .map(|(i, segment)| match segment {
+                                            | Segment::Separator => self.segment.variants[0]
+                                                .tester
+                                                .apply(&[&seq.nth(&Int::from_u64(ctx, i as u64))])
+                                                .as_bool()
+                                                .unwrap(),
+                                            | Segment::Component(s) => self.segment.variants[1]
+                                                .accessors[0]
+                                                .apply(&[&seq.nth(&Int::from_u64(ctx, i as u64))])
+                                                .as_string()
+                                                .unwrap()
+                                                ._eq(&z3::ast::String::from_str(ctx, s).unwrap()),
+                                        })
+                                        .collect_vec()
+                                        .as_slice(),
+                                ),
+                            ],
+                        )
+                    },
+                    | ParamDecl::Path { segments: nodes } => Bool::and(
+                        ctx,
+                        nodes
+                            .iter()
+                            .zip(segments)
+                            .map(|(node, segment)| match segment {
+                                | Segment::Separator => self.segment.variants[0]
+                                    .tester
+                                    .apply(&[node])
+                                    .as_bool()
+                                    .unwrap(),
+                                | Segment::Component(s) => Bool::and(
+                                    ctx,
+                                    &[
+                                        self.segment.variants[1]
+                                            .tester
+                                            .apply(&[node])
+                                            .as_bool()
+                                            .unwrap(),
+                                        self.segment.variants[1].accessors[0]
+                                            .apply(&[node])
+                                            .as_string()
+                                            .unwrap()
+                                            ._eq(&z3::ast::String::from_str(ctx, s).unwrap()),
+                                    ],
+                                ),
+                            })
+                            .collect_vec()
+                            .as_slice(),
+                    ),
+                }
             },
             | (WasiType::Variant(variant), WasiValue::Variant(variant_value)) => {
                 match &variant_value.payload {
@@ -3156,6 +3155,7 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
         }
 
         let model = solver.get_model().unwrap();
+        println!("----------\n{:#?}", model);
         let mut clauses = Vec::new();
 
         for (name, result) in &decls.to_solves.results {
@@ -3198,7 +3198,10 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
 
         match solver.check() {
             | z3::SatResult::Unsat => (),
-            | _ => return Err(err!("more than one solution for output contract")),
+            | _ => {
+                println!("----------\n{:#?}", solver.get_model().unwrap());
+                return Err(err!("more than one solution for output contract"));
+            },
         }
 
         Ok(())

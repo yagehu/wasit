@@ -40,7 +40,7 @@ use wazzi::{
     StatefulStrategy,
     StatelessStrategy,
 };
-use wazzi_runners::{MappedDir, Node, RunningExecutor, Wamr, Wasmedge, Wasmer, Wasmtime, Wazero};
+use wazzi_runners::{MappedDir, Node, RunningExecutor, Wamr, Wasmedge, Wasmtime, Wazero};
 use wazzi_store::FuzzStore;
 
 #[derive(Parser, Debug)]
@@ -131,10 +131,10 @@ fn main() -> Result<(), eyre::Error> {
                 "wasmedge",
                 Box::new(Wasmedge::default()) as Box<dyn InitializeState>,
             ),
-            (
-                "wasmer",
-                Box::new(Wasmer::default()) as Box<dyn InitializeState>,
-            ),
+            // (
+            //     "wasmer",
+            //     Box::new(Wasmer::default()) as Box<dyn InitializeState>,
+            // ),
             (
                 "wasmtime",
                 Box::new(Wasmtime::default()) as Box<dyn InitializeState>,
