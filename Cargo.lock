@@ -294,6 +294,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1462739cb27611015575c0c11df5df7601141071f07518d56fcc1be504cbec97"
 
 [[package]]
+name = "cmake"
+version = "0.1.51"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb1e43aa7fd152b1f968787f7dbcdeb306d1867ff373c69955211876c053f91a"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "color-eyre"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1786,7 +1795,7 @@ checksum = "dff9641d1cd4be8d1a070daf9e3773c5f67e78b4d9d42263020c057706765c04"
 [[package]]
 name = "z3"
 version = "0.12.1"
-source = "git+https://github.com/yagehu/z3.rs.git?branch=wazzi#8c81d1d87fe3105ff1bc73574e6cfd6edd19d33b"
+source = "git+https://github.com/yagehu/z3.rs.git?branch=wazzi#9bdbbd85a3dc59519c3c65b9324bf0674556d25f"
 dependencies = [
  "log",
  "num",
@@ -1796,8 +1805,9 @@ dependencies = [
 [[package]]
 name = "z3-sys"
 version = "0.8.1"
-source = "git+https://github.com/yagehu/z3.rs.git?branch=wazzi#8c81d1d87fe3105ff1bc73574e6cfd6edd19d33b"
+source = "git+https://github.com/yagehu/z3.rs.git?branch=wazzi#9bdbbd85a3dc59519c3c65b9324bf0674556d25f"
 dependencies = [
  "bindgen",
+ "cmake",
  "pkg-config",
 ]

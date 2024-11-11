@@ -973,14 +973,12 @@
 
         ; $path should not be absolute (begin with a `/`).
         ;(@not (@value.eq (@str.at (param $path) 0) "/"))
-      )
-    )
-    (@output
-      (@or
-        @true
-        (@and
-          (@value.eq (param $fd') (param $fd))
-        )
+        
+        ; When generating path segments, if we generate one corresponding to a
+        ; non-existent directory, the next segment shall not be `..`.
+        ; This excludes uninteresting path normalization differences between
+        ; Windows and Linux.
+        ;(@no-nonexistent-dir-backtrack $fd $path)
       )
     )
   )

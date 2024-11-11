@@ -13,12 +13,12 @@ use eyre::{eyre as err, Context};
 use idxspace::IndexSpace;
 use itertools::Itertools;
 use petgraph::{data::DataMap as _, graph::DiGraph, visit::IntoNeighborsDirected};
-use z3::ast::{forall_const, lambda_const, Ast, Bool, Dynamic, Int, Seq};
+use z3::ast::{exists_const, forall_const, lambda_const, Array, Ast, Bool, Dynamic, Int, Seq};
 
 use super::CallStrategy;
 use crate::{
     spec::{
-        witx::slang::{self, Term},
+        witx::slang::{self, NoNonExistentDirBacktrack, Term},
         FlagsValue,
         Function,
         ListValue,
@@ -288,16 +288,22 @@ impl State {
             .collect();
 
         StateDecls {
+            fd_file_default: z3::FuncDecl::new(
+                ctx,
+                "fd-file-default",
+                &[&types.resources.get("fd").unwrap().sort, &types.file.sort],
+                &z3::Sort::bool(ctx),
+            ),
             fd_file: z3::FuncDecl::new(
                 ctx,
                 "fd-file",
                 &[&types.resources.get("fd").unwrap().sort, &types.file.sort],
                 &z3::Sort::bool(ctx),
             ),
-            children: z3::FuncDecl::new(
+            children: Array::fresh_const(
                 ctx,
                 "children",
-                &[&types.file.sort, &z3::Sort::string(ctx), &types.file.sort],
+                &types.children_mapping.sort,
                 &z3::Sort::bool(ctx),
             ),
             preopens,
@@ -323,6 +329,25 @@ impl State {
         let mut topo = petgraph::visit::Topo::new(&fds_graph_rev);
         let mut dirs: BTreeMap<ResourceIdx, &DirectoryEncoding> = Default::default();
         let mut fd_file_pairs = Vec::new();
+
+        let mut all_files = Vec::new();
+
+        for (&_resource_idx, preopen) in decls.preopens.iter() {
+            all_files.push(&preopen.root.node);
+
+            let mut dirs = vec![&preopen.root];
+
+            while let Some(dir) = dirs.pop() {
+                for (_filename, child) in &dir.children {
+                    all_files.push(child.node());
+
+                    match child {
+                        | FileEncoding::Directory(d) => dirs.push(&d),
+                        | FileEncoding::RegularFile(_f) => (),
+                    }
+                }
+            }
+        }
 
         for (&resource_idx, preopen) in decls.preopens.iter() {
             dirs.insert(resource_idx, &preopen.root);
@@ -497,93 +522,73 @@ impl State {
             let file_a = Dynamic::fresh_const(ctx, "", &types.file.sort);
             let file_b = Dynamic::fresh_const(ctx, "", &types.file.sort);
 
-            clauses.push(forall_const(
-                ctx,
-                &[&file_a, &file_b],
-                &[],
-                &Bool::and(
-                    ctx,
-                    &[
-                        file_a._eq(&file_b).not(),
-                        types.file.variants[0]
-                            .tester
-                            .apply(&[&file_a])
-                            .as_bool()
-                            .unwrap(),
-                        types.file.variants[0]
-                            .tester
-                            .apply(&[&file_b])
-                            .as_bool()
-                            .unwrap(),
-                    ],
-                )
-                .implies(
-                    &types.file.variants[0].accessors[0]
-                        .apply(&[&file_a])
-                        ._eq(&types.file.variants[0].accessors[0].apply(&[&file_b]))
-                        .not(),
-                ),
-            ));
-            clauses.push(forall_const(
-                ctx,
-                &[&file_a, &file_b],
-                &[],
-                &Bool::and(
-                    ctx,
-                    &[
-                        file_a._eq(&file_b).not(),
-                        types.file.variants[1]
-                            .tester
-                            .apply(&[&file_a])
-                            .as_bool()
-                            .unwrap(),
-                        types.file.variants[1]
-                            .tester
-                            .apply(&[&file_b])
-                            .as_bool()
-                            .unwrap(),
-                    ],
-                )
-                .implies(
-                    &types.file.variants[1].accessors[0]
-                        .apply(&[&file_a])
-                        ._eq(&types.file.variants[1].accessors[0].apply(&[&file_b]))
-                        .not(),
-                ),
-            ));
+            // clauses.push(forall_const(
+            //     ctx,
+            //     &[&file_a, &file_b],
+            //     &[],
+            //     &Bool::and(
+            //         ctx,
+            //         &[
+            //             file_a._eq(&file_b).not(),
+            //             types.file.variants[0]
+            //                 .tester
+            //                 .apply(&[&file_a])
+            //                 .as_bool()
+            //                 .unwrap(),
+            //             types.file.variants[0]
+            //                 .tester
+            //                 .apply(&[&file_b])
+            //                 .as_bool()
+            //                 .unwrap(),
+            //         ],
+            //     )
+            //     .implies(
+            //         &types.file.variants[0].accessors[0]
+            //             .apply(&[&file_a])
+            //             ._eq(&types.file.variants[0].accessors[0].apply(&[&file_b]))
+            //             .not(),
+            //     ),
+            // ));
+            // clauses.push(forall_const(
+            //     ctx,
+            //     &[&file_a, &file_b],
+            //     &[],
+            //     &Bool::and(
+            //         ctx,
+            //         &[
+            //             file_a._eq(&file_b).not(),
+            //             types.file.variants[1]
+            //                 .tester
+            //                 .apply(&[&file_a])
+            //                 .as_bool()
+            //                 .unwrap(),
+            //             types.file.variants[1]
+            //                 .tester
+            //                 .apply(&[&file_b])
+            //                 .as_bool()
+            //                 .unwrap(),
+            //         ],
+            //     )
+            //     .implies(
+            //         &types.file.variants[1].accessors[0]
+            //             .apply(&[&file_a])
+            //             ._eq(&types.file.variants[1].accessors[0].apply(&[&file_b]))
+            //             .not(),
+            //     ),
+            // ));
         }
 
         // fd -> file mapping
-        {
-            let some_fd = Dynamic::fresh_const(ctx, "", &types.resources.get("fd").unwrap().sort);
-            let some_file = Dynamic::fresh_const(ctx, "", &types.file.sort);
+        for (fd, file) in fd_file_pairs {
+            for &f in &all_files {
+                let mut clause = decls.fd_file.apply(&[fd, f]).as_bool().unwrap();
 
-            clauses.push(forall_const(
-                ctx,
-                &[&some_fd, &some_file],
-                &[],
-                &Bool::or(
-                    ctx,
-                    fd_file_pairs
-                        .into_iter()
-                        .map(|(fd, file)| Bool::and(ctx, &[fd._eq(&some_fd), file._eq(&some_file)]))
-                        .collect_vec()
-                        .as_slice(),
-                )
-                .ite(
-                    &decls
-                        .fd_file
-                        .apply(&[&some_fd, &some_file])
-                        .as_bool()
-                        .unwrap(),
-                    &decls
-                        .fd_file
-                        .apply(&[&some_fd, &some_file])
-                        .as_bool()
-                        .unwrap()
-                        .not(),
-                ),
-            ));
+                if file != f {
+                    clause = clause.not();
+                }
+
+                clauses.push(clause);
+            }
         }
 
         // Constrain all the resource values.
@@ -636,14 +641,14 @@ impl State {
 
         // Children relation. Maps any file (directory) to its children.
         {
-            let mut children = Vec::new();
+            let mut children_entries = Vec::new();
 
             for (&_idx, preopen) in &decls.preopens {
                 let mut stack = vec![&preopen.root];
 
                 while let Some(dir) = stack.pop() {
                     for (name, child) in &dir.children {
-                        children.push((&dir.node, name, child.node()));
+                        children_entries.push((&dir.node, name, child.node()));
 
                         match child {
                             | FileEncoding::Directory(d) => stack.push(d),
@@ -653,47 +658,66 @@ impl State {
                 }
             }
 
-            let some_dir = Dynamic::fresh_const(ctx, "", &types.file.sort);
-            let some_file = Dynamic::fresh_const(ctx, "", &types.file.sort);
-            let some_name = z3::ast::String::fresh_const(ctx, "");
-
-            clauses.push(forall_const(
+            let mut children = Array::const_array(
                 ctx,
-                &[&some_dir, &some_file, &some_name],
-                &[],
-                &Bool::or(
-                    ctx,
-                    children
-                        .into_iter()
-                        .map(|(dir, name, file)| {
-                            Bool::and(
-                                ctx,
-                                &[
-                                    dir._eq(&some_dir),
-                                    z3::ast::String::from_str(ctx, name.as_str())
-                                        .unwrap()
-                                        ._eq(&some_name),
-                                    file._eq(&some_file),
-                                ],
-                            )
-                        })
-                        .collect_vec()
-                        .as_slice(),
-                )
-                .ite(
-                    &decls
-                        .children
-                        .apply(&[&some_dir, &some_name, &some_file])
-                        .as_bool()
-                        .unwrap(),
-                    &decls
-                        .children
-                        .apply(&[&some_dir, &some_name, &some_file])
-                        .as_bool()
-                        .unwrap()
-                        .not(),
-                ),
-            ));
+                &types.children_mapping.sort,
+                &Bool::from_bool(ctx, false),
+            );
+
+            for (parent, filename, child) in children_entries {
+                children = children.store(
+                    &types.children_mapping.variants[0].constructor.apply(&[
+                        parent,
+                        &z3::ast::String::from_str(ctx, filename).unwrap(),
+                        child,
+                    ]),
+                    &Bool::from_bool(ctx, true),
+                );
+            }
+
+            clauses.push(children._eq(&decls.children));
+
+            // let some_dir = Dynamic::fresh_const(ctx, "", &types.file.sort);
+            // let some_file = Dynamic::fresh_const(ctx, "", &types.file.sort);
+            // let some_name = z3::ast::String::fresh_const(ctx, "");
+
+            // clauses.push(forall_const(
+            //     ctx,
+            //     &[&some_dir, &some_file, &some_name],
+            //     &[],
+            //     &Bool::or(
+            //         ctx,
+            //         children
+            //             .into_iter()
+            //             .map(|(dir, name, file)| {
+            //                 Bool::and(
+            //                     ctx,
+            //                     &[
+            //                         dir._eq(&some_dir),
+            //                         z3::ast::String::from_str(ctx, name.as_str())
+            //                             .unwrap()
+            //                             ._eq(&some_name),
+            //                         file._eq(&some_file),
+            //                     ],
+            //                 )
+            //             })
+            //             .collect_vec()
+            //             .as_slice(),
+            //     )
+            //     .ite(
+            //         &decls
+            //             .children
+            //             .apply(&[&some_dir, &some_name, &some_file])
+            //             .as_bool()
+            //             .unwrap(),
+            //         &decls
+            //             .children
+            //             .apply(&[&some_dir, &some_name, &some_file])
+            //             .as_bool()
+            //             .unwrap()
+            //             .not(),
+            //     ),
+            // ));
         }
 
         let separator = types.segment.variants.first().unwrap();
@@ -708,97 +732,93 @@ impl State {
             .collect_vec();
 
         // Segment components cannot be empty.
-        for &path in paths.iter() {
-            clauses.push(Bool::and(
-                &ctx,
-                path.iter()
-                    .map(|segment| {
-                        component
-                            .tester
-                            .apply(&[segment])
-                            .as_bool()
-                            .unwrap()
-                            .implies(&Bool::and(
-                                ctx,
-                                &[
-                                    &component.accessors[0]
-                                        .apply(&[segment])
-                                        .as_string()
-                                        .unwrap()
-                                        .length()
-                                        .gt(&Int::from_u64(ctx, 0)),
-                                    &Bool::or(
-                                        ctx,
-                                        &[
-                                            &component.accessors[0]
-                                                .apply(&[segment])
-                                                .as_string()
-                                                .unwrap()
-                                                ._eq(&z3::ast::String::from_str(ctx, "a").unwrap()),
-                                            &component.accessors[0]
-                                                .apply(&[segment])
-                                                .as_string()
-                                                .unwrap()
-                                                ._eq(&z3::ast::String::from_str(ctx, ".").unwrap()),
-                                            &component.accessors[0]
-                                                .apply(&[segment])
-                                                .as_string()
-                                                .unwrap()
-                                                ._eq(
-                                                    &z3::ast::String::from_str(ctx, "..").unwrap(),
-                                                ),
-                                        ],
-                                    ),
-                                ],
-                            ))
-                    })
-                    .collect_vec()
-                    .as_slice(),
-            ));
-        }
+        // for &path in paths.iter() {
+        //     clauses.push(Bool::and(
+        //         &ctx,
+        //         path.iter()
+        //             .map(|segment| {
+        //                 component
+        //                     .tester
+        //                     .apply(&[segment])
+        //                     .as_bool()
+        //                     .unwrap()
+        //                     .implies(&Bool::and(
+        //                         ctx,
+        //                         &[
+        //                             &component.accessors[0]
+        //                                 .apply(&[segment])
+        //                                 .as_string()
+        //                                 .unwrap()
+        //                                 .length()
+        //                                 .gt(&Int::from_u64(ctx, 0)),
+        //                             &Bool::or(
+        //                                 ctx,
+        //                                 &[
+        //                                     &component.accessors[0]
+        //                                         .apply(&[segment])
+        //                                         .as_string()
+        //                                         .unwrap()
+        //                                         ._eq(&z3::ast::String::from_str(ctx, "a").unwrap()),
+        //                                     &component.accessors[0]
+        //                                         .apply(&[segment])
+        //                                         .as_string()
+        //                                         .unwrap()
+        //                                         ._eq(&z3::ast::String::from_str(ctx, ".").unwrap()),
+        //                                     &component.accessors[0]
+        //                                         .apply(&[segment])
+        //                                         .as_string()
+        //                                         .unwrap()
+        //                                         ._eq(
+        //                                             &z3::ast::String::from_str(ctx, "..").unwrap(),
+        //                                         ),
+        //                                 ],
+        //                             ),
+        //                         ],
+        //                     ))
+        //             })
+        //             .collect_vec()
+        //             .as_slice(),
+        //     ));
+        // }
 
         // Adjacent segments can't both be components or separators.
         for path in paths.iter() {
             for (i, segment) in path.iter().enumerate().skip(1) {
                 let prev = path.get(i - 1).unwrap();
 
-                clauses.push(Bool::and(
-                    ctx,
-                    &[
-                        separator
-                            .tester
-                            .apply(&[segment])
-                            .as_bool()
-                            .unwrap()
-                            .implies(&separator.tester.apply(&[prev]).as_bool().unwrap().not()),
-                        component
-                            .tester
-                            .apply(&[segment])
-                            .as_bool()
-                            .unwrap()
-                            .implies(&component.tester.apply(&[prev]).as_bool().unwrap().not()),
-                    ],
-                ));
+                // clauses.push(Bool::and(
+                //     ctx,
+                //     &[
+                //         separator
+                //             .tester
+                //             .apply(&[segment])
+                //             .as_bool()
+                //             .unwrap()
+                //             .implies(&separator.tester.apply(&[prev]).as_bool().unwrap().not()),
+                //         component
+                //             .tester
+                //             .apply(&[segment])
+                //             .as_bool()
+                //             .unwrap()
+                //             .implies(&component.tester.apply(&[prev]).as_bool().unwrap().not()),
+                //     ],
+                // ));
             }
         }
 
         // Constrain non-resource param values.
-        // if let Some(params) = params {
-        //     for (function_param, (param_value, _idx)) in function.params.iter().zip(params.iter()) {
-        //         let param_decl = decls.params.get(&function_param.name).unwrap();
-        //         let tdef = function_param.tref.resolve(spec);
+        if let Some(params) = params {
+            for (function_param, (param_value, _idx)) in function.params.iter().zip(params.iter()) {
+                let param_decl = decls.params.get(&function_param.name).unwrap();
+                let tdef = function_param.tref.resolve(spec);
 
-        //         if tdef.state.is_some() {
-        //             continue;
-        //         }
+                if tdef.state.is_some() {
+                    continue;
+                }
 
-        //         if tdef.name == "path" {
-        //             println!("{:?} {:?}", param_decl, param_value);
-        //         }
-
-        //         clauses.push(types.encode_wasi_value(ctx, spec, param_decl, tdef, param_value));
-        //     }
-        // }
+                clauses.push(types.encode_wasi_value(ctx, spec, param_decl, tdef, param_value));
+            }
+        }
 
         // Constrain param resources.
         for (param_name, param_node) in decls.params.iter() {
@@ -1506,8 +1526,8 @@ impl State {
                     Type::Wasi(filetype_tdef.to_owned()),
                 )
             },
-            | Term::NoNonExistentDirBacktrack(_t) => (
-                no_nonexistent_dir_backtrack(ctx, types, decls /*t*/),
+            | Term::NoNonExistentDirBacktrack(t) => (
+                no_nonexistent_dir_backtrack(ctx, types, decls, t),
                 Type::Wazzi(WazziType::Bool),
             ),
         }
@@ -1543,9 +1563,12 @@ impl State {
                     .unwrap(),
             ),
             | WasiType::U8 => WasiValue::U8(
-                datatype.variants[0].accessors[0]
-                    .apply(&[decl.node()])
-                    .simplify()
+                model
+                    .eval(
+                        &datatype.variants[0].accessors[0].apply(&[decl.node()]),
+                        true,
+                    )
+                    .unwrap()
                     .as_int()
                     .unwrap()
                     .as_u64()
@@ -1555,9 +1578,12 @@ impl State {
             ),
             | WasiType::U16 => todo!(),
             | WasiType::U32 => {
-                let i = datatype.variants[0].accessors[0]
-                    .apply(&[decl.node()])
-                    .simplify()
+                let i = model
+                    .eval(
+                        &datatype.variants[0].accessors[0].apply(&[decl.node()]),
+                        true,
+                    )
+                    .unwrap()
                     .as_int()
                     .unwrap();
 
@@ -1690,8 +1716,6 @@ impl State {
                                         .unwrap()
                                         .as_str(),
                                 );
-
-                                println!("pushing `{s}`");
                             }
                         }
 
@@ -1741,7 +1765,7 @@ impl State {
                     .simplify()
                     .as_seq()
                     .unwrap();
-                let length = seq.length().simplify().as_u64().unwrap();
+                let length = model.eval(&seq.length(), true).unwrap().as_u64().unwrap();
                 let mut items = Vec::with_capacity(length as usize);
 
                 for i in 0..length {
@@ -1763,7 +1787,7 @@ impl State {
                     .simplify()
                     .as_seq()
                     .unwrap();
-                let length = seq.length().simplify().as_u64().unwrap();
+                let length = model.eval(&seq.length(), true).unwrap().as_u64().unwrap();
                 let mut items = Vec::with_capacity(length as usize);
 
                 for i in 0..length {
@@ -1790,9 +1814,10 @@ enum ArbitraryOrPresolved<'u, 'data> {
 
 #[derive(Debug)]
 pub(crate) struct StateTypes<'ctx> {
-    resources: BTreeMap<String, z3::DatatypeSort<'ctx>>,
-    file:      z3::DatatypeSort<'ctx>,
-    segment:   z3::DatatypeSort<'ctx>,
+    resources:        BTreeMap<String, z3::DatatypeSort<'ctx>>,
+    file:             z3::DatatypeSort<'ctx>,
+    segment:          z3::DatatypeSort<'ctx>,
+    children_mapping: z3::DatatypeSort<'ctx>,
 }
 
 impl<'ctx> StateTypes<'ctx> {
@@ -1963,25 +1988,40 @@ impl<'ctx> StateTypes<'ctx> {
             encode_type(ctx, spec, name, tdef, &mut resources);
         }
 
+        let file = z3::DatatypeBuilder::new(ctx, "file")
+            .variant(
+                "directory",
+                vec![(
+                    "directory-id",
+                    z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)),
+                )],
+            )
+            .variant(
+                "regular-file",
+                vec![(
+                    "regular-file-id",
+                    z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)),
+                )],
+            )
+            .finish();
+
         Self {
             resources,
-            file: z3::DatatypeBuilder::new(ctx, "file")
+            segment: segment_type,
+            children_mapping: z3::DatatypeBuilder::new(ctx, "children-mapping")
                 .variant(
-                    "directory",
-                    vec![(
-                        "directory-id",
-                        z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)),
-                    )],
-                )
-                .variant(
-                    "regular-file",
-                    vec![(
-                        "regular-file-id",
-                        z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)),
-                    )],
+                    "children-mapping",
+                    vec![
+                        ("parent", z3::DatatypeAccessor::Sort(file.sort.clone())),
+                        (
+                            "filename",
+                            z3::DatatypeAccessor::Sort(z3::Sort::string(ctx)),
+                        ),
+                        ("child", z3::DatatypeAccessor::Sort(file.sort.clone())),
+                    ],
                 )
                 .finish(),
-            segment: segment_type,
+            file,
         }
     }
 
@@ -2117,12 +2157,28 @@ impl<'ctx> StateTypes<'ctx> {
                                                 .apply(&[&seq.nth(&Int::from_u64(ctx, i as u64))])
                                                 .as_bool()
                                                 .unwrap(),
-                                            | Segment::Component(s) => self.segment.variants[1]
-                                                .accessors[0]
-                                                .apply(&[&seq.nth(&Int::from_u64(ctx, i as u64))])
-                                                .as_string()
-                                                .unwrap()
-                                                ._eq(&z3::ast::String::from_str(ctx, s).unwrap()),
+                                            | Segment::Component(s) => Bool::and(
+                                                ctx,
+                                                &[
+                                                    self.segment.variants[1]
+                                                        .tester
+                                                        .apply(&[
+                                                            &seq.nth(&Int::from_u64(ctx, i as u64))
+                                                        ])
+                                                        .as_bool()
+                                                        .unwrap(),
+                                                    self.segment.variants[1].accessors[0]
+                                                        .apply(&[
+                                                            &seq.nth(&Int::from_u64(ctx, i as u64))
+                                                        ])
+                                                        .as_string()
+                                                        .unwrap()
+                                                        ._eq(
+                                                            &z3::ast::String::from_str(ctx, s)
+                                                                .unwrap(),
+                                                        ),
+                                                ],
+                                            ),
                                         })
                                         .collect_vec()
                                         .as_slice(),
@@ -2201,83 +2257,51 @@ impl<'ctx> StateTypes<'ctx> {
             },
             | (_, WasiValue::Variant(_variant_value)) => unreachable!(),
             | (WasiType::Pointer(pointer), WasiValue::Pointer(pointer_value)) => {
-                let idx = Int::fresh_const(ctx, "");
+                let mut clauses = vec![];
 
-                forall_const(
-                    ctx,
-                    &[&idx],
-                    &[],
-                    &Bool::and(
-                        ctx,
-                        &[
-                            Int::from_u64(ctx, 0).le(&idx),
-                            idx.lt(&Int::from_u64(ctx, pointer_value.items.len() as u64)),
-                        ],
-                    )
-                    .implies(&Bool::and(
-                        ctx,
-                        (0..pointer_value.items.len())
-                            .map(|i| {
-                                idx._eq(&Int::from_u64(ctx, i as u64)).implies(
-                                    &self.encode_wasi_value(
-                                        ctx,
-                                        spec,
-                                        &ParamDecl::Node(
-                                            datatype.variants[0].accessors[0]
-                                                .apply(&[param.node()])
-                                                .as_seq()
-                                                .unwrap()
-                                                .nth(&idx),
-                                        ),
-                                        &pointer.item.resolve(spec),
-                                        pointer_value.items.get(i).unwrap(),
-                                    ),
-                                )
-                            })
-                            .collect_vec()
-                            .as_slice(),
-                    )),
-                )
+                for i in 0..pointer_value.items.len() {
+                    clauses.push(
+                        self.encode_wasi_value(
+                            ctx,
+                            spec,
+                            &ParamDecl::Node(
+                                datatype.variants[0].accessors[0]
+                                    .apply(&[param.node()])
+                                    .as_seq()
+                                    .unwrap()
+                                    .nth(&Int::from_u64(ctx, i as u64)),
+                            ),
+                            &pointer.item.resolve(spec),
+                            pointer_value.items.get(i).unwrap(),
+                        ),
+                    );
+                }
+
+                Bool::and(ctx, &clauses)
             },
             | (_, WasiValue::Pointer(_pointer_value)) => unreachable!(),
             | (WasiType::List(list), WasiValue::List(list_value)) => {
-                let idx = Int::fresh_const(ctx, "");
+                let mut clauses = vec![];
 
-                forall_const(
-                    ctx,
-                    &[&idx],
-                    &[],
-                    &Bool::and(
-                        ctx,
-                        &[
-                            Int::from_u64(ctx, 0).le(&idx),
-                            idx.lt(&Int::from_u64(ctx, list_value.items.len() as u64)),
-                        ],
-                    )
-                    .implies(&Bool::and(
-                        ctx,
-                        (0..list_value.items.len())
-                            .map(|i| {
-                                idx._eq(&Int::from_u64(ctx, i as u64)).implies(
-                                    &self.encode_wasi_value(
-                                        ctx,
-                                        spec,
-                                        &ParamDecl::Node(
-                                            datatype.variants[0].accessors[0]
-                                                .apply(&[param.node()])
-                                                .as_seq()
-                                                .unwrap()
-                                                .nth(&idx),
-                                        ),
-                                        &list.item.resolve(spec),
-                                        list_value.items.get(i).unwrap(),
-                                    ),
-                                )
-                            })
-                            .collect_vec()
-                            .as_slice(),
-                    )),
-                )
+                for i in 0..list_value.items.len() {
+                    clauses.push(
+                        self.encode_wasi_value(
+                            ctx,
+                            spec,
+                            &ParamDecl::Node(
+                                datatype.variants[0].accessors[0]
+                                    .apply(&[param.node()])
+                                    .as_seq()
+                                    .unwrap()
+                                    .nth(&Int::from_u64(ctx, i as u64)),
+                            ),
+                            &list.item.resolve(spec),
+                            list_value.items.get(i).unwrap(),
+                        ),
+                    );
+                }
+
+                Bool::and(ctx, &clauses)
             },
             | (_, WasiValue::List(_list_value)) => unreachable!("{:#?}", _list_value),
         }
@@ -2286,386 +2310,367 @@ impl<'ctx> StateTypes<'ctx> {
 
 fn no_nonexistent_dir_backtrack<'ctx>(
     ctx: &'ctx z3::Context,
-    _types: &'ctx StateTypes<'ctx>,
+    types: &'ctx StateTypes<'ctx>,
     decls: &'ctx StateDecls<'ctx>,
-    // t: &NoNonExistentDirBacktrack,
+    t: &NoNonExistentDirBacktrack,
 ) -> Dynamic<'ctx> {
-    // let mut clauses: Vec<Bool> = Vec::new();
-    // let namespace = format!("nndb-{}-{}", t.fd_param, t.path_param);
-    // let segment_file = z3::FuncDecl::new(
-    //     ctx,
-    //     format!("{namespace}--segment-file"),
-    //     &[&z3::Sort::int(ctx), &types.file.sort],
-    //     &z3::Sort::bool(ctx),
-    // );
-    // let param_path = decls.params.get(&t.path_param).unwrap();
-    // let param_fd = decls.params.get(&t.fd_param).unwrap();
+    let mut clauses: Vec<Bool> = Vec::new();
+    let namespace = format!("nndb-{}-{}", t.fd_param, t.path_param);
+    let segment_file = z3::FuncDecl::new(
+        ctx,
+        format!("{namespace}--segment-file"),
+        &[&z3::Sort::int(ctx), &types.file.sort],
+        &z3::Sort::bool(ctx),
+    );
 
-    // {
-    //     let mut all_files = decls
-    //         .preopens
-    //         .values()
-    //         .map(|preopen| &preopen.root.node)
-    //         .collect_vec();
+    let param_fd = decls.params.get(&t.fd_param).unwrap().node();
 
-    //     for (_idx, preopen) in decls.preopens.iter() {
-    //         let mut stack = vec![&preopen.root];
+    {
+        let mut all_files = decls
+            .preopens
+            .values()
+            .map(|preopen| &preopen.root.node)
+            .collect_vec();
 
-    //         while let Some(dir) = stack.pop() {
-    //             for (_filename, child) in dir.children.iter() {
-    //                 all_files.push(child.node());
+        for (_idx, preopen) in decls.preopens.iter() {
+            let mut stack = vec![&preopen.root];
 
-    //                 match child {
-    //                     | FileEncoding::Directory(d) => stack.push(d),
-    //                     | FileEncoding::RegularFile(_f) => continue,
-    //                 }
-    //             }
-    //         }
-    //     }
+            while let Some(dir) = stack.pop() {
+                for (_filename, child) in dir.children.iter() {
+                    all_files.push(child.node());
 
-    //     let some_file = Dynamic::fresh_const(ctx, "", &types.file.sort);
-    //     let some_segment = Dynamic::fresh_const(ctx, "", &types.segment.sort);
+                    match child {
+                        | FileEncoding::Directory(d) => stack.push(d),
+                        | FileEncoding::RegularFile(_f) => continue,
+                    }
+                }
+            }
+        }
 
-    //     clauses.push(forall_const(
-    //         ctx,
-    //         &[&some_file, &some_segment],
-    //         &[],
-    //         &Bool::and(
-    //             ctx,
-    //             all_files
-    //                 .into_iter()
-    //                 .map(|file| file._eq(&some_file).not())
-    //                 .collect_vec()
-    //                 .as_slice(),
-    //         )
-    //         .implies(
-    //             &segment_file
-    //                 .apply(&[&some_segment, &some_file])
-    //                 .as_bool()
-    //                 .unwrap()
-    //                 .not(),
-    //         ),
-    //     ));
-    // }
-
-    for (&_idx, preopen) in decls.preopens.iter() {
-        let mut stack = vec![&preopen.root];
-        // let path_datatype = types.resources.get("path").unwrap();
-        // let segments_accessor = &path_datatype.variants[0].accessors[0];
-        // let some_idx = Int::fresh_const(ctx, "");
+        // let some_file = Dynamic::fresh_const(ctx, "", &types.file.sort);
+        // let some_segment = Dynamic::fresh_const(ctx, "", &types.segment.sort);
 
         // clauses.push(forall_const(
         //     ctx,
-        //     &[&some_idx],
+        //     &[&some_file, &some_segment],
         //     &[],
-        //     &segment_file
-        //         .apply(&[&some_idx, &preopen.root.node])
-        //         .as_bool()
-        //         .unwrap()
-        //         .not(),
+        //     &Bool::and(
+        //         ctx,
+        //         all_files
+        //             .into_iter()
+        //             .map(|file| file._eq(&some_file).not())
+        //             .collect_vec()
+        //             .as_slice(),
+        //     )
+        //     .implies(
+        //         &segment_file
+        //             .apply(&[&some_segment, &some_file])
+        //             .as_bool()
+        //             .unwrap()
+        //             .not(),
+        //     ),
         // ));
+    }
+
+    for (&_idx, preopen) in decls.preopens.iter() {
+        let mut stack = vec![&preopen.root];
+        let some_idx = Int::fresh_const(ctx, "");
+
+        clauses.push(forall_const(
+            ctx,
+            &[&some_idx],
+            &[],
+            &segment_file
+                .apply(&[&some_idx, &preopen.root.node])
+                .as_bool()
+                .unwrap()
+                .not(),
+        ));
 
         while let Some(dir) = stack.pop() {
-            // clauses.push(
-            //     decls
-            //         .fd_file
-            //         .apply(&[param_fd, &dir.node])
-            //         .as_bool()
-            //         .unwrap()
-            //         .ite(
-            //             &Bool::and(
-            //                 ctx,
-            //                 dir.children
-            //                     .iter()
-            //                     .map(|(filename, child)| {
-            //                         Bool::and(
-            //                             ctx,
-            //                             &[
-            //                                 decls
-            //                                     .children
-            //                                     .apply(&[
-            //                                         &dir.node,
-            //                                         &z3::ast::String::from_str(ctx, filename)
-            //                                             .unwrap(),
-            //                                         child.node(),
-            //                                     ])
-            //                                     .as_bool()
-            //                                     .unwrap(),
-            //                                 types.segment.variants[1].accessors[0]
-            //                                     .apply(&[&segments_accessor
-            //                                         .apply(&[param_path])
-            //                                         .as_seq()
-            //                                         .unwrap()
-            //                                         .nth(&Int::from_u64(ctx, 0))])
-            //                                     .as_string()
-            //                                     .unwrap()
-            //                                     ._eq(
-            //                                         &z3::ast::String::from_str(ctx, filename)
-            //                                             .unwrap(),
-            //                                     ),
-            //                             ],
-            //                         )
-            //                         .iff(
-            //                             &segment_file
-            //                                 .apply(&[
-            //                                     &segments_accessor
-            //                                         .apply(&[param_path])
-            //                                         .as_seq()
-            //                                         .unwrap()
-            //                                         .nth(&Int::from_u64(ctx, 0)),
-            //                                     child.node(),
-            //                                 ])
-            //                                 .as_bool()
-            //                                 .unwrap(),
-            //                         )
-            //                     })
-            //                     .collect_vec()
-            //                     .as_slice(),
-            //             ),
-            //             &Bool::or(
-            //                 ctx,
-            //                 dir.children
-            //                     .iter()
-            //                     .map(|(_filename, child)| {
-            //                         segment_file
-            //                             .apply(&[
-            //                                 &segments_accessor
-            //                                     .apply(&[param_path])
-            //                                     .as_seq()
-            //                                     .unwrap()
-            //                                     .nth(&Int::from_u64(ctx, 0)),
-            //                                 child.node(),
-            //                             ])
-            //                             .as_bool()
-            //                             .unwrap()
-            //                     })
-            //                     .collect_vec()
-            //                     .as_slice(),
-            //             )
-            //             .not(),
-            //         ),
-            // );
+            let segments = match &decls.params.get(&t.path_param).unwrap() {
+                | ParamDecl::Node(param_path) => types.resources.get("path").unwrap().variants[0]
+                    .accessors[0]
+                    .apply(&[param_path])
+                    .as_seq()
+                    .unwrap(),
+                | ParamDecl::Path { segments } => {
+                    if segments.is_empty() {
+                        Seq::empty(ctx, z3::Sort::seq(ctx, &types.segment.sort))
+                    } else {
+                        Seq::concat(
+                            ctx,
+                            segments
+                                .iter()
+                                .map(|segment| Seq::unit(ctx, segment))
+                                .collect_vec()
+                                .as_slice(),
+                        )
+                    }
+                },
+            };
 
-            for (_filename, file) in dir.children.iter() {
-                // let some_file = Dynamic::fresh_const(ctx, "", &types.file.sort);
-                // let some_string = z3::ast::String::fresh_const(ctx, "");
-                // let some_prev_idx = Int::fresh_const(ctx, "");
-                // let some_between_idx = Int::fresh_const(ctx, "");
+            clauses.push(
+                decls
+                    .fd_file
+                    .apply(&[param_fd, &dir.node])
+                    .as_bool()
+                    .unwrap()
+                    .ite(
+                        &Bool::and(
+                            ctx,
+                            dir.children
+                                .iter()
+                                .map(|(filename, child)| {
+                                    Bool::and(
+                                        ctx,
+                                        &[
+                                            decls
+                                                .children
+                                                .select(
+                                                    &types.children_mapping.variants[0]
+                                                        .constructor
+                                                        .apply(&[
+                                                            &dir.node,
+                                                            &z3::ast::String::from_str(
+                                                                ctx, filename,
+                                                            )
+                                                            .unwrap(),
+                                                            child.node(),
+                                                        ]),
+                                                )
+                                                .as_bool()
+                                                .unwrap(),
+                                            types.segment.variants[1].accessors[0]
+                                                .apply(&[&segments.nth(&Int::from_u64(ctx, 0))])
+                                                .as_string()
+                                                .unwrap()
+                                                ._eq(
+                                                    &z3::ast::String::from_str(ctx, filename)
+                                                        .unwrap(),
+                                                ),
+                                        ],
+                                    )
+                                    .iff(
+                                        &segment_file
+                                            .apply(&[&Int::from_u64(ctx, 0), child.node()])
+                                            .as_bool()
+                                            .unwrap(),
+                                    )
+                                })
+                                .collect_vec()
+                                .as_slice(),
+                        ),
+                        &Bool::or(
+                            ctx,
+                            dir.children
+                                .iter()
+                                .map(|(_filename, child)| {
+                                    segment_file
+                                        .apply(&[&Int::from_u64(ctx, 0), child.node()])
+                                        .as_bool()
+                                        .unwrap()
+                                })
+                                .collect_vec()
+                                .as_slice(),
+                        )
+                        .not(),
+                    ),
+            );
 
-                // clauses.push(forall_const(
-                //     ctx,
-                //     &[&some_idx],
-                //     &[],
-                //     &Bool::and(
-                //         ctx,
-                //         &[
-                //             decls
-                //                 .fd_file
-                //                 .apply(&[param_fd, &dir.node])
-                //                 .as_bool()
-                //                 .unwrap(),
-                //             // Constrain i bounds..
-                //             Int::from_u64(ctx, 0).le(&some_idx),
-                //             some_idx.lt(&segments_accessor
-                //                 .apply(&[param_path])
-                //                 .as_seq()
-                //                 .unwrap()
-                //                 .length()),
-                //             // segment[i] is a component.
-                //             types.segment.variants[1]
-                //                 .tester
-                //                 .apply(&[&segments_accessor
-                //                     .apply(&[param_path])
-                //                     .as_seq()
-                //                     .unwrap()
-                //                     .nth(&some_idx)])
-                //                 .as_bool()
-                //                 .unwrap(),
-                //         ],
-                //     )
-                //     .implies(&Bool::or(
-                //         ctx,
-                //         &[
-                //             Bool::and(
-                //                 ctx,
-                //                 &[
-                //                     // segment[i] is `..`
-                //                     types.segment.variants[1].accessors[0]
-                //                         .apply(&[&segments_accessor
-                //                             .apply(&[param_path])
-                //                             .as_seq()
-                //                             .unwrap()
-                //                             .nth(&some_idx)])
-                //                         .as_string()
-                //                         .unwrap()
-                //                         ._eq(&z3::ast::String::from_str(ctx, "..").unwrap()),
-                //                     exists_const(
-                //                         ctx,
-                //                         &[&some_file, &some_string],
-                //                         &[],
-                //                         &Bool::and(
-                //                             ctx,
-                //                             &[
-                //                                 segment_file
-                //                                     .apply(&[&some_idx, &some_file])
-                //                                     .as_bool()
-                //                                     .unwrap(),
-                //                                 decls
-                //                                     .children
-                //                                     .apply(&[&some_file, &some_string, &dir.node])
-                //                                     .as_bool()
-                //                                     .unwrap(),
-                //                             ],
-                //                         ),
-                //                     ),
-                //                 ],
-                //             ),
-                //             Bool::and(
-                //                 ctx,
-                //                 &[
-                //                     types.segment.variants[1].accessors[0]
-                //                         .apply(&[&segments_accessor
-                //                             .apply(&[param_path])
-                //                             .as_seq()
-                //                             .unwrap()
-                //                             .nth(&some_idx)])
-                //                         .as_string()
-                //                         .unwrap()
-                //                         ._eq(&z3::ast::String::from_str(ctx, ".").unwrap()),
-                //                     segment_file
-                //                         .apply(&[&some_idx, &dir.node])
-                //                         .as_bool()
-                //                         .unwrap(),
-                //                 ],
-                //             ),
-                //             Bool::and(
-                //                 ctx,
-                //                 &[
-                //                     // segment[i] is the filename
-                //                     types.segment.variants[1].accessors[0]
-                //                         .apply(&[&segments_accessor
-                //                             .apply(&[param_path])
-                //                             .as_seq()
-                //                             .unwrap()
-                //                             .nth(&some_idx)])
-                //                         .as_string()
-                //                         .unwrap()
-                //                         ._eq(&z3::ast::String::from_str(ctx, &filename).unwrap()),
-                //                     segment_file
-                //                         .apply(&[&some_idx, file.node()])
-                //                         .as_bool()
-                //                         .unwrap(),
-                //                 ],
-                //             ),
-                //             // segment[i] is the filename
-                //             types.segment.variants[1].accessors[0]
-                //                 .apply(&[&segments_accessor
-                //                     .apply(&[param_path])
-                //                     .as_seq()
-                //                     .unwrap()
-                //                     .nth(&some_idx)])
-                //                 .as_string()
-                //                 .unwrap()
-                //                 ._eq(&z3::ast::String::from_str(ctx, &filename).unwrap())
-                //                 .not(),
-                //         ],
-                //     )),
-                // ));
-                // clauses.push(forall_const(
-                //     ctx,
-                //     &[&some_idx],
-                //     &[],
-                //     &exists_const(
-                //         ctx,
-                //         &[&some_prev_idx],
-                //         &[],
-                //         &Bool::and(
-                //             ctx,
-                //             &[
-                //                 decls
-                //                     .fd_file
-                //                     .apply(&[param_fd, &dir.node])
-                //                     .as_bool()
-                //                     .unwrap(),
-                //                 // Constrain i bounds..
-                //                 Int::from_u64(ctx, 0).le(&some_idx),
-                //                 some_idx.lt(&segments_accessor
-                //                     .apply(&[param_path])
-                //                     .as_seq()
-                //                     .unwrap()
-                //                     .length()),
-                //                 // Constrain prev_i bounds..
-                //                 Int::from_u64(ctx, 0).le(&some_idx),
-                //                 some_idx.lt(&some_idx),
-                //                 // segment[i] is a component.
-                //                 types.segment.variants[1]
-                //                     .tester
-                //                     .apply(&[&segments_accessor
-                //                         .apply(&[param_path])
-                //                         .as_seq()
-                //                         .unwrap()
-                //                         .nth(&some_idx)])
-                //                     .as_bool()
-                //                     .unwrap(),
-                //                 // segment[prev_i] is a component.
-                //                 types.segment.variants[1]
-                //                     .tester
-                //                     .apply(&[&segments_accessor
-                //                         .apply(&[param_path])
-                //                         .as_seq()
-                //                         .unwrap()
-                //                         .nth(&some_prev_idx)])
-                //                     .as_bool()
-                //                     .unwrap(),
-                //                 // And all segment in between are separators
-                //                 forall_const(
-                //                     ctx,
-                //                     &[&some_between_idx],
-                //                     &[],
-                //                     &Bool::and(
-                //                         ctx,
-                //                         &[
-                //                             some_prev_idx.lt(&some_between_idx),
-                //                             some_between_idx.lt(&some_idx),
-                //                             types.segment.variants[0]
-                //                                 .tester
-                //                                 .apply(&[&segments_accessor
-                //                                     .apply(&[param_path])
-                //                                     .as_seq()
-                //                                     .unwrap()
-                //                                     .nth(&some_prev_idx)])
-                //                                 .as_bool()
-                //                                 .unwrap(),
-                //                         ],
-                //                     ),
-                //                 ),
-                //                 // Previous segment doesn't maps to a file
-                //                 forall_const(
-                //                     ctx,
-                //                     &[&some_file],
-                //                     &[],
-                //                     &segment_file
-                //                         .apply(&[&some_prev_idx, &some_file])
-                //                         .as_bool()
-                //                         .unwrap()
-                //                         .not(),
-                //                 ),
-                //             ],
-                //         ),
-                //     )
-                //     .implies(
-                //         &types.segment.variants[1].accessors[0]
-                //             .apply(&[&segments_accessor
-                //                 .apply(&[param_path])
-                //                 .as_seq()
-                //                 .unwrap()
-                //                 .nth(&some_idx)])
-                //             .as_string()
-                //             .unwrap()
-                //             ._eq(&z3::ast::String::from_str(ctx, "..").unwrap())
-                //             .not(),
-                //     ),
-                // ));
+            for (filename, file) in dir.children.iter() {
+                let some_file = Dynamic::fresh_const(ctx, "", &types.file.sort);
+                let some_string = z3::ast::String::fresh_const(ctx, "");
+                let some_prev_idx = Int::fresh_const(ctx, "");
+                let some_between_idx = Int::fresh_const(ctx, "");
+
+                clauses.push(forall_const(
+                    ctx,
+                    &[&some_idx],
+                    &[],
+                    &Bool::and(
+                        ctx,
+                        &[
+                            decls
+                                .fd_file
+                                .apply(&[param_fd, &dir.node])
+                                .as_bool()
+                                .unwrap(),
+                            // Constrain i bounds..
+                            Int::from_u64(ctx, 0).le(&some_idx),
+                            some_idx.lt(&segments.length()),
+                            // segment[i] is a component.
+                            types.segment.variants[1]
+                                .tester
+                                .apply(&[&segments.nth(&some_idx)])
+                                .as_bool()
+                                .unwrap(),
+                        ],
+                    )
+                    .implies(&Bool::or(
+                        ctx,
+                        &[
+                            Bool::and(
+                                ctx,
+                                &[
+                                    // segment[i] is `..`
+                                    types.segment.variants[1].accessors[0]
+                                        .apply(&[&segments.nth(&some_idx)])
+                                        .as_string()
+                                        .unwrap()
+                                        ._eq(&z3::ast::String::from_str(ctx, "..").unwrap()),
+                                    exists_const(
+                                        ctx,
+                                        &[&some_file, &some_string],
+                                        &[],
+                                        &Bool::and(
+                                            ctx,
+                                            &[
+                                                segment_file
+                                                    .apply(&[&some_idx, &some_file])
+                                                    .as_bool()
+                                                    .unwrap(),
+                                                decls
+                                                    .children
+                                                    .select(
+                                                        &types.children_mapping.variants[0]
+                                                            .constructor
+                                                            .apply(&[
+                                                                &some_file,
+                                                                &some_string,
+                                                                &dir.node,
+                                                            ]),
+                                                    )
+                                                    .as_bool()
+                                                    .unwrap(),
+                                            ],
+                                        ),
+                                    ),
+                                ],
+                            ),
+                            Bool::and(
+                                ctx,
+                                &[
+                                    types.segment.variants[1].accessors[0]
+                                        .apply(&[&segments.nth(&some_idx)])
+                                        .as_string()
+                                        .unwrap()
+                                        ._eq(&z3::ast::String::from_str(ctx, ".").unwrap()),
+                                    segment_file
+                                        .apply(&[&some_idx, &dir.node])
+                                        .as_bool()
+                                        .unwrap(),
+                                ],
+                            ),
+                            Bool::and(
+                                ctx,
+                                &[
+                                    // segment[i] is the filename
+                                    types.segment.variants[1].accessors[0]
+                                        .apply(&[&segments.nth(&some_idx)])
+                                        .as_string()
+                                        .unwrap()
+                                        ._eq(&z3::ast::String::from_str(ctx, &filename).unwrap()),
+                                    segment_file
+                                        .apply(&[&some_idx, file.node()])
+                                        .as_bool()
+                                        .unwrap(),
+                                ],
+                            ),
+                            // segment[i] is not the filename
+                            types.segment.variants[1].accessors[0]
+                                .apply(&[&segments.nth(&some_idx)])
+                                .as_string()
+                                .unwrap()
+                                ._eq(&z3::ast::String::from_str(ctx, &filename).unwrap())
+                                .not(),
+                        ],
+                    )),
+                ));
+                clauses.push(forall_const(
+                    ctx,
+                    &[&some_idx],
+                    &[],
+                    &exists_const(
+                        ctx,
+                        &[&some_prev_idx],
+                        &[],
+                        &Bool::and(
+                            ctx,
+                            &[
+                                decls
+                                    .fd_file
+                                    .apply(&[param_fd, &dir.node])
+                                    .as_bool()
+                                    .unwrap(),
+                                // Constrain i bounds..
+                                Int::from_u64(ctx, 0).le(&some_idx),
+                                some_idx.lt(&segments.length()),
+                                // Constrain prev_i bounds..
+                                Int::from_u64(ctx, 0).le(&some_prev_idx),
+                                some_prev_idx.lt(&some_idx),
+                                // segment[i] is a component.
+                                types.segment.variants[1]
+                                    .tester
+                                    .apply(&[&segments.nth(&some_idx)])
+                                    .as_bool()
+                                    .unwrap(),
+                                // segment[prev_i] is a component.
+                                types.segment.variants[1]
+                                    .tester
+                                    .apply(&[&segments.nth(&some_prev_idx)])
+                                    .as_bool()
+                                    .unwrap(),
+                                // And all segment in between are separators
+                                forall_const(
+                                    ctx,
+                                    &[&some_between_idx],
+                                    &[],
+                                    &Bool::and(
+                                        ctx,
+                                        &[
+                                            some_prev_idx.lt(&some_between_idx),
+                                            some_between_idx.lt(&some_idx),
+                                            types.segment.variants[0]
+                                                .tester
+                                                .apply(&[&segments.nth(&some_between_idx)])
+                                                .as_bool()
+                                                .unwrap(),
+                                        ],
+                                    ),
+                                ),
+                                // Previous segment doesn't maps to a file
+                                forall_const(
+                                    ctx,
+                                    &[&some_file],
+                                    &[],
+                                    &segment_file
+                                        .apply(&[&some_prev_idx, &some_file])
+                                        .as_bool()
+                                        .unwrap()
+                                        .not(),
+                                ),
+                            ],
+                        ),
+                    )
+                    .implies(&Bool::and(
+                        ctx,
+                        &[
+                            &types.segment.variants[1].accessors[0]
+                                .apply(&[&segments.nth(&some_idx)])
+                                .as_string()
+                                .unwrap()
+                                ._eq(&z3::ast::String::from_str(ctx, "..").unwrap())
+                                .not(),
+                            &types.segment.variants[1].accessors[0]
+                                .apply(&[&segments.nth(&some_idx)])
+                                .as_string()
+                                .unwrap()
+                                ._eq(&z3::ast::String::from_str(ctx, ".").unwrap())
+                                .not(),
+                        ],
+                    )),
+                ));
 
                 // for i in 0..param_path.segments.len() {
                 //     let segment = param_path.segments.get(i).unwrap();
@@ -2843,18 +2848,19 @@ fn no_nonexistent_dir_backtrack<'ctx>(
         }
     }
 
-    // Dynamic::from_ast(&Bool::and(ctx, clauses.as_slice()))
-    Dynamic::from_ast(&Bool::and(ctx, &[Bool::from_bool(ctx, true)]))
+    // Dynamic::from_ast(&Bool::and(ctx, &[Bool::from_bool(ctx, true)]))
+    Dynamic::from_ast(&Bool::and(ctx, clauses.as_slice()))
 }
 
 #[derive(Debug)]
 struct StateDecls<'ctx> {
-    fd_file:   z3::FuncDecl<'ctx>,
-    children:  z3::FuncDecl<'ctx>,
-    preopens:  BTreeMap<ResourceIdx, PreopenFsEncoding<'ctx>>,
-    resources: BTreeMap<ResourceIdx, Dynamic<'ctx>>,
-    params:    BTreeMap<String, ParamDecl<'ctx>>,
-    to_solves: ToSolves<'ctx>,
+    fd_file_default: z3::FuncDecl<'ctx>,
+    fd_file:         z3::FuncDecl<'ctx>,
+    children:        Array<'ctx>,
+    preopens:        BTreeMap<ResourceIdx, PreopenFsEncoding<'ctx>>,
+    resources:       BTreeMap<ResourceIdx, Dynamic<'ctx>>,
+    params:          BTreeMap<String, ParamDecl<'ctx>>,
+    to_solves:       ToSolves<'ctx>,
 }
 
 #[derive(Debug)]
@@ -3009,7 +3015,11 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
         ));
 
         loop {
-            if solver.check() != z3::SatResult::Sat || nsolutions == 10 {
+            // if std::thread::current().name().unwrap() == "node" {
+            //     println!("whoa---\n{}", solver.to_smt2());
+            // }
+
+            if solver.check() != z3::SatResult::Sat || nsolutions == 4 {
                 break;
             }
 
@@ -3042,6 +3052,7 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
 
             solutions.push(model);
             nsolutions += 1;
+            solver.push();
             solver.assert(&Bool::or(self.z3_ctx, clauses.as_slice()));
         }
 

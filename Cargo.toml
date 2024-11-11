@@ -32,8 +32,8 @@ tracing.workspace = true
 tracing-error = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 walkdir = "2"
-z3 = { git = "https://github.com/yagehu/z3.rs.git", branch = "wazzi" }
-z3-sys = { git = "https://github.com/yagehu/z3.rs.git", branch = "wazzi" }
+z3 = { git = "https://github.com/yagehu/z3.rs.git", branch = "wazzi", features = ["bundled"] }
+z3-sys = { git = "https://github.com/yagehu/z3.rs.git", branch = "wazzi", features = ["bundled"] }
 
 [build-dependencies]
 
