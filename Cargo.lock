@@ -294,15 +294,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1462739cb27611015575c0c11df5df7601141071f07518d56fcc1be504cbec97"
 
 [[package]]
-name = "cmake"
-version = "0.1.51"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb1e43aa7fd152b1f968787f7dbcdeb306d1867ff373c69955211876c053f91a"
-dependencies = [
- "cc",
-]
-
-[[package]]
 name = "color-eyre"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1808,6 +1799,5 @@ version = "0.8.1"
 source = "git+https://github.com/yagehu/z3.rs.git?branch=wazzi#9bdbbd85a3dc59519c3c65b9324bf0674556d25f"
 dependencies = [
  "bindgen",
- "cmake",
  "pkg-config",
 ]

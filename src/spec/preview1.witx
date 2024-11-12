@@ -978,7 +978,7 @@
         ; non-existent directory, the next segment shall not be `..`.
         ; This excludes uninteresting path normalization differences between
         ; Windows and Linux.
-        ;(@no-nonexistent-dir-backtrack $fd $path)
+        (@no-nonexistent-dir-backtrack $fd $path)
       )
     )
   )
@@ -994,6 +994,8 @@
     (result $error (expected $fd (error $errno)))
     (@input
       (@and
+        (@flags.get (param $oflags) $creat)
+        
         ; In general, the behavior of O_EXCL is undefined
         ; if it is used without O_CREAT.
         (@not (@and
@@ -1011,7 +1013,7 @@
         ; non-existent directory, the next segment shall not be `..`.
         ; This excludes uninteresting path normalization differences between
         ; Windows and Linux.
-        ;(@no-nonexistent-dir-backtrack $fd $path)
+        (@no-nonexistent-dir-backtrack $fd $path)
 
         (@not (@flags.get (param $fdflags) $dsync))
         (@not (@flags.get (param $fdflags) $rsync))
@@ -1101,6 +1103,25 @@
           (@value.eq (@record.field (result $ok') $path) (param $path))
           (@value.eq (@int.const (@record.field (result $ok') $parent)) (@resource-id $fd))
         )
+      )
+    )
+  )
+
+  ;;; Remove a directory.
+  ;;; Return `errno::notempty` if the directory is not empty.
+  ;;; Note: This is similar to `unlinkat(fd, path, AT_REMOVEDIR)` in POSIX.
+  (@interface func (export "path_remove_directory")
+    (param $fd $fd)
+    ;;; The path to a directory to remove.
+    (param $path $path)
+    (result $error (expected (error $errno)))
+    (@input
+      (@and
+        ; When generating path segments, if we generate one corresponding to a
+        ; non-existent directory, the next segment shall not be `..`.
+        ; This excludes uninteresting path normalization differences between
+        ; Windows and Linux.
+        (@no-nonexistent-dir-backtrack $fd $path)
       )
     )
   )
