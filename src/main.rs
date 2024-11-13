@@ -383,19 +383,6 @@ impl<'s> Fuzzer<'s> {
                                 let buf_ptr = buf_ptr.0;
 
                                 loop {
-                                    let env = env.clone();
-                                    let (resume_mu, resume_cond) = &*resume_pair;
-                                    let resume_state = resume_mu.lock().unwrap();
-                                    let resume_gen = resume_state.1;
-
-                                    drop(
-                                        resume_cond
-                                            .wait_while(resume_state, |(resume, gen)| {
-                                                !*resume && *gen == resume_gen
-                                            })
-                                            .unwrap(),
-                                    );
-
                                     if diff_cancel.load(atomic::Ordering::SeqCst) {
                                         let f = fs::OpenOptions::new()
                                             .create_new(true)
@@ -412,6 +399,19 @@ impl<'s> Fuzzer<'s> {
                                     if time_cancel.load(atomic::Ordering::SeqCst) {
                                         return Err(FuzzError::Time);
                                     }
+
+                                    let env = env.clone();
+                                    let (resume_mu, resume_cond) = &*resume_pair;
+                                    let resume_state = resume_mu.lock().unwrap();
+                                    let resume_gen = resume_state.1;
+
+                                    drop(
+                                        resume_cond
+                                            .wait_while(resume_state, |(resume, gen)| {
+                                                !*resume && *gen == resume_gen
+                                            })
+                                            .unwrap(),
+                                    );
 
                                     let mut strategy =
                                         strategy.into_call_strategy(&mut u, &ctx, &z3_ctx);

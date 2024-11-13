@@ -800,6 +800,46 @@
     )
   )
 
+  ;;; Adjust the size of an open file. If this increases the file's size, the extra bytes are filled with zeros.
+  ;;; Note: This is similar to `ftruncate` in POSIX.
+  (@interface func (export "fd_filestat_set_size")
+    (param $fd $fd)
+    ;;; The desired file size.
+    (param $size $filesize)
+    (result $error (expected (error $errno)))
+    (@input
+      (@and
+        ; Must be a regular file.
+        (@value.eq
+          (@record.field (param $fd) $type)
+          (@variant.const $filetype $regular_file)
+        )
+      )
+    )
+  )
+
+  ;;; Adjust the timestamps of an open file or directory.
+  ;;; Note: This is similar to `futimens` in POSIX.
+  (@interface func (export "fd_filestat_set_times")
+    (param $fd $fd)
+    ;;; The desired values of the data access timestamp.
+    (param $atim $timestamp)
+    ;;; The desired values of the data modification timestamp.
+    (param $mtim $timestamp)
+    ;;; A bitmask indicating which timestamps to adjust.
+    (param $fst_flags $fstflags)
+    (result $error (expected (error $errno)))
+    (@input
+      (@and
+        ; Must not be the base directory.
+        (@not (@value.eq
+          (@int.const (@record.field (param $fd) $parent))
+          0
+        ))
+      )
+    )
+  )
+
   ;;; Read from a file descriptor.
   ;;; Note: This is similar to `readv` in POSIX.
   (@interface func (export "fd_read")
@@ -994,8 +1034,6 @@
     (result $error (expected $fd (error $errno)))
     (@input
       (@and
-        (@flags.get (param $oflags) $creat)
-        
         ; In general, the behavior of O_EXCL is undefined
         ; if it is used without O_CREAT.
         (@not (@and
@@ -1013,7 +1051,7 @@
         ; non-existent directory, the next segment shall not be `..`.
         ; This excludes uninteresting path normalization differences between
         ; Windows and Linux.
-        (@no-nonexistent-dir-backtrack $fd $path)
+        ;(@no-nonexistent-dir-backtrack $fd $path)
 
         (@not (@flags.get (param $fdflags) $dsync))
         (@not (@flags.get (param $fdflags) $rsync))
@@ -1110,21 +1148,21 @@
   ;;; Remove a directory.
   ;;; Return `errno::notempty` if the directory is not empty.
   ;;; Note: This is similar to `unlinkat(fd, path, AT_REMOVEDIR)` in POSIX.
-  (@interface func (export "path_remove_directory")
-    (param $fd $fd)
-    ;;; The path to a directory to remove.
-    (param $path $path)
-    (result $error (expected (error $errno)))
-    (@input
-      (@and
-        ; When generating path segments, if we generate one corresponding to a
-        ; non-existent directory, the next segment shall not be `..`.
-        ; This excludes uninteresting path normalization differences between
-        ; Windows and Linux.
-        (@no-nonexistent-dir-backtrack $fd $path)
-      )
-    )
-  )
+  ;(@interface func (export "path_remove_directory")
+  ;  (param $fd $fd)
+  ;  ;;; The path to a directory to remove.
+  ;  (param $path $path)
+  ;  (result $error (expected (error $errno)))
+  ;  (@input
+  ;    (@and
+  ;      ; When generating path segments, if we generate one corresponding to a
+  ;      ; non-existent directory, the next segment shall not be `..`.
+  ;      ; This excludes uninteresting path normalization differences between
+  ;      ; Windows and Linux.
+  ;      ;(@no-nonexistent-dir-backtrack $fd $path)
+  ;    )
+  ;  )
+  ;)
 
   ;;; Create a symbolic link.
   ;;; Note: This is similar to `symlinkat` in POSIX.
