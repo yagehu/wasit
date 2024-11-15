@@ -166,7 +166,7 @@ impl InitializeState for Wasmer<'_> {
         executor: &RunningExecutor,
         mapped_dirs: Vec<MappedDir>,
     ) -> Result<EnvironmentInitializer, eyre::Error> {
-        const VIRTUAL_ROOT_FD: u32 = 4;
+        const VIRTUAL_ROOT_FD: u32 = 5;
 
         let mut preopens: Vec<_> = Default::default();
         let rights_base = spec
@@ -178,8 +178,9 @@ impl InitializeState for Wasmer<'_> {
                 [
                     "fd_read",
                     "fd_seek",
-                    "fd_fdstat_set_flags",
                     "fd_tell",
+                    "fd_fdstat_set_flags",
+                    "fd_write",
                     "path_create_directory",
                     "path_create_file",
                     "path_link_target",

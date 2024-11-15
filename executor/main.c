@@ -562,7 +562,7 @@ static void * value_ptr_new(const Value * value) {
         }
         case VALUE__WHICH_STRING: {
             ptr = calloc(1, sizeof(char *) + sizeof(uint32_t));
-            * (uint32_t *) ((char **) ptr + 1) = value->string.len;
+            * (uint32_t *) ((char **) ptr)[1] = value->string.len;
 
             break;
         }

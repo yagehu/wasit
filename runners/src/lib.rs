@@ -260,8 +260,8 @@ impl WasiRunner for Wasmtime<'_> {
             let mut mapdir = OsString::new();
 
             mapdir.push(&dir.host_path);
-            mapdir.push("::");
-            mapdir.push(&dir.name);
+            // mapdir.push("::");
+            // mapdir.push(&dir.name);
             command.arg("--dir").arg(mapdir);
         }
 

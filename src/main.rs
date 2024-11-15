@@ -40,7 +40,7 @@ use wazzi::{
     StatefulStrategy,
     StatelessStrategy,
 };
-use wazzi_runners::{MappedDir, Node, RunningExecutor, Wamr, Wasmedge, Wasmtime, Wazero};
+use wazzi_runners::{MappedDir, Node, RunningExecutor, Wamr, Wasmedge, Wasmer, Wasmtime, Wazero};
 use wazzi_store::FuzzStore;
 
 #[derive(Parser, Debug)]
@@ -131,10 +131,10 @@ fn main() -> Result<(), eyre::Error> {
                 "wasmedge",
                 Box::new(Wasmedge::default()) as Box<dyn InitializeState>,
             ),
-            // (
-            //     "wasmer",
-            //     Box::new(Wasmer::default()) as Box<dyn InitializeState>,
-            // ),
+            (
+                "wasmer",
+                Box::new(Wasmer::default()) as Box<dyn InitializeState>,
+            ),
             (
                 "wasmtime",
                 Box::new(Wasmtime::default()) as Box<dyn InitializeState>,
@@ -274,7 +274,7 @@ impl<'s> Fuzzer<'s> {
             let executor = RunningExecutor::from_wasi_runner(
                 runtime.as_ref(),
                 Path::new("target")
-                    .join("debug")
+                    .join("release")
                     .join("wazzi-executor.wasm")
                     .canonicalize()
                     .unwrap()
