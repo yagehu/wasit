@@ -663,7 +663,7 @@ impl State {
                                             //             .apply(&[segment])
                                             //             .as_string()
                                             //             .unwra
-                                                        
+
                                             //            p()
                                             //             ._eq(
                                             //                 &z3::ast::String::from_str(ctx, "a")
@@ -1162,15 +1162,19 @@ impl State {
                 )
             },
             | Term::IntGt(t) => {
-                let (lhs, _lhs_type) = self.term_to_z3_ast(
+                let (lhs, lhs_type) = self.term_to_z3_ast(
                     ctx, env, eval_ctx, spec, types, decls, decls2, &t.lhs, function, params,
                 );
-                let (rhs, _rhs_type) = self.term_to_z3_ast(
+                let (rhs, rhs_type) = self.term_to_z3_ast(
                     ctx, env, eval_ctx, spec, types, decls, decls2, &t.rhs, function, params,
                 );
 
                 (
-                    Dynamic::from_ast(&lhs.as_int().unwrap().gt(&rhs.as_int().unwrap())),
+                    Dynamic::from_ast(
+                        &lhs_type
+                            .unwrap_ast_as_int(types, &lhs)
+                            .gt(&rhs_type.unwrap_ast_as_int(types, &rhs)),
+                    ),
                     Type::Wazzi(WazziType::Bool),
                 )
             },

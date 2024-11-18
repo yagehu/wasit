@@ -43,6 +43,7 @@ fn main() -> Result<(), eyre::Error> {
     let mut max_trace_len_idx = 0;
     let mut runtimes = None;
     let mut total_max_calls = 0;
+    let mut max_resource_depth = 0;
     let mut total_max_resource_depth = 0;
 
     for (path, run_idx) in entries {
@@ -134,7 +135,7 @@ fn main() -> Result<(), eyre::Error> {
         }
 
         let mut most_calls = 0;
-        let mut max_resource_depth = 0;
+        let mut max_resource_depth_ = 0;
 
         fn tree_depth(
             graph: &DiGraph<Node, Edge>,
@@ -171,8 +172,8 @@ fn main() -> Result<(), eyre::Error> {
         }
 
         for &init_resource in &init_resources {
-            max_resource_depth =
-                max_resource_depth.max(tree_depth(&graph, &resource_node_map, init_resource));
+            max_resource_depth_ =
+                max_resource_depth_.max(tree_depth(&graph, &resource_node_map, init_resource));
         }
 
         for (resource_idx, node_idx) in resource_node_map {
@@ -199,7 +200,8 @@ fn main() -> Result<(), eyre::Error> {
 
         max_trace_len = max_trace_len.max(trace_len);
         total_max_calls += most_calls;
-        total_max_resource_depth += max_resource_depth;
+        max_resource_depth = max_resource_depth.max(max_resource_depth_);
+        total_max_resource_depth += max_resource_depth_;
         runs += 1;
     }
 
@@ -214,6 +216,7 @@ fn main() -> Result<(), eyre::Error> {
         "average max calls involving one resource: {:2}",
         total_max_calls as f64 / runs as f64
     );
+    println!("max resource depth: {:.2}", max_resource_depth,);
     println!(
         "average max resource depth {:.2}",
         total_max_resource_depth as f64 / runs as f64

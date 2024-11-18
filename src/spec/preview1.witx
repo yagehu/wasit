@@ -777,6 +777,77 @@
 )
 
 (module $wasi_snapshot_preview1
+  ;;; Provide file advisory information on a file descriptor.
+  ;;; Note: This is similar to `posix_fadvise` in POSIX.
+  (@interface func (export "fd_advise")
+    (param $fd $fd)
+    ;;; The offset within the file to which the advisory applies.
+    (param $offset $filesize)
+    ;;; The length of the region to which the advisory applies.
+    (param $len $filesize)
+    ;;; The advice.
+    (param $advice $advice)
+    (result $error (expected (error $errno)))
+    (@input
+      (@and
+        ; Must be a regular file.
+        (@value.eq
+          (@record.field (param $fd) $type)
+          (@variant.const $filetype $regular_file)
+        )
+      )
+    )
+  )
+
+
+  ;;; Force the allocation of space in a file.
+  ;;; Note: This is similar to `posix_fallocate` in POSIX.
+  ; Removed in p2. Disabled.
+  ;(@interface func (export "fd_allocate")
+  ;  (param $fd $fd)
+  ;  ;;; The offset at which to start the allocation.
+  ;  (param $offset $filesize)
+  ;  ;;; The length of the area that is allocated.
+  ;  (param $len $filesize)
+  ;  (result $error (expected (error $errno)))
+  ;  (@input
+  ;    (@and
+  ;      ; Must be a regular file.
+  ;      (@value.eq
+  ;        (@record.field (param $fd) $type)
+  ;        (@variant.const $filetype $regular_file)
+  ;      )
+
+  ;      ; `$len` should not be zero.
+  ;      (@int.gt (param $len) 0)
+  ;    )
+  ;  )
+  ;)
+
+  ;;; Synchronize the data of a file to disk.
+  ;;; Note: This is similar to `fdatasync` in POSIX.
+  (@interface func (export "fd_datasync")
+    (param $fd $fd)
+    (result $error (expected (error $errno)))
+    (@input
+      (@and
+        ; Must be a regular file.
+        (@value.eq
+          (@record.field (param $fd) $type)
+          (@variant.const $filetype $regular_file)
+        )
+      )
+    )
+  )
+
+  ;;; Get the attributes of a file descriptor.
+  ;;; Note: This returns similar flags to `fcntl(fd, F_GETFL)` in POSIX, as well as additional fields.
+  (@interface func (export "fd_fdstat_get")
+    (param $fd $fd)
+    ;;; The buffer where the file descriptor's attributes are stored.
+    (result $error (expected $fdstat (error $errno)))
+  )
+
   ;;; Adjust the flags associated with a file descriptor.
   ;;; Note: This is similar to `fcntl(fd, F_SETFL, flags)` in POSIX.
   (@interface func (export "fd_fdstat_set_flags")
@@ -972,30 +1043,6 @@
           )
         ))
       )
-      (@output
-        ;; Imperative
-        ;(@record.field.set (param $fd) $offset
-        ;  (@int.add
-        ;    (@record.field (param $fd) $offset)
-        ;    (result $ok)
-        ;  )
-        ;)
-        
-        ;; Functional
-        ;(@and
-        ;  (@value.eq
-        ;    (param $fd')
-        ;    (@record.const
-        ;      (@int.add
-        ;        (result $ok)
-        ;        (@record.field (param $fd) $offset)
-        ;      )
-        ;      (@record.field (param $fd) $fdflags)
-        ;      (@record.field (param $fd) $filetype)
-        ;    )
-        ;  )
-        ;)
-      )
     )
   )
 
@@ -1018,7 +1065,7 @@
         ; non-existent directory, the next segment shall not be `..`.
         ; This excludes uninteresting path normalization differences between
         ; Windows and Linux.
-        (@no-nonexistent-dir-backtrack $fd $path)
+        ;(@no-nonexistent-dir-backtrack $fd $path)
       )
     )
   )
@@ -1053,6 +1100,11 @@
         ; Windows and Linux.
         ;(@no-nonexistent-dir-backtrack $fd $path)
 
+        (@not (@and
+          (@flags.get (param $oflags) $directory)
+          (@flags.get (param $fs_rights_base) $fd_write)
+        ))
+
         (@not (@flags.get (param $fdflags) $dsync))
         (@not (@flags.get (param $fdflags) $rsync))
         (@not (@flags.get (param $fdflags) $sync))
@@ -1062,7 +1114,7 @@
         (@flags.get (param $fs_rights_base) $fd_fdstat_set_flags)
         (@flags.get (param $fs_rights_base) $fd_sync)
         (@flags.get (param $fs_rights_base) $fd_tell)
-        (@flags.get (param $fs_rights_base) $fd_write)
+        ;(@flags.get (param $fs_rights_base) $fd_write)
         (@flags.get (param $fs_rights_base) $fd_advise)
         (@flags.get (param $fs_rights_base) $fd_allocate)
         (@flags.get (param $fs_rights_base) $path_create_directory)

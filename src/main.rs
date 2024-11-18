@@ -131,10 +131,10 @@ fn main() -> Result<(), eyre::Error> {
                 "wasmedge",
                 Box::new(Wasmedge::default()) as Box<dyn InitializeState>,
             ),
-            (
-                "wasmer",
-                Box::new(Wasmer::default()) as Box<dyn InitializeState>,
-            ),
+            // (
+            //     "wasmer",
+            //     Box::new(Wasmer::default()) as Box<dyn InitializeState>,
+            // ),
             (
                 "wasmtime",
                 Box::new(Wasmtime::default()) as Box<dyn InitializeState>,
@@ -412,6 +412,23 @@ impl<'s> Fuzzer<'s> {
                                             })
                                             .unwrap(),
                                     );
+
+                                    if diff_cancel.load(atomic::Ordering::SeqCst) {
+                                        let f = fs::OpenOptions::new()
+                                            .create_new(true)
+                                            .write(true)
+                                            .open(&store.path.join("env.json"))
+                                            .unwrap();
+
+                                        serde_json::to_writer_pretty(f, &*env.read().unwrap())
+                                            .unwrap();
+
+                                        return Err(FuzzError::DiffFound);
+                                    }
+
+                                    if time_cancel.load(atomic::Ordering::SeqCst) {
+                                        return Err(FuzzError::Time);
+                                    }
 
                                     let mut strategy =
                                         strategy.into_call_strategy(&mut u, &ctx, &z3_ctx);
