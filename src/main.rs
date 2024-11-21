@@ -119,18 +119,18 @@ fn main() -> Result<(), eyre::Error> {
         cmd.strategy,
         &mut store,
         [
-            (
-                "node",
-                Box::new(Node::default()) as Box<dyn InitializeState>,
-            ),
+            // (
+            //     "node",
+            //     Box::new(Node::default()) as Box<dyn InitializeState>,
+            // ),
             (
                 "wamr",
                 Box::new(Wamr::default()) as Box<dyn InitializeState>,
             ),
-            (
-                "wasmedge",
-                Box::new(Wasmedge::default()) as Box<dyn InitializeState>,
-            ),
+            // (
+            //     "wasmedge",
+            //     Box::new(Wasmedge::default()) as Box<dyn InitializeState>,
+            // ),
             // (
             //     "wasmer",
             //     Box::new(Wasmer::default()) as Box<dyn InitializeState>,
@@ -139,10 +139,10 @@ fn main() -> Result<(), eyre::Error> {
                 "wasmtime",
                 Box::new(Wasmtime::default()) as Box<dyn InitializeState>,
             ),
-            (
-                "wazero",
-                Box::new(Wazero::default()) as Box<dyn InitializeState>,
-            ),
+            // (
+            //     "wazero",
+            //     Box::new(Wazero::default()) as Box<dyn InitializeState>,
+            // ),
         ],
         cmd.duration,
     );

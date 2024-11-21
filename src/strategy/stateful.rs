@@ -375,11 +375,12 @@ impl State {
                 match tdef.name.as_str() {
                     | "path" => {
                         let len = match &mut aop {
-                            | ArbitraryOrPresolved::Arbitrary(u) => u.choose_index(8).unwrap() + 1,
+                            | ArbitraryOrPresolved::Arbitrary(u) => u.choose(&[0, 2]).unwrap() + 1,
                             | ArbitraryOrPresolved::Presolved(lens) => {
                                 *lens.get(param_name).unwrap()
                             },
                         };
+                        let len = if len == 2 { 1 } else { len };
 
                         (
                             param_name.to_owned(),
@@ -705,12 +706,12 @@ impl State {
                 clauses.push(Bool::and(
                     ctx,
                     &[
-                        separator
-                            .tester
-                            .apply(&[segment])
-                            .as_bool()
-                            .unwrap()
-                            .implies(&separator.tester.apply(&[prev]).as_bool().unwrap().not()),
+                        // separator
+                        //     .tester
+                        //     .apply(&[segment])
+                        //     .as_bool()
+                        //     .unwrap()
+                        //     .implies(&separator.tester.apply(&[prev]).as_bool().unwrap().not()),
                         component
                             .tester
                             .apply(&[segment])
@@ -720,6 +721,28 @@ impl State {
                     ],
                 ));
             }
+        }
+
+        // Final segment should not be a separator.
+        for path in paths.iter() {
+            clauses.push(Bool::and(
+                ctx,
+                &[separator
+                    .tester
+                    .apply(&[path.first().unwrap()])
+                    .as_bool()
+                    .unwrap()
+                    .not()],
+            ));
+            clauses.push(Bool::and(
+                ctx,
+                &[separator
+                    .tester
+                    .apply(&[path.last().unwrap()])
+                    .as_bool()
+                    .unwrap()
+                    .not()],
+            ));
         }
 
         // Constrain non-resource param values.
@@ -1392,7 +1415,7 @@ impl State {
                 let file = FileEncodingRef::Directory(&preopen.root);
                 let mut files = vec![file];
 
-                for path in paths.iter() {
+                for path in paths.iter().rev() {
                     let path = Path::new(path);
 
                     for component in path.components() {
@@ -1407,9 +1430,12 @@ impl State {
                             },
                             | "." => (),
                             | filename => match f {
-                                | FileEncodingRef::Directory(d) => {
-                                    files.push(d.children.get(filename).unwrap().as_ref())
-                                },
+                                | FileEncodingRef::Directory(d) => files.push(
+                                    d.children
+                                        .get(filename)
+                                        .expect(&format!("{filename} {:#?}", d.children))
+                                        .as_ref(),
+                                ),
                                 | FileEncodingRef::RegularFile(_f) => unreachable!(),
                             },
                         }
@@ -1490,14 +1516,15 @@ impl State {
             | WasiType::U8 => WasiValue::U8(
                 model
                     .eval(
-                        &datatype.variants[0].accessors[0].apply(&[decl.node()]),
+                        &datatype.variants[0].accessors[0]
+                            .apply(&[decl.node()])
+                            .as_int()
+                            .unwrap(),
                         true,
                     )
                     .unwrap()
-                    .as_int()
-                    .unwrap()
-                    .as_u64()
-                    .unwrap() as u8,
+                    .as_i64()
+                    .expect(&format!("{:#?}", decl)) as u8,
             ),
             | WasiType::U16 => todo!(),
             | WasiType::U32 => {
@@ -1510,7 +1537,7 @@ impl State {
                     .as_int()
                     .unwrap();
 
-                WasiValue::U32(i.as_u64().unwrap() as u32)
+                WasiValue::U32(i.as_i64().unwrap() as u32)
             },
             | WasiType::U64 => WasiValue::U64(
                 model

@@ -82,11 +82,16 @@ def main [] {
 
     mut activate = '$env.path = (
     $env.path'
+    mut activate_zsh = 'path=('
 
     for p in $paths {
         $activate = $"($activate)\n    | prepend ($p)"
+        $activate_zsh = $"($activate)\n  ($p)"
     }
 
     $activate = $"($activate)\n)\n"
+    $activate_zsh = $"($activate_zsh)\n)\nexport PATH"
+
     $activate out> $source_path
+    $activate_zsh out> $"($source_path).zsh"
 }
