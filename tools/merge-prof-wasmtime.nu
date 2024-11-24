@@ -28,7 +28,7 @@ def main [path: string] {
             --ignore-filename-regex='wasmtime/crates/environ'
             --ignore-filename-regex='wasmtime/crates/slab'
             --ignore-filename-regex='wasmtime/crates/wasmtime'
-            --ignore-filename-regex='wasmtime/crates/wasi-common'
+            # --ignore-filename-regex='wasmtime/crates/wasi-common'
             --ignore-filename-regex='wasmtime/crates/wasi-config'
             --ignore-filename-regex='wasmtime/crates/wasi-nn'
             --ignore-filename-regex='wasmtime/crates/wasi-threads'
