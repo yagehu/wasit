@@ -4,19 +4,21 @@ def main [path: string, runtime: string] {
     let cov_command = match $runtime {
         "wamr" => wamr_cov,
         "wasmtime" => wasmtime_cov,
+        "wasmtime-wasi" => wasmtime_wasi_cov,
         _ => ( error make { msg: $"unknown runtime ($runtime)" } )
     }
+    let rt = $cov_command.runtime
     let llvm_prefix = $env.LLVM | default "/usr/local"
     let llvm_profdata = [$llvm_prefix, "bin", "llvm-profdata"] | path join
     let llvm_cov = [$llvm_prefix, "bin", "llvm-cov"] | path join
     let prof_raws = glob $"($path)/*"
         | sort
-        | each { |run| [$run, "runtimes", $runtime, "**", "*.profraw"] | path join }
+        | each { |run| [$run, "runtimes", $rt, "**", "*.profraw"] | path join }
         | each { |p| glob $p }
         | flatten
-        | save --force $"($runtime)-profraws.txt";
-    let profdata = $"($runtime).profdata"
-    ^$"($llvm_profdata)" merge -sparse -o $profdata $"--input-files=($runtime)-profraws.txt"
+        | save --force $"($rt)-profraws.txt";
+    let profdata = $"($rt).profdata"
+    ^$"($llvm_profdata)" merge -sparse -o $profdata $"--input-files=($rt)-profraws.txt"
 
     (
         ^$"($llvm_cov)" report
@@ -32,6 +34,7 @@ def wamr_cov [] {
     let os = (uname | get kernel-name | str downcase)
 
     {
+        runtime: "wamr",
         target: $"runtimes/wasm-micro-runtime/product-mini/platforms/($os)/build/iwasm",
         options: [
         ]
@@ -40,6 +43,17 @@ def wamr_cov [] {
 
 def wasmtime_cov [] {
     {
+        runtime: "wasmtime",
+        target: "runtimes/wasmtime/target/release/wasmtime",
+        options: [
+            "-Xdemangler=rustfilt"
+        ]
+    }
+}
+
+def wasmtime_wasi_cov [] {
+    {
+        runtime: "wasmtime",
         target: "runtimes/wasmtime/target/release/wasmtime",
         options: [
             "-Xdemangler=rustfilt"
