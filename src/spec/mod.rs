@@ -57,8 +57,8 @@ impl Spec {
         }
     }
 
-    pub fn preview1() -> Result<Self, eyre::Error> {
-        witx::preview1()
+    pub fn preview1(s: &str) -> Result<Self, eyre::Error> {
+        witx::preview1(s)
     }
 
     fn insert_type_def(&mut self, name: String, wasi: WasiType, state: Option<WasiType>) {

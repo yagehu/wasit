@@ -29,11 +29,9 @@ use super::{
 #[grammar = "spec/witx.pest"]
 struct Parser;
 
-pub(super) fn preview1() -> Result<Spec, eyre::Error> {
-    const DOC: &str = include_str!("preview1.witx");
-
+pub(super) fn preview1(s: &str) -> Result<Spec, eyre::Error> {
     let mut spec = Spec::new();
-    let doc = Parser::parse(Rule::document, DOC)
+    let doc = Parser::parse(Rule::document, s)
         .wrap_err("failed to parse document")?
         .next()
         .unwrap();
@@ -459,14 +457,4 @@ fn preview1_int_repr(pair: Pair<'_, Rule>) -> Result<IntRepr, eyre::Error> {
         | Rule::r#u64 => IntRepr::U64,
         | _ => return Err(err!("unknown int repr {:?}", pair)),
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ok() {
-        let _spec = preview1().unwrap();
-    }
 }

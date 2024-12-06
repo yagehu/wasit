@@ -16,6 +16,7 @@ clap = { version = "4", features = ["derive"] }
 color-eyre.workspace = true
 eyre.workspace = true
 humantime = "2"
+humantime-serde = "1"
 idxspace.workspace = true
 itertools = "0.12"
 memmap = "0.7.0"
@@ -26,6 +27,7 @@ petgraph = "0.6"
 rand = "0.8"
 serde.workspace = true
 serde_json.workspace = true
+serde_yml = "0.0.12"
 tempfile.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
@@ -50,6 +52,7 @@ publish = false
 [workspace]
 resolver = "2"
 members = [
+    "collect",
     "compile-time",
     "executor",
     "executor/pb/c",

@@ -25,6 +25,7 @@ use eyre::{eyre as err, Context as _};
 use itertools::{EitherOrBoth, Itertools as _};
 use memmap::MmapOptions;
 use rand::{thread_rng, RngCore};
+use serde::{Deserialize, Serialize};
 use tracing::level_filters::LevelFilter;
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{layer::SubscriberExt as _, EnvFilter};
@@ -45,23 +46,26 @@ use wazzi_store::FuzzStore;
 
 #[derive(Parser, Debug)]
 struct Cmd {
-    #[arg(long)]
-    data: Option<PathBuf>,
+    // #[arg(long)]
+    // data: Option<PathBuf>,
 
-    #[arg(long, value_enum, default_value_t = Strategy::Stateful)]
-    strategy: Strategy,
+    // #[arg(long, value_enum, default_value_t = Strategy::Stateful)]
+    // strategy: Strategy,
 
-    #[arg(long)]
-    max_epochs: Option<usize>,
+    // #[arg(long)]
+    // max_epochs: Option<usize>,
 
-    #[arg(long, value_parser = humantime::parse_duration)]
-    duration: Option<Duration>,
+    // #[arg(long, value_parser = humantime::parse_duration)]
+    // duration: Option<Duration>,
+    #[arg()]
+    config: PathBuf,
 
     #[arg()]
     path: PathBuf,
 }
 
-#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+#[derive(clap::ValueEnum, Serialize, Deserialize, PartialEq, Eq, Clone, Copy, Debug)]
+#[serde(rename_all = "kebab-case")]
 enum Strategy {
     Stateful,
     Stateless,
@@ -114,99 +118,97 @@ fn main() -> Result<(), eyre::Error> {
     }));
 
     let cmd = Cmd::parse();
+    let config: FuzzConfig = serde_yml::from_reader(
+        fs::OpenOptions::new()
+            .read(true)
+            .open(&cmd.config)
+            .wrap_err("failed to read fuzz config")?,
+    )
+    .wrap_err("failed to deserialize fuzz config")?;
     let mut store = FuzzStore::new(&cmd.path).wrap_err("failed to init fuzz store")?;
-    let mut fuzzer = Fuzzer::new(
-        cmd.strategy,
-        &mut store,
-        [
-            // (
-            //     "node",
-            //     Box::new(Node::default()) as Box<dyn InitializeState>,
-            // ),
-            (
-                "wamr",
-                Box::new(Wamr::default()) as Box<dyn InitializeState>,
-            ),
-            // (
-            //     "wasmedge",
-            //     Box::new(Wasmedge::default()) as Box<dyn InitializeState>,
-            // ),
-            // (
-            //     "wasmer",
-            //     Box::new(Wasmer::default()) as Box<dyn InitializeState>,
-            // ),
-            (
-                "wasmtime",
-                Box::new(Wasmtime::default()) as Box<dyn InitializeState>,
-            ),
-            // (
-            //     "wazero",
-            //     Box::new(Wazero::default()) as Box<dyn InitializeState>,
-            // ),
-        ],
-        cmd.duration,
-    );
-    let data = cmd
-        .data
-        .as_ref()
-        .map(|path| fs::read(path))
-        .transpose()
-        .wrap_err("failed to read data")?;
+    let mut runtimes = Vec::with_capacity(config.runtimes.len());
 
-    fuzzer.fuzz_loop(data, cmd.max_epochs)?;
+    for runtime in config.runtimes {
+        let rt = match runtime.name.as_str() {
+            | "node" => Box::new(Node::default()) as Box<dyn InitializeState>,
+            | "wamr" => Box::new(Wamr::default()) as Box<dyn InitializeState>,
+            | "wasmedge" => Box::new(Wasmedge::default()) as Box<dyn InitializeState>,
+            | "wasmer" => Box::new(Wasmer::default()) as Box<dyn InitializeState>,
+            | "wasmtime" => Box::new(Wasmtime::default()) as Box<dyn InitializeState>,
+            | "wazero" => Box::new(Wazero::default()) as Box<dyn InitializeState>,
+            | name @ _ => return Err(err!("unknown runtime {name}")),
+        };
+
+        runtimes.push((runtime.name, rt));
+    }
+
+    let mut fuzzer = Fuzzer::new(
+        fs::read_to_string(config.spec).wrap_err("failed to read spec file")?,
+        config.strategy,
+        &mut store,
+        runtimes,
+    );
+
+    fuzzer.fuzz_loop(config.limit)?;
 
     Ok(())
 }
 
 #[derive(Debug)]
 struct Fuzzer<'s> {
+    spec:     String,
     strategy: Strategy,
     store:    &'s mut FuzzStore,
-    runtimes: Vec<(&'static str, Box<dyn InitializeState>)>,
-    duration: Option<Duration>,
+    runtimes: Vec<(String, Box<dyn InitializeState>)>,
 }
 
 impl<'s> Fuzzer<'s> {
     pub fn new(
+        spec: String,
         strategy: Strategy,
         store: &'s mut FuzzStore,
-        runtimes: impl IntoIterator<Item = (&'static str, Box<dyn InitializeState>)>,
-        duration: Option<Duration>,
+        runtimes: impl IntoIterator<Item = (String, Box<dyn InitializeState>)>,
     ) -> Self {
         Self {
+            spec,
             strategy,
             store,
             runtimes: runtimes.into_iter().collect(),
-            duration,
         }
     }
 
-    pub fn fuzz_loop(
-        &mut self,
-        data: Option<Vec<u8>>,
-        max_epochs: Option<usize>,
-    ) -> Result<(), eyre::Error> {
-        let mut data = data;
-        let mut epoch = 0;
+    pub fn fuzz_loop(&mut self, limit: Option<FuzzLoopLimit>) -> Result<(), eyre::Error> {
+        let mut epoch_idx = 0;
         let time_cancel = Arc::new(AtomicBool::new(false));
+        let data_files = match &limit {
+            | None => None,
+            | Some(limit) => match limit {
+                | FuzzLoopLimit::Time(duration) => {
+                    thread::Builder::new()
+                        .name("timer".to_owned())
+                        .spawn({
+                            let time_cancel = time_cancel.clone();
+                            let duration = duration.clone();
 
-        if let Some(duration) = self.duration.clone() {
-            thread::Builder::new()
-                .name("timer".to_owned())
-                .spawn({
-                    let time_cancel = time_cancel.clone();
+                            move || {
+                                thread::sleep(duration);
+                                time_cancel.store(true, atomic::Ordering::SeqCst);
+                                tracing::warn!(
+                                    duration = humantime::Duration::from(duration).to_string(),
+                                    "Time's up. Cancelling."
+                                );
+                            }
+                        })
+                        .wrap_err("failed to spawn timer thread")?;
 
-                    move || {
-                        thread::sleep(duration);
-                        time_cancel.store(true, atomic::Ordering::SeqCst);
-                        tracing::warn!(
-                            duration = humantime::Duration::from(duration).to_string(),
-                            "Time's up. Cancelling."
-                        );
-                    }
-                })
-                .wrap_err("failed to spawn timer thread")?;
-        }
+                    None
+                },
+                | FuzzLoopLimit::Epochs(epochs) => match epochs.get(epoch_idx) {
+                    | None => return Ok(()),
+                    | Some(cfg) => Some(&cfg.data_files),
+                },
+            },
+        };
 
         loop {
             if time_cancel.load(atomic::Ordering::SeqCst) {
@@ -214,15 +216,15 @@ impl<'s> Fuzzer<'s> {
                 break;
             }
 
-            if let Some(max_epochs) = max_epochs {
-                if epoch == max_epochs {
-                    break;
-                }
-            }
+            let result = self.fuzz(
+                epoch_idx,
+                time_cancel.clone(),
+                data_files.as_ref().map(AsRef::as_ref),
+            );
 
-            epoch += 1;
+            epoch_idx += 1;
 
-            match self.fuzz(epoch, data.take(), time_cancel.clone()) {
+            match result {
                 | Ok(_) => continue,
                 | Err(FuzzError::DiffFound) => continue,
                 | Err(FuzzError::Time) => break,
@@ -236,8 +238,8 @@ impl<'s> Fuzzer<'s> {
     pub fn fuzz(
         &mut self,
         epoch: usize,
-        data: Option<Vec<u8>>,
         time_cancel: Arc<AtomicBool>,
+        data_files: Option<&[PathBuf]>,
     ) -> Result<(), FuzzError> {
         const BUF_SIZE: usize = 131072;
 
@@ -246,17 +248,8 @@ impl<'s> Fuzzer<'s> {
                 .new_run()
                 .wrap_err("failed to init new run store")?,
         ));
-        let data = match data {
-            | Some(d) => d,
-            | None => {
-                let mut data = vec![0u8; BUF_SIZE];
-
-                thread_rng().fill_bytes(&mut data);
-
-                data
-            },
-        };
-        let spec = Spec::preview1().wrap_err("failed to init spec")?;
+        let data_file_idx = data_files.map(|_| Arc::new(AtomicUsize::new(0)));
+        let spec = Spec::preview1(&self.spec).wrap_err("failed to init spec")?;
         let mut initializers: Vec<EnvironmentInitializer> = Default::default();
         let mut runtimes: Vec<_> = Default::default();
 
@@ -302,13 +295,6 @@ impl<'s> Fuzzer<'s> {
 
         let (env, ctxs) = apply_env_initializers(&spec, &initializers);
         let env = Arc::new(RwLock::new(env));
-
-        run_store
-            .lock()
-            .unwrap()
-            .write_data(&data)
-            .wrap_err("failed to write data")?;
-
         let mut mmap = MmapOptions::new().len(BUF_SIZE).map_anon().unwrap();
         let buf_ptr = mmap.as_ptr();
 
@@ -334,14 +320,29 @@ impl<'s> Fuzzer<'s> {
             let refill_buffer = Arc::new(AtomicBool::new(false));
 
             thread::Builder::new()
-                .name("arbitrary-buf-filler".to_string())
+                .name("buf-filler".to_string())
                 .spawn_scoped(scope, {
                     let filled_pair = filled_pair.clone();
                     let run_store = run_store.clone();
+                    let data_file_idx = data_file_idx.clone();
 
                     move || {
                         while let Ok(()) = fill_rx.recv() {
-                            thread_rng().fill_bytes(&mut mmap);
+                            match data_file_idx {
+                                | None => {
+                                    thread_rng().fill_bytes(&mut mmap);
+                                },
+                                | Some(ref idx) => {
+                                    let data_file_path = data_files
+                                        .unwrap()
+                                        .get(idx.fetch_add(1, atomic::Ordering::SeqCst))
+                                        .unwrap();
+                                    let data = fs::read(data_file_path).unwrap();
+
+                                    mmap.copy_from_slice(&data);
+                                },
+                            }
+
                             run_store.lock().unwrap().write_data(&mmap).unwrap();
 
                             let (filled_mu, filled_cond) = &*filled_pair;
@@ -354,14 +355,31 @@ impl<'s> Fuzzer<'s> {
                         }
                     }
                 })
-                .wrap_err("failed to spawn arbitrary-buf-filler thread")?;
+                .wrap_err("failed to spawn buf-filler thread")?;
+
+            let mut data = {
+                let (filled_mu, filled_cond) = &*filled_pair;
+                let mut filled_state = filled_mu.lock().unwrap();
+
+                filled_state.0 = false;
+                fill_tx.send(()).unwrap();
+
+                let filled_gen = filled_state.1;
+
+                drop(
+                    filled_cond
+                        .wait_while(filled_state, |(filled, gen)| !*filled && *gen == filled_gen)
+                        .unwrap(),
+                );
+
+                unsafe { std::slice::from_raw_parts(buf_ptr.0, BUF_SIZE) }
+            };
 
             for ((runtime_name, mut store, executor), mut ctx) in runtimes.into_iter().zip(ctxs) {
                 runtime_threads.push(
                     thread::Builder::new()
                         .name(runtime_name.to_string())
                         .spawn_scoped(scope, {
-                            let mut u = Unstructured::new(&data);
                             let env = env.clone();
                             let tx = tx.clone();
                             let fill_tx = fill_tx.clone();
@@ -373,14 +391,16 @@ impl<'s> Fuzzer<'s> {
                             let n_live_threads = n_live_threads.clone();
                             let strategy = self.strategy;
                             let refill_buffer = refill_buffer.clone();
+                            let spec = self.spec.clone();
 
                             move || -> Result<(), FuzzError> {
                                 let z3_cfg = z3::Config::new();
                                 let z3_ctx = z3::Context::new(&z3_cfg);
-                                let spec = Spec::preview1()?;
+                                let spec = Spec::preview1(&spec)?;
                                 let mut iteration = 0;
                                 let buf_ptr = buf_ptr;
                                 let buf_ptr = buf_ptr.0;
+                                let mut u = Unstructured::new(data);
 
                                 loop {
                                     if diff_cancel.load(atomic::Ordering::SeqCst) {
@@ -493,13 +513,31 @@ impl<'s> Fuzzer<'s> {
                                     if pause_state.0
                                         == n_live_threads.load(atomic::Ordering::SeqCst)
                                     {
+                                        refill_buffer.store(false, atomic::Ordering::SeqCst);
+
                                         if u.is_empty() {
-                                            let (filled_mu, _filled_cond) = &*filled_pair;
+                                            let (filled_mu, filled_cond) = &*filled_pair;
                                             let mut filled_state = filled_mu.lock().unwrap();
 
                                             refill_buffer.store(true, atomic::Ordering::SeqCst);
                                             filled_state.0 = false;
                                             fill_tx.send(()).unwrap();
+
+                                            let filled_gen = filled_state.1;
+
+                                            drop(
+                                                filled_cond
+                                                    .wait_while(filled_state, |(filled, gen)| {
+                                                        !*filled && *gen == filled_gen
+                                                    })
+                                                    .unwrap(),
+                                            );
+
+                                            // let data = unsafe {
+                                            //     std::slice::from_raw_parts(buf_ptr, BUF_SIZE)
+                                            // };
+
+                                            // u = Unstructured::new(data);
                                         }
 
                                         resume_mu.lock().unwrap().0 = false;
@@ -531,10 +569,9 @@ impl<'s> Fuzzer<'s> {
                                                 .unwrap(),
                                         );
 
-                                        let data = unsafe {
+                                        data = unsafe {
                                             std::slice::from_raw_parts(buf_ptr, BUF_SIZE)
                                         };
-
                                         u = Unstructured::new(data);
                                     }
                                 }
@@ -548,10 +585,10 @@ impl<'s> Fuzzer<'s> {
                 .name("wazzi-differ".to_string())
                 .spawn_scoped(scope, {
                     let cancel = diff_cancel.clone();
-                    let mut u = Unstructured::new(&data);
 
                     move || -> Result<(), FuzzError> {
-                        let spec = Spec::preview1()?;
+                        let spec = Spec::preview1(&self.spec)?;
+                        let mut u = Unstructured::new(&[]);
 
                         while let Ok((function, params, results, ctx)) = rx.recv() {
                             let runtimes = run_store
@@ -711,4 +748,30 @@ enum FuzzError {
 
     #[error("time exceeded")]
     Time,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
+struct FuzzConfig {
+    strategy: Strategy,
+    runtimes: Vec<RuntimeFuzzConfig>,
+    spec:     PathBuf,
+    limit:    Option<FuzzLoopLimit>,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
+enum FuzzLoopLimit {
+    #[serde(with = "humantime_serde")]
+    Time(Duration),
+
+    Epochs(Vec<EpochConfig>),
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
+struct EpochConfig {
+    data_files: Vec<PathBuf>,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
+struct RuntimeFuzzConfig {
+    name: String,
 }
