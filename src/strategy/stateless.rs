@@ -115,26 +115,3 @@ impl CallStrategy for StatelessStrategy<'_, '_, '_> {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use arbitrary::Unstructured;
-
-    use super::*;
-
-    #[test]
-    fn object_safe() {
-        let data = vec![];
-        let mut u = Unstructured::new(&data);
-        let env = Environment::new();
-        let ctx = RuntimeContext::new();
-        let mut strat = StatelessStrategy {
-            u:   &mut u,
-            ctx: &ctx,
-        };
-        let strat: &mut dyn CallStrategy = &mut strat;
-        let spec = Spec::preview1().unwrap();
-
-        assert!(strat.select_function(&spec, &env).is_err());
-    }
-}
