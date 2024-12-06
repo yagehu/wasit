@@ -1,6 +1,3 @@
-#[cfg(test)]
-mod tests;
-
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     fs,
