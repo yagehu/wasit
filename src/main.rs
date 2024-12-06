@@ -46,22 +46,14 @@ use wazzi_store::FuzzStore;
 
 #[derive(Parser, Debug)]
 struct Cmd {
-    // #[arg(long)]
-    // data: Option<PathBuf>,
-
-    // #[arg(long, value_enum, default_value_t = Strategy::Stateful)]
-    // strategy: Strategy,
-
-    // #[arg(long)]
-    // max_epochs: Option<usize>,
-
-    // #[arg(long, value_parser = humantime::parse_duration)]
-    // duration: Option<Duration>,
     #[arg()]
     config: PathBuf,
 
     #[arg()]
     path: PathBuf,
+
+    #[arg(long, value_enum, default_value_t = Strategy::Stateful)]
+    strategy: Strategy,
 }
 
 #[derive(clap::ValueEnum, Serialize, Deserialize, PartialEq, Eq, Clone, Copy, Debug)]
@@ -144,7 +136,7 @@ fn main() -> Result<(), eyre::Error> {
 
     let mut fuzzer = Fuzzer::new(
         fs::read_to_string(config.spec).wrap_err("failed to read spec file")?,
-        config.strategy,
+        cmd.strategy,
         &mut store,
         runtimes,
     );
@@ -301,8 +293,6 @@ impl<'s> Fuzzer<'s> {
         #[derive(Copy, Clone)]
         struct ShareablePtr(*const u8);
 
-        // SAFETY: We never alias data when writing from multiple threads.
-        // Writer threads finish before unmapping.
         unsafe impl Send for ShareablePtr {
         }
 
@@ -752,7 +742,6 @@ enum FuzzError {
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 struct FuzzConfig {
-    strategy: Strategy,
     runtimes: Vec<RuntimeFuzzConfig>,
     spec:     PathBuf,
     limit:    Option<FuzzLoopLimit>,

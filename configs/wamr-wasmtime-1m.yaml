@@ -1,6 +1,5 @@
 limit: !Time "1m"
-strategy: stateful
-spec: src/spec/preview1.witx
+spec: preview1.witx
 runtimes:
   - name: wamr
   - name: wasmtime
