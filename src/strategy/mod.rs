@@ -5,6 +5,7 @@ pub use stateful::StatefulStrategy;
 pub use stateless::StatelessStrategy;
 
 use crate::{
+    resource::HighLevelValue,
     spec::{Function, Spec, WasiValue},
     Environment,
     ResourceIdx,
@@ -22,7 +23,7 @@ pub trait CallStrategy {
         spec: &Spec,
         function: &Function,
         env: &Environment,
-    ) -> Result<Vec<(WasiValue, Option<ResourceIdx>)>, eyre::Error>;
+    ) -> Result<Vec<HighLevelValue>, eyre::Error>;
 
     fn handle_results(
         &mut self,

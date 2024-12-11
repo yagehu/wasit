@@ -38,3 +38,9 @@ impl Default for Resources {
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy, Debug)]
 pub struct ResourceIdx(pub(crate) usize);
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub enum HighLevelValue {
+    Resource(ResourceIdx),
+    Concrete(WasiValue),
+}

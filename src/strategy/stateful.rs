@@ -17,6 +17,7 @@ use z3::{
 
 use super::CallStrategy;
 use crate::{
+    resource::HighLevelValue,
     spec::{
         witx::slang::{self, NoNonExistentDirBacktrack, Term},
         FlagsValue,
@@ -32,7 +33,6 @@ use crate::{
     },
     Environment,
     ResourceIdx,
-    RuntimeContext,
 };
 
 #[derive(Clone, Debug)]
@@ -2643,23 +2643,23 @@ impl<'ctx> ParamDecl<'ctx> {
     }
 }
 
-pub struct StatefulStrategy<'u, 'data, 'ctx, 'zctx> {
-    z3_ctx: &'zctx z3::Context,
-    u:      &'u mut Unstructured<'data>,
-    ctx:    &'ctx RuntimeContext,
+pub struct StatefulStrategy<'u, 'data, 'ctx> {
+    ctx:      &'ctx z3::Context,
+    u:        &'u mut Unstructured<'data>,
+    preopens: BTreeMap<ResourceIdx, PathBuf>,
 }
 
-impl<'u, 'data, 'ctx, 'zctx> StatefulStrategy<'u, 'data, 'ctx, 'zctx> {
+impl<'u, 'data, 'ctx> StatefulStrategy<'u, 'data, 'ctx> {
     pub fn new(
         u: &'u mut Unstructured<'data>,
-        ctx: &'ctx RuntimeContext,
-        z3_ctx: &'zctx z3::Context,
+        ctx: &'ctx z3::Context,
+        preopens: BTreeMap<ResourceIdx, PathBuf>,
     ) -> Self {
-        Self { z3_ctx, u, ctx }
+        Self { ctx, u, preopens }
     }
 }
 
-impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
+impl<'u, 'data, 'ctx> CallStrategy for StatefulStrategy<'u, 'data, 'ctx> {
     fn select_function<'spec>(
         &mut self,
         spec: &'spec Spec,
@@ -2674,7 +2674,7 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
         for (_name, function) in &interface.functions {
             let mut state = State::new();
 
-            for (&idx, path) in &self.ctx.preopens {
+            for (&idx, path) in &self.preopens {
                 state.push_preopen(idx, path);
             }
 
@@ -2688,21 +2688,21 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
                 }
             }
 
-            let types = StateTypes::new(self.z3_ctx, spec);
+            let types = StateTypes::new(self.ctx, spec);
             let decls = state.declare(
                 ArbitraryOrPresolved::Arbitrary(self.u),
                 spec,
-                self.z3_ctx,
+                self.ctx,
                 &types,
                 env,
                 function,
                 None,
             );
             let decls2 = state.declare2(&decls);
-            let solver = z3::Solver::new(self.z3_ctx);
+            let solver = z3::Solver::new(self.ctx);
 
             solver.assert(&state.encode(
-                self.z3_ctx,
+                self.ctx,
                 env,
                 &types,
                 &decls,
@@ -2732,10 +2732,10 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
         spec: &Spec,
         function: &Function,
         env: &Environment,
-    ) -> Result<Vec<(WasiValue, Option<ResourceIdx>)>, eyre::Error> {
+    ) -> Result<Vec<HighLevelValue>, eyre::Error> {
         let mut state = State::new();
 
-        for (&idx, path) in &self.ctx.preopens {
+        for (&idx, path) in &self.preopens {
             state.push_preopen(idx, path);
         }
 
@@ -2749,19 +2749,19 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
             }
         }
 
-        let types = StateTypes::new(self.z3_ctx, spec);
+        let types = StateTypes::new(self.ctx, spec);
         let decls = state.declare(
             ArbitraryOrPresolved::Arbitrary(self.u),
             spec,
-            self.z3_ctx,
+            self.ctx,
             &types,
             env,
             function,
             None,
         );
         let decls2 = state.declare2(&decls);
-        let solver = z3::Solver::new(self.z3_ctx);
-        let mut solver_params = z3::Params::new(self.z3_ctx);
+        let solver = z3::Solver::new(self.ctx);
+        let mut solver_params = z3::Params::new(self.ctx);
 
         solver_params.set_u32("sat.random_seed", self.u.arbitrary()?);
         solver_params.set_u32("smt.random_seed", self.u.arbitrary()?);
@@ -2772,7 +2772,7 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
 
         solver.push();
         solver.assert(&state.encode(
-            self.z3_ctx,
+            self.ctx,
             &env,
             &types,
             &decls,
@@ -2800,7 +2800,7 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
                     },
                     | ParamDecl::Path { segments } => {
                         clauses.push(Bool::or(
-                            self.z3_ctx,
+                            self.ctx,
                             segments
                                 .iter()
                                 .map(|segment| {
@@ -2818,7 +2818,7 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
             solutions.push(model);
             nsolutions += 1;
             solver.push();
-            solver.assert(&Bool::or(self.z3_ctx, clauses.as_slice()));
+            solver.assert(&Bool::or(self.ctx, clauses.as_slice()));
         }
 
         let model = self.u.choose(&solutions).unwrap();
@@ -2828,7 +2828,7 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
             let tdef = param.tref.resolve(spec);
             let param_node_value = decls.params.get(&param.name).unwrap();
             let wasi_value = state.decode_to_wasi_value(
-                self.z3_ctx,
+                self.ctx,
                 spec,
                 &types,
                 &tdef,
@@ -2844,11 +2844,10 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
                         | Some(resource_idx) => *resource_idx,
                         | None => panic!("{:#?} -> {:#?}", wasi_value, x),
                     };
-                    let value = self.ctx.resources.get(&resource_idx).unwrap();
 
-                    params.push((value.to_owned(), Some(resource_idx)));
+                    params.push(HighLevelValue::Resource(resource_idx));
                 },
-                | None => params.push((wasi_value, None)),
+                | None => params.push(HighLevelValue::Concrete(wasi_value)),
             }
         }
 
@@ -2865,7 +2864,7 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
     ) -> Result<(), eyre::Error> {
         let mut state = State::new();
 
-        for (&idx, path) in &self.ctx.preopens {
+        for (&idx, path) in &self.preopens {
             state.push_preopen(idx, path);
         }
 
@@ -2914,21 +2913,21 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
             })
             .collect();
 
-        let types = StateTypes::new(self.z3_ctx, spec);
+        let types = StateTypes::new(self.ctx, spec);
         let decls = state.declare(
             ArbitraryOrPresolved::Presolved(lens),
             spec,
-            self.z3_ctx,
+            self.ctx,
             &types,
             env,
             function,
             function.output_contract.as_ref(),
         );
         let decls2 = state.declare2(&decls);
-        let solver = z3::Solver::new(self.z3_ctx);
+        let solver = z3::Solver::new(self.ctx);
 
         solver.assert(&state.encode(
-            self.z3_ctx,
+            self.ctx,
             &env,
             &types,
             &decls,
@@ -2953,7 +2952,7 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
             };
             let param_node = decls.params.get(&function_param.name).unwrap();
 
-            solver.assert(&types.encode_wasi_value(self.z3_ctx, spec, param_node, &tdef, value));
+            solver.assert(&types.encode_wasi_value(self.ctx, spec, param_node, &tdef, value));
         }
 
         match solver.check() {
@@ -2976,7 +2975,7 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
                 .unwrap();
             let tdef = function_result.tref.resolve(spec);
             let wasi_value = state.decode_to_wasi_value(
-                self.z3_ctx,
+                self.ctx,
                 spec,
                 &types,
                 &tdef,
@@ -3002,7 +3001,7 @@ impl CallStrategy for StatefulStrategy<'_, '_, '_, '_> {
         }
 
         solver.push();
-        solver.assert(&Bool::or(self.z3_ctx, clauses.as_slice()));
+        solver.assert(&Bool::or(self.ctx, clauses.as_slice()));
 
         match solver.check() {
             | z3::SatResult::Unsat => (),

@@ -7,7 +7,7 @@ mod resource;
 mod strategy;
 
 pub use resource::ResourceIdx;
-use resource::{Resource, Resources};
+use resource::{HighLevelValue, Resource, Resources};
 pub use strategy::{CallStrategy, StatefulStrategy, StatelessStrategy};
 
 use std::{
@@ -149,137 +149,6 @@ impl Environment {
             .insert(resource_idx);
 
         resource_idx
-    }
-
-    pub fn call(
-        &self,
-        spec: &Spec,
-        ctx: &RuntimeContext,
-        store: &mut TraceStore<Call>,
-        function: &Function,
-        strategy: &mut dyn CallStrategy,
-        executor: &RunningExecutor,
-    ) -> Result<
-        (
-            Vec<(WasiValue, Option<ResourceIdx>)>,
-            Option<Vec<MaybeResourceValue>>,
-        ),
-        eyre::Error,
-    > {
-        let params = strategy.prepare_arguments(spec, function, self)?;
-
-        store.begin_call(&Call {
-            function: function.name.clone(),
-            errno:    None,
-            params:   params
-                .clone()
-                .into_iter()
-                .map(|(value, resource_idx)| MaybeResourceValue {
-                    value,
-                    resource_idx,
-                })
-                .collect_vec(),
-            results:  None,
-        })?;
-
-        let response = executor.call(wazzi_executor_pb_rust::request::Call {
-            func:           WasiFunc::try_from(function.name.as_str())
-                .map_err(|_| err!("unknown WASI function name"))?
-                .into(),
-            params:         function
-                .params
-                .iter()
-                .zip(params.clone())
-                .map(|(param, (value, _idx))| value.into_pb(spec, &param.tref))
-                .collect(),
-            results:        function
-                .results
-                .iter()
-                .map(|result| {
-                    result
-                        .tref
-                        .resolve(spec)
-                        .wasi
-                        .zero_value(spec)
-                        .into_pb(spec, &result.tref)
-                })
-                .collect(),
-            special_fields: Default::default(),
-        })?;
-        let errno = match response.errno_option {
-            | Some(wazzi_executor_pb_rust::response::call::Errno_option::ErrnoSome(i)) => Some(i),
-            | _ => None,
-        };
-        let results = match errno {
-            | Some(i) if i != 0 => None,
-            | _ => Some(
-                response
-                    .results
-                    .into_iter()
-                    .zip(function.results.iter())
-                    .map(|(result_value, result)| {
-                        WasiValue::from_pb(result_value, spec, result.tref.resolve(spec))
-                    })
-                    .collect_vec(),
-            ),
-        };
-        let results = match results {
-            | Some(results) => {
-                let mut ctx = ctx.to_owned();
-                let mut v = vec![];
-                let mut prev_env = self.clone();
-
-                for (value, result) in results.iter().zip(function.results.iter()) {
-                    v.push((
-                        value.clone(),
-                        prev_env.add_resources_to_ctx_recursively(
-                            &spec,
-                            &mut ctx,
-                            result.tref.resolve(&spec),
-                            &value,
-                        ),
-                    ));
-                }
-
-                Some(v)
-            },
-            | None => None,
-        };
-
-        store.end_call(&Call {
-            function: function.name.clone(),
-            errno,
-            params: params
-                .clone()
-                .into_iter()
-                .map(|(value, resource_idx)| MaybeResourceValue {
-                    value,
-                    resource_idx,
-                })
-                .collect_vec(),
-            results: results.as_ref().map(|results| {
-                results
-                    .iter()
-                    .map(|(value, resource_idx)| MaybeResourceValue {
-                        value:        value.to_owned(),
-                        resource_idx: resource_idx.to_owned(),
-                    })
-                    .collect_vec()
-            }),
-        })?;
-
-        Ok((
-            params,
-            results.map(|results| {
-                results
-                    .iter()
-                    .map(|(value, resource_idx)| MaybeResourceValue {
-                        value:        value.to_owned(),
-                        resource_idx: resource_idx.to_owned(),
-                    })
-                    .collect_vec()
-            }),
-        ))
     }
 
     pub fn execute_function_effects(
@@ -491,4 +360,127 @@ impl RuntimeContext {
             resources: Default::default(),
         }
     }
+
+    fn lift(
+        &mut self,
+        env: &mut Environment,
+        spec: &Spec,
+        tdef: &TypeDef,
+        value: WasiValue,
+    ) -> Option<ResourceIdx> {
+        match &tdef.state {
+            | None => return None,
+            | Some(state_type) => {
+                let state = state_type.zero_value(spec);
+                let resource_idx = env.new_resource(tdef.name.clone(), Resource { state });
+
+                self.resources.insert(resource_idx, value);
+
+                Some(resource_idx)
+            },
+        }
+    }
+
+    fn lower(&self, value: HighLevelValue) -> (WasiValue, Option<ResourceIdx>) {
+        match value {
+            | HighLevelValue::Resource(resource_idx) => (
+                self.resources.get(&resource_idx).unwrap().to_owned(),
+                Some(resource_idx),
+            ),
+            | HighLevelValue::Concrete(wasi_value) => (wasi_value, None),
+        }
+    }
+}
+
+fn execute_call(
+    spec: &Spec,
+    ctx: &RuntimeContext,
+    store: &mut TraceStore<Call>,
+    function: &Function,
+    params: Vec<HighLevelValue>,
+    strategy: &mut dyn CallStrategy,
+    executor: &RunningExecutor,
+) -> Result<
+    (
+        Vec<(WasiValue, Option<ResourceIdx>)>,
+        Option<Vec<MaybeResourceValue>>,
+    ),
+    eyre::Error,
+> {
+    store.begin_call(&Call {
+        function: function.name.clone(),
+        errno:    None,
+        params:   params
+            .clone()
+            .into_iter()
+            .map(|value| {
+                let (value, resource_idx) = ctx.lower(value);
+
+                MaybeResourceValue {
+                    value,
+                    resource_idx,
+                }
+            })
+            .collect_vec(),
+        results:  None,
+    })?;
+
+    let response = executor.call(wazzi_executor_pb_rust::request::Call {
+        func:           WasiFunc::try_from(function.name.as_str())
+            .map_err(|_| err!("unknown WASI function name"))?
+            .into(),
+        params:         function
+            .params
+            .iter()
+            .zip(params.clone())
+            .map(|(param, value)| {
+                let (value, _resource_idx) = ctx.lower(value);
+
+                value.into_pb(spec, &param.tref)
+            })
+            .collect(),
+        results:        function
+            .results
+            .iter()
+            .map(|result| {
+                result
+                    .tref
+                    .resolve(spec)
+                    .wasi
+                    .zero_value(spec)
+                    .into_pb(spec, &result.tref)
+            })
+            .collect(),
+        special_fields: Default::default(),
+    })?;
+    let errno = match response.errno_option {
+        | Some(wazzi_executor_pb_rust::response::call::Errno_option::ErrnoSome(i)) => Some(i),
+        | _ => None,
+    };
+    let results = match errno {
+        | Some(i) if i != 0 => None,
+        | _ => Some(
+            response
+                .results
+                .into_iter()
+                .zip(function.results.iter())
+                .map(|(result_value, result)| {
+                    WasiValue::from_pb(result_value, spec, result.tref.resolve(spec))
+                })
+                .collect_vec(),
+        ),
+    };
+
+    Ok((
+        params,
+        results.map(|results| {
+            results
+                .iter()
+                .map(|(value, resource_idx)| MaybeResourceValue {
+                    value:        value.to_owned(),
+                    resource_idx: resource_idx.to_owned(),
+                })
+                .collect_vec()
+        }),
+    ))
 }
