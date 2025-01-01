@@ -39,12 +39,6 @@ z3-sys = { git = "https://github.com/yagehu/z3.rs.git", branch = "wazzi" }
 
 [build-dependencies]
 
-[features]
-build-protobuf = [
-    "wazzi-executor-pb-rust/build-protobuf",
-    "wazzi-executor/build-protobuf",
-]
-
 [workspace.package]
 edition = "2021"
 publish = false
@@ -57,24 +51,20 @@ members = [
     "executor",
     "executor/pb/c",
     "executor/pb/rust",
-    "executor/protobuf/build",
     "executor/protobuf-c/build",
     "executor/protobuf-c/wasm",
     "idxspace",
     "runners",
     "store",
-    "wasi-sdk/build",
 ]
 
 [workspace.dependencies]
 idxspace.path = "idxspace"
-wasi-sdk.path = "wasi-sdk/build"
 wazzi-compile-time.path = "compile-time"
 wazzi-dyn-spec.path = "dyn-spec"
 wazzi-executor.path = "executor"
 wazzi-executor-pb-c.path = "executor/pb/c"
 wazzi-executor-pb-rust.path = "executor/pb/rust"
-wazzi-executor-protobuf.path = "executor/protobuf/build"
 wazzi-executor-protobuf-c.path = "executor/protobuf-c/build"
 wazzi-executor-protobuf-c-wasm.path = "executor/protobuf-c/wasm"
 wazzi-runners.path = "runners"

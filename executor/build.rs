@@ -23,18 +23,7 @@ fn main() {
         .join("upstream")
         .canonicalize()
         .unwrap();
-
-    #[cfg(feature = "build-wasi-sdk")]
-    let wasi_sdk = root_dir
-        .join("target")
-        .join(env::var("PROFILE").unwrap())
-        .join("wasi-sdk")
-        .join("install")
-        .canonicalize()
-        .unwrap();
-    #[cfg(not(feature = "build-wasi-sdk"))]
     let wasi_sdk = PathBuf::from(env::var("WASI_SDK").unwrap());
-
     let clang = wasi_sdk.join("bin").join("clang").canonicalize().unwrap();
     let mut child = process::Command::new(clang)
         .arg("--sysroot")

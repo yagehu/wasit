@@ -8,7 +8,3 @@ publish = false
 
 [build-dependencies]
 wazzi-compile-time.workspace = true
-wazzi-executor-protobuf = { workspace = true, optional = true }
-
-[features]
-build-protobuf = ["wazzi-executor-protobuf"]

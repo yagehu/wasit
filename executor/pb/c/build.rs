@@ -25,23 +25,8 @@ fn main() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap())
         .canonicalize()
         .unwrap();
-
-    #[cfg(feature = "build-wasi-sdk")]
-    let wasi_sdk = root_dir
-        .join("target")
-        .join(env::var("PROFILE").unwrap())
-        .join("wasi-sdk")
-        .canonicalize()
-        .unwrap();
-
-    #[cfg(not(feature = "build-wasi-sdk"))]
     let wasi_sdk = PathBuf::from(env::var("WASI_SDK").unwrap());
-
-    #[cfg(feature = "build-protobuf")]
-    let protoc = target_dir.join("protobuf").join("bin").join("protoc");
-    #[cfg(not(feature = "build-protobuf"))]
     let protoc = PathBuf::from("protoc");
-
     let clang_path = wasi_sdk.join("bin").join("clang").canonicalize().unwrap();
     let ar_path = wasi_sdk.join("bin").join("llvm-ar").canonicalize().unwrap();
 

@@ -11,13 +11,5 @@ protobuf.workspace = true
 wasi = "0.11"
 
 [build-dependencies]
-wasi-sdk = { workspace = true, optional = true }
 wazzi-executor-pb-c.workspace = true
 wazzi-executor-protobuf-c-wasm.workspace = true
-
-[features]
-build-protobuf = [
-    "wazzi-executor-pb-c/build-protobuf",
-    "wazzi-executor-protobuf-c-wasm/build-protobuf",
-]
-build-wasi-sdk = ["wasi-sdk"]

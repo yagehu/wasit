@@ -11,11 +11,6 @@ fn main() {
         .canonicalize()
         .unwrap();
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
-    let target_dir = root
-        .join("target")
-        .join(env::var("PROFILE").unwrap())
-        .canonicalize()
-        .unwrap();
 
     env::set_current_dir(&upstream_dir).unwrap();
 
@@ -26,27 +21,14 @@ fn main() {
         .unwrap()
         .success());
 
-    #[cfg(feature = "build-wasi-sdk")]
-    let wasi_sdk = root
-        .join("target")
-        .join(env::var("PROFILE").unwrap())
-        .join("wasi-sdk")
-        .join("install")
-        .canonicalize()
-        .unwrap();
-    #[cfg(not(feature = "build-wasi-sdk"))]
     let wasi_sdk = PathBuf::from(env::var("WASI_SDK").unwrap());
-
     let wasi_sdk_bin_dir = wasi_sdk.join("bin").canonicalize().unwrap();
     let mut protobuf = None;
 
-    if cfg!(feature = "build-protobuf") {
-        protobuf = Some(target_dir.join("protobuf"));
+    if let Ok(p) = env::var("PROTOBUF") {
+        protobuf = Some(PathBuf::from(p));
     }
 
-    #[cfg(feature = "build-protobuf")]
-    let protoc = protobuf.as_ref().unwrap().join("bin").join("protoc");
-    #[cfg(not(feature = "build-protobuf"))]
     let protoc = PathBuf::from("protoc");
 
     env::set_current_dir(&out_dir).unwrap();
@@ -63,6 +45,14 @@ fn main() {
         .env(
             "protobuf_LIBS",
             format!("-lprotobuf -L{}", protobuf.join("lib").display()),
+        )
+        .env(
+            "PKG_CONFIG_PATH",
+            format!(
+                "{}:{}",
+                protobuf.join("lib").join("pkgconfig").display(),
+                protobuf.join("lib64").join("pkgconfig").display(),
+            ),
         );
     }
 

@@ -31,17 +31,10 @@ fn main() {
 
     let mut protobuf = None;
 
-    if cfg!(feature = "build-protobuf") {
-        protobuf = Some(target_dir.join("protobuf"));
-    }
-
     if let Ok(p) = env::var("PROTOBUF") {
         protobuf = Some(PathBuf::from(p));
     }
 
-    #[cfg(feature = "build-protobuf")]
-    let protoc = protobuf.as_ref().unwrap().join("bin").join("protoc");
-    #[cfg(not(feature = "build-protobuf"))]
     let protoc = PathBuf::from("protoc");
 
     let mut command = process::Command::new(upstream_dir.join("configure").canonicalize().unwrap());

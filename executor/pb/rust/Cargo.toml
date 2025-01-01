@@ -9,8 +9,4 @@ protobuf.workspace = true
 
 [build-dependencies]
 wazzi-compile-time.workspace = true
-wazzi-executor-protobuf = { workspace = true, optional = true }
 protobuf-codegen = "*"
-
-[features]
-build-protobuf = ["wazzi-executor-protobuf"]
