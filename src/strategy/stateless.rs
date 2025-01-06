@@ -4,24 +4,23 @@ use itertools::Itertools;
 
 use super::CallStrategy;
 use crate::{
+    resource::HighLevelValue,
     spec::{Function, Spec, WasiValue},
     Environment,
     ResourceIdx,
-    RuntimeContext,
 };
 
-pub struct StatelessStrategy<'u, 'data, 'ctx> {
-    u:   &'u mut Unstructured<'data>,
-    ctx: &'ctx RuntimeContext,
+pub struct StatelessStrategy<'u, 'data> {
+    u: &'u mut Unstructured<'data>,
 }
 
-impl<'u, 'data, 'ctx> StatelessStrategy<'u, 'data, 'ctx> {
-    pub fn new(u: &'u mut Unstructured<'data>, ctx: &'ctx RuntimeContext) -> Self {
-        Self { u, ctx }
+impl<'u, 'data> StatelessStrategy<'u, 'data> {
+    pub fn new(u: &'u mut Unstructured<'data>) -> Self {
+        Self { u }
     }
 }
 
-impl CallStrategy for StatelessStrategy<'_, '_, '_> {
+impl CallStrategy for StatelessStrategy<'_, '_> {
     fn select_function<'spec>(
         &mut self,
         spec: &'spec Spec,
@@ -72,7 +71,7 @@ impl CallStrategy for StatelessStrategy<'_, '_, '_> {
         spec: &Spec,
         function: &Function,
         env: &Environment,
-    ) -> Result<Vec<(WasiValue, Option<ResourceIdx>)>, eyre::Error> {
+    ) -> Result<Vec<HighLevelValue>, eyre::Error> {
         let mut params = Vec::with_capacity(function.params.len());
 
         for param in function.params.iter() {
@@ -80,7 +79,9 @@ impl CallStrategy for StatelessStrategy<'_, '_, '_> {
 
             match &tdef.state {
                 | None => {
-                    params.push((tdef.wasi.arbitrary_value(spec, self.u)?, None));
+                    params.push(HighLevelValue::Concrete(
+                        tdef.wasi.arbitrary_value(spec, self.u)?,
+                    ));
                 },
                 | Some(_state_type) => {
                     let resources = env
@@ -94,9 +95,8 @@ impl CallStrategy for StatelessStrategy<'_, '_, '_> {
                         .u
                         .choose(&resources)
                         .wrap_err("failed to choose a resource")?;
-                    let resource = self.ctx.resources.get(&resource_id).unwrap();
 
-                    params.push((resource.to_owned(), Some(resource_id)));
+                    params.push(HighLevelValue::Resource(resource_id));
                 },
             }
         }

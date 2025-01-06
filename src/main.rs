@@ -1,9 +1,9 @@
 #![feature(trait_upcasting)]
 
 use std::{
+    collections::BTreeMap,
     fs,
     io::{self, stderr, IsTerminal},
-    ops::Deref,
     panic,
     path::{Path, PathBuf},
     process,
@@ -32,17 +32,18 @@ use tracing_subscriber::{layer::SubscriberExt as _, EnvFilter};
 use walkdir::WalkDir;
 use wazzi::{
     apply_env_initializers,
+    execute_call,
     normalization::InitializeState,
     spec::Spec,
     Call,
     CallStrategy,
     EnvironmentInitializer,
-    RuntimeContext,
+    ResourceIdx,
     StatefulStrategy,
     StatelessStrategy,
 };
 use wazzi_runners::{MappedDir, Node, RunningExecutor, Wamr, Wasmedge, Wasmer, Wasmtime, Wazero};
-use wazzi_store::FuzzStore;
+use wazzi_store::{FuzzStore, RuntimeStore};
 
 #[derive(Parser, Debug)]
 struct Cmd {
@@ -67,12 +68,12 @@ impl Strategy {
     fn into_call_strategy<'a>(
         self,
         u: &'a mut Unstructured,
-        ctx: &'a RuntimeContext,
-        z3_ctx: &'a z3::Context,
+        ctx: &'a z3::Context,
+        preopens: BTreeMap<ResourceIdx, PathBuf>,
     ) -> Box<dyn CallStrategy + 'a> {
         match self {
-            | Strategy::Stateful => Box::new(StatefulStrategy::new(u, ctx, z3_ctx)),
-            | Strategy::Stateless => Box::new(StatelessStrategy::new(u, ctx)),
+            | Strategy::Stateful => Box::new(StatefulStrategy::new(u, ctx, preopens)),
+            | Strategy::Stateless => Box::new(StatelessStrategy::new(u)),
         }
     }
 }
@@ -246,7 +247,7 @@ impl<'s> Fuzzer<'s> {
         let mut runtimes: Vec<_> = Default::default();
 
         for (runtime_name, runtime) in &self.runtimes {
-            let store = run_store
+            let store: RuntimeStore<Call> = run_store
                 .lock()
                 .unwrap()
                 .new_runtime(runtime_name.to_string(), "-")
@@ -259,7 +260,7 @@ impl<'s> Fuzzer<'s> {
             let executor = RunningExecutor::from_wasi_runner(
                 runtime.as_ref(),
                 Path::new("target")
-                    .join("release")
+                    .join("debug")
                     .join("wazzi-executor.wasm")
                     .canonicalize()
                     .unwrap()
@@ -285,7 +286,7 @@ impl<'s> Fuzzer<'s> {
             runtimes.push((runtime_name.to_string(), store, executor));
         }
 
-        let (env, ctxs) = apply_env_initializers(&spec, &initializers);
+        let (env, rtctxs, preopens) = apply_env_initializers(&spec, &initializers);
         let env = Arc::new(RwLock::new(env));
         let mut mmap = MmapOptions::new().len(BUF_SIZE).map_anon().unwrap();
         let buf_ptr = mmap.as_ptr();
@@ -299,16 +300,84 @@ impl<'s> Fuzzer<'s> {
         let buf_ptr = ShareablePtr(buf_ptr);
 
         thread::scope(|scope| -> Result<_, FuzzError> {
-            let (tx, rx) = mpsc::channel();
+            // let (tx, rx) = mpsc::channel();
             let pause_pair = Arc::new((Mutex::new((0, 0usize)), Condvar::new()));
             let resume_pair = Arc::new((Mutex::new((true, 0usize)), Condvar::new()));
+            let select_func_pair = Arc::new((Mutex::new((0, 0usize)), Condvar::new()));
+            let select_func_done_pair = Arc::new((Mutex::new((false, 0usize)), Condvar::new()));
             let (fill_tx, fill_rx) = mpsc::channel();
             let filled_pair = Arc::new((Mutex::new((false, 0usize)), Condvar::new()));
-            let n_live_threads = Arc::new(AtomicUsize::new(self.runtimes.len()));
             let mut runtime_threads = Vec::with_capacity(self.runtimes.len());
             let diff_cancel = Arc::new(AtomicBool::new(false));
             let refill_buffer = Arc::new(AtomicBool::new(false));
+            let function = Arc::new(Mutex::new(None));
+            let mut data = {
+                let (filled_mu, filled_cond) = &*filled_pair;
+                let mut filled_state = filled_mu.lock().unwrap();
 
+                filled_state.0 = false;
+                fill_tx.send(()).unwrap();
+
+                let filled_gen = filled_state.1;
+
+                drop(
+                    filled_cond
+                        .wait_while(filled_state, |(filled, gen)| !*filled && *gen == filled_gen)
+                        .unwrap(),
+                );
+
+                unsafe { std::slice::from_raw_parts(buf_ptr.0, BUF_SIZE) }
+            };
+            let n_runtimes = self.runtimes.len();
+
+            thread::Builder::new()
+                .name("strategy".to_string())
+                .spawn_scoped(scope, {
+                    let env = env.clone();
+                    let select_func_done_pair = select_func_done_pair.clone();
+                    let strategy = self.strategy;
+                    let function = function.clone();
+                    let select_func_pair = select_func_pair.clone();
+
+                    move || {
+                        let mut u = Unstructured::new(data);
+                        let cfg = z3::Config::new();
+                        let ctx = z3::Context::new(&cfg);
+                        let mut strategy = strategy.into_call_strategy(&mut u, &ctx, preopens);
+
+                        loop {
+                            {
+                                let (mu, cond) = &*select_func_pair;
+                                let state = mu.lock().unwrap();
+                                let gen = state.1;
+
+                                cond.wait_while(state, |(select, g)| {
+                                    !(*select != n_runtimes) && *g == gen
+                                })
+                                .unwrap();
+                            }
+
+                            *function.lock().unwrap() = Some(
+                                strategy
+                                    .select_function(&spec, &env.read().unwrap())
+                                    .unwrap()
+                                    .to_owned(),
+                            );
+
+                            {
+                                let (select_func_done_mu, select_func_done_cond) =
+                                    &*select_func_done_pair;
+                                let mut select_func_done_state =
+                                    select_func_done_mu.lock().unwrap();
+
+                                select_func_done_state.0 = true;
+                                select_func_done_state.1 = select_func_done_state.1.wrapping_add(1);
+                                select_func_done_cond.notify_all();
+                            }
+                        }
+                    }
+                })
+                .wrap_err("failed to spawn strategy thread");
             thread::Builder::new()
                 .name("buf-filler".to_string())
                 .spawn_scoped(scope, {
@@ -347,45 +416,29 @@ impl<'s> Fuzzer<'s> {
                 })
                 .wrap_err("failed to spawn buf-filler thread")?;
 
-            let mut data = {
-                let (filled_mu, filled_cond) = &*filled_pair;
-                let mut filled_state = filled_mu.lock().unwrap();
-
-                filled_state.0 = false;
-                fill_tx.send(()).unwrap();
-
-                let filled_gen = filled_state.1;
-
-                drop(
-                    filled_cond
-                        .wait_while(filled_state, |(filled, gen)| !*filled && *gen == filled_gen)
-                        .unwrap(),
-                );
-
-                unsafe { std::slice::from_raw_parts(buf_ptr.0, BUF_SIZE) }
-            };
-
-            for ((runtime_name, mut store, executor), mut ctx) in runtimes.into_iter().zip(ctxs) {
+            for ((runtime_name, mut store, executor), mut rtctx) in runtimes.into_iter().zip(rtctxs)
+            {
                 runtime_threads.push(
                     thread::Builder::new()
                         .name(runtime_name.to_string())
                         .spawn_scoped(scope, {
                             let env = env.clone();
-                            let tx = tx.clone();
+                            // let tx = tx.clone();
                             let fill_tx = fill_tx.clone();
                             let diff_cancel = diff_cancel.clone();
                             let time_cancel = time_cancel.clone();
                             let pause_pair = pause_pair.clone();
                             let resume_pair = resume_pair.clone();
                             let filled_pair = filled_pair.clone();
-                            let n_live_threads = n_live_threads.clone();
-                            let strategy = self.strategy;
+                            let select_func_pair = select_func_pair.clone();
+                            let select_func_done_pair = select_func_done_pair.clone();
                             let refill_buffer = refill_buffer.clone();
                             let spec = self.spec.clone();
+                            let function = function.clone();
 
                             move || -> Result<(), FuzzError> {
                                 let z3_cfg = z3::Config::new();
-                                let z3_ctx = z3::Context::new(&z3_cfg);
+                                let ctx = z3::Context::new(&z3_cfg);
                                 let spec = Spec::preview1(&spec)?;
                                 let mut iteration = 0;
                                 let buf_ptr = buf_ptr;
@@ -440,10 +493,30 @@ impl<'s> Fuzzer<'s> {
                                         return Err(FuzzError::Time);
                                     }
 
-                                    let mut strategy =
-                                        strategy.into_call_strategy(&mut u, &ctx, &z3_ctx);
+                                    {
+                                        let (mu, cond) = &*select_func_pair;
+                                        let mut state = mu.lock().unwrap();
+
+                                        state.0 += 1;
+
+                                        if state.0 == n_runtimes {
+                                            // Dispatch to strategy thread to select a function.
+                                            state.0 = 0;
+                                            state.1 = state.1.wrapping_add(1);
+                                            cond.notify_all();
+                                        }
+                                    }
+
+                                    {
+                                        let (mu, cond) = &*select_func_done_pair;
+                                        let state = mu.lock().unwrap();
+                                        let gen = state.1;
+
+                                        cond.wait_while(state, |(done, g)| !*done && gen == *g);
+                                    }
+
                                     let function =
-                                        strategy.select_function(&spec, &env.read().unwrap())?;
+                                        function.lock().unwrap().as_ref().unwrap().clone();
 
                                     tracing::info!(
                                         epoch = epoch,
@@ -453,117 +526,127 @@ impl<'s> Fuzzer<'s> {
                                     );
                                     iteration += 1;
 
-                                    let (params, results) = match env.read().unwrap().call(
-                                        &spec,
-                                        &ctx,
-                                        store.trace_mut(),
-                                        function,
-                                        strategy.as_mut(),
-                                        &executor,
-                                    ) {
-                                        | Ok(x) => x,
-                                        | Err(err) => {
-                                            let (pause_mu, _pause_cond) = &*pause_pair;
-                                            let mut pause_state = pause_mu.lock().unwrap();
+                                    // execute_call(
+                                    //     &spec,
+                                    //     &rtctx,
+                                    //     store.trace_mut(),
+                                    //     function,
+                                    //     params,
+                                    //     &executor,
+                                    // );
 
-                                            pause_state.0 += 1;
-                                            drop(pause_state);
-                                            diff_cancel.store(true, atomic::Ordering::SeqCst);
+                                    // let (params, results) = match env.read().unwrap().call(
+                                    //     &spec,
+                                    //     &rtctx,
+                                    //     store.trace_mut(),
+                                    //     function,
+                                    //     strategy.as_mut(),
+                                    //     &executor,
+                                    // ) {
+                                    //     | Ok(x) => x,
+                                    //     | Err(err) => {
+                                    //         let (pause_mu, _pause_cond) = &*pause_pair;
+                                    //         let mut pause_state = pause_mu.lock().unwrap();
 
-                                            return Err(FuzzError::Unknown(err));
-                                        },
-                                    };
+                                    //         pause_state.0 += 1;
+                                    //         drop(pause_state);
+                                    //         diff_cancel.store(true, atomic::Ordering::SeqCst);
 
-                                    drop(strategy);
+                                    //         return Err(FuzzError::Unknown(err));
+                                    //     },
+                                    // };
 
-                                    let mut env_prev_iter = env.read().unwrap().deref().clone();
+                                    // drop(strategy);
 
-                                    if let Some(results) = &results {
-                                        for (result_value, result) in
-                                            results.into_iter().zip(function.results.iter())
-                                        {
-                                            env_prev_iter.add_resources_to_ctx_recursively(
-                                                &spec,
-                                                &mut ctx,
-                                                result.tref.resolve(&spec),
-                                                &result_value.value,
-                                            );
-                                        }
-                                    }
+                                    // let mut env_prev_iter = env.read().unwrap().deref().clone();
 
-                                    drop(env);
+                                    // if let Some(results) = &results {
+                                    //     for (result_value, result) in
+                                    //         results.into_iter().zip(function.results.iter())
+                                    //     {
+                                    //         env_prev_iter.add_resources_to_ctx_recursively(
+                                    //             &spec,
+                                    //             &mut rtctx,
+                                    //             result.tref.resolve(&spec),
+                                    //             &result_value.value,
+                                    //         );
+                                    //     }
+                                    // }
 
-                                    let function = function.clone();
-                                    let (pause_mu, pause_cond) = &*pause_pair;
-                                    let mut pause_state = pause_mu.lock().unwrap();
-                                    let pause_gen = pause_state.1;
+                                    // drop(env);
 
-                                    pause_state.0 += 1;
+                                    // let function = function.clone();
+                                    // let (pause_mu, pause_cond) = &*pause_pair;
+                                    // let mut pause_state = pause_mu.lock().unwrap();
+                                    // let pause_gen = pause_state.1;
 
-                                    if pause_state.0
-                                        == n_live_threads.load(atomic::Ordering::SeqCst)
-                                    {
-                                        refill_buffer.store(false, atomic::Ordering::SeqCst);
+                                    // pause_state.0 += 1;
 
-                                        if u.is_empty() {
-                                            let (filled_mu, filled_cond) = &*filled_pair;
-                                            let mut filled_state = filled_mu.lock().unwrap();
+                                    // if pause_state.0
+                                    //     == n_live_threads.load(atomic::Ordering::SeqCst)
+                                    // {
+                                    //     refill_buffer.store(false, atomic::Ordering::SeqCst);
 
-                                            refill_buffer.store(true, atomic::Ordering::SeqCst);
-                                            filled_state.0 = false;
-                                            fill_tx.send(()).unwrap();
+                                    //     if u.is_empty() {
+                                    //         let (filled_mu, filled_cond) = &*filled_pair;
+                                    //         let mut filled_state = filled_mu.lock().unwrap();
 
-                                            let filled_gen = filled_state.1;
+                                    //         refill_buffer.store(true, atomic::Ordering::SeqCst);
+                                    //         filled_state.0 = false;
+                                    //         fill_tx.send(()).unwrap();
 
-                                            drop(
-                                                filled_cond
-                                                    .wait_while(filled_state, |(filled, gen)| {
-                                                        !*filled && *gen == filled_gen
-                                                    })
-                                                    .unwrap(),
-                                            );
+                                    //         let filled_gen = filled_state.1;
 
-                                            // let data = unsafe {
-                                            //     std::slice::from_raw_parts(buf_ptr, BUF_SIZE)
-                                            // };
+                                    //         drop(
+                                    //             filled_cond
+                                    //                 .wait_while(filled_state, |(filled, gen)| {
+                                    //                     !*filled && *gen == filled_gen
+                                    //                 })
+                                    //                 .unwrap(),
+                                    //         );
 
-                                            // u = Unstructured::new(data);
-                                        }
+                                    //         // let data = unsafe {
+                                    //         //     std::slice::from_raw_parts(buf_ptr, BUF_SIZE)
+                                    //         // };
 
-                                        resume_mu.lock().unwrap().0 = false;
-                                        pause_state.0 = 0;
-                                        pause_state.1 = pause_state.1.wrapping_add(1);
-                                        pause_cond.notify_all();
-                                        tx.send((function, params, results, ctx.clone())).unwrap();
-                                    }
+                                    //         // u = Unstructured::new(data);
+                                    //     }
 
-                                    drop(
-                                        pause_cond
-                                            .wait_while(pause_state, |(n, gen)| {
-                                                *n != n_live_threads.load(atomic::Ordering::SeqCst)
-                                                    && pause_gen == *gen
-                                            })
-                                            .unwrap(),
-                                    );
+                                    //     resume_mu.lock().unwrap().0 = false;
+                                    //     pause_state.0 = 0;
+                                    //     pause_state.1 = pause_state.1.wrapping_add(1);
+                                    //     pause_cond.notify_all();
+                                    //     tx.send((function, params, results, rtctx.clone()))
+                                    //         .unwrap();
+                                    // }
 
-                                    if refill_buffer.load(atomic::Ordering::SeqCst) {
-                                        let (filled_mu, filled_cond) = &*filled_pair;
-                                        let filled_state = filled_mu.lock().unwrap();
-                                        let filled_gen = filled_state.1;
+                                    // drop(
+                                    //     pause_cond
+                                    //         .wait_while(pause_state, |(n, gen)| {
+                                    //             *n != n_live_threads.load(atomic::Ordering::SeqCst)
+                                    //                 && pause_gen == *gen
+                                    //         })
+                                    //         .unwrap(),
+                                    // );
 
-                                        drop(
-                                            filled_cond
-                                                .wait_while(filled_state, |(filled, gen)| {
-                                                    !*filled && *gen == filled_gen
-                                                })
-                                                .unwrap(),
-                                        );
+                                    // if refill_buffer.load(atomic::Ordering::SeqCst) {
+                                    //     let (filled_mu, filled_cond) = &*filled_pair;
+                                    //     let filled_state = filled_mu.lock().unwrap();
+                                    //     let filled_gen = filled_state.1;
 
-                                        data = unsafe {
-                                            std::slice::from_raw_parts(buf_ptr, BUF_SIZE)
-                                        };
-                                        u = Unstructured::new(data);
-                                    }
+                                    //     drop(
+                                    //         filled_cond
+                                    //             .wait_while(filled_state, |(filled, gen)| {
+                                    //                 !*filled && *gen == filled_gen
+                                    //             })
+                                    //             .unwrap(),
+                                    //     );
+
+                                    //     data = unsafe {
+                                    //         std::slice::from_raw_parts(buf_ptr, BUF_SIZE)
+                                    //     };
+                                    //     u = Unstructured::new(data);
+                                    // }
                                 }
                             }
                         })
@@ -571,151 +654,151 @@ impl<'s> Fuzzer<'s> {
                 );
             }
 
-            thread::Builder::new()
-                .name("wazzi-differ".to_string())
-                .spawn_scoped(scope, {
-                    let cancel = diff_cancel.clone();
+            // thread::Builder::new()
+            //     .name("wazzi-differ".to_string())
+            //     .spawn_scoped(scope, {
+            //         let cancel = diff_cancel.clone();
 
-                    move || -> Result<(), FuzzError> {
-                        let spec = Spec::preview1(&self.spec)?;
-                        let mut u = Unstructured::new(&[]);
+            //         move || -> Result<(), FuzzError> {
+            //             let spec = Spec::preview1(&self.spec)?;
+            //             let mut u = Unstructured::new(&[]);
 
-                        while let Ok((function, params, results, ctx)) = rx.recv() {
-                            let runtimes = run_store
-                                .lock()
-                                .unwrap()
-                                .runtimes::<Call>()
-                                .wrap_err("failed to resume runtimes")?
-                                .collect::<Vec<_>>();
+            //             while let Ok((function, params, results, ctx)) = rx.recv() {
+            //                 let runtimes = run_store
+            //                     .lock()
+            //                     .unwrap()
+            //                     .runtimes::<Call>()
+            //                     .wrap_err("failed to resume runtimes")?
+            //                     .collect::<Vec<_>>();
 
-                            'outer: for (i, runtime_0) in runtimes.iter().enumerate() {
-                                let call_0 = runtime_0
-                                    .trace()
-                                    .last_call()
-                                    .wrap_err("failed to get last call")
-                                    .unwrap()
-                                    .unwrap()
-                                    .read_call()
-                                    .wrap_err("failed to read action")
-                                    .unwrap()
-                                    .unwrap();
+            //                 'outer: for (i, runtime_0) in runtimes.iter().enumerate() {
+            //                     let call_0 = runtime_0
+            //                         .trace()
+            //                         .last_call()
+            //                         .wrap_err("failed to get last call")
+            //                         .unwrap()
+            //                         .unwrap()
+            //                         .read_call()
+            //                         .wrap_err("failed to read action")
+            //                         .unwrap()
+            //                         .unwrap();
 
-                                for j in (i + 1)..runtimes.len() {
-                                    let runtime_1 = runtimes.get(j).unwrap();
-                                    let call_1 = runtime_1
-                                        .trace()
-                                        .last_call()
-                                        .wrap_err("failed to get last call")
-                                        .unwrap()
-                                        .unwrap()
-                                        .read_call()
-                                        .wrap_err("failed to read action")
-                                        .unwrap()
-                                        .unwrap();
+            //                     for j in (i + 1)..runtimes.len() {
+            //                         let runtime_1 = runtimes.get(j).unwrap();
+            //                         let call_1 = runtime_1
+            //                             .trace()
+            //                             .last_call()
+            //                             .wrap_err("failed to get last call")
+            //                             .unwrap()
+            //                             .unwrap()
+            //                             .read_call()
+            //                             .wrap_err("failed to read action")
+            //                             .unwrap()
+            //                             .unwrap();
 
-                                    match (call_0.errno, call_1.errno) {
-                                        | (None, None) => {},
-                                        | (Some(errno_0), Some(errno_1))
-                                            if errno_0 == 0 && errno_1 == 0
-                                                || errno_0 != 0 && errno_1 != 0 => {},
-                                        | _ => {
-                                            tracing::error!(
-                                                runtime_a = runtime_0.name(),
-                                                runtime_b = runtime_1.name(),
-                                                runtime_a_errno = call_0.errno,
-                                                runtime_b_errno = call_1.errno,
-                                                "Errno diff found!"
-                                            );
+            //                         match (call_0.errno, call_1.errno) {
+            //                             | (None, None) => {},
+            //                             | (Some(errno_0), Some(errno_1))
+            //                                 if errno_0 == 0 && errno_1 == 0
+            //                                     || errno_0 != 0 && errno_1 != 0 => {},
+            //                             | _ => {
+            //                                 tracing::error!(
+            //                                     runtime_a = runtime_0.name(),
+            //                                     runtime_b = runtime_1.name(),
+            //                                     runtime_a_errno = call_0.errno,
+            //                                     runtime_b_errno = call_1.errno,
+            //                                     "Errno diff found!"
+            //                                 );
 
-                                            cancel.store(true, atomic::Ordering::SeqCst);
-                                            break 'outer;
-                                        },
-                                    }
+            //                                 cancel.store(true, atomic::Ordering::SeqCst);
+            //                                 break 'outer;
+            //                             },
+            //                         }
 
-                                    let runtime_0_walk = WalkDir::new(&runtime_0.base)
-                                        .sort_by_file_name()
-                                        .min_depth(1)
-                                        .into_iter();
-                                    let runtime_1_walk = WalkDir::new(&runtime_1.base)
-                                        .sort_by_file_name()
-                                        .min_depth(1)
-                                        .into_iter();
+            //                         let runtime_0_walk = WalkDir::new(&runtime_0.base)
+            //                             .sort_by_file_name()
+            //                             .min_depth(1)
+            //                             .into_iter();
+            //                         let runtime_1_walk = WalkDir::new(&runtime_1.base)
+            //                             .sort_by_file_name()
+            //                             .min_depth(1)
+            //                             .into_iter();
 
-                                    for pair in runtime_0_walk.zip_longest(runtime_1_walk) {
-                                        match pair {
-                                            | EitherOrBoth::Both(a, b) => {
-                                                let a = a.wrap_err("failed to read dir entry")?;
-                                                let b = b.wrap_err("failed to read dir entry")?;
+            //                         for pair in runtime_0_walk.zip_longest(runtime_1_walk) {
+            //                             match pair {
+            //                                 | EitherOrBoth::Both(a, b) => {
+            //                                     let a = a.wrap_err("failed to read dir entry")?;
+            //                                     let b = b.wrap_err("failed to read dir entry")?;
 
-                                                if a.depth() != b.depth()
-                                                    || a.file_type() != b.file_type()
-                                                    || a.file_name() != b.file_name()
-                                                    || (a.file_type().is_file()
-                                                        && fs::read(a.path())
-                                                            .wrap_err("failed to read file")?
-                                                            != fs::read(b.path())
-                                                                .wrap_err("failed to read file")?)
-                                                {
-                                                    tracing::error!("Fs diff found.");
+            //                                     if a.depth() != b.depth()
+            //                                         || a.file_type() != b.file_type()
+            //                                         || a.file_name() != b.file_name()
+            //                                         || (a.file_type().is_file()
+            //                                             && fs::read(a.path())
+            //                                                 .wrap_err("failed to read file")?
+            //                                                 != fs::read(b.path())
+            //                                                     .wrap_err("failed to read file")?)
+            //                                     {
+            //                                         tracing::error!("Fs diff found.");
 
-                                                    cancel.store(true, atomic::Ordering::SeqCst);
-                                                    break 'outer;
-                                                }
-                                            },
-                                            | EitherOrBoth::Left(_) | EitherOrBoth::Right(_) => {
-                                                tracing::error!("Fs diff found.");
+            //                                         cancel.store(true, atomic::Ordering::SeqCst);
+            //                                         break 'outer;
+            //                                     }
+            //                                 },
+            //                                 | EitherOrBoth::Left(_) | EitherOrBoth::Right(_) => {
+            //                                     tracing::error!("Fs diff found.");
 
-                                                cancel.store(true, atomic::Ordering::SeqCst);
-                                                break 'outer;
-                                            },
-                                        }
-                                    }
-                                }
-                            }
+            //                                     cancel.store(true, atomic::Ordering::SeqCst);
+            //                                     break 'outer;
+            //                                 },
+            //                             }
+            //                         }
+            //                     }
+            //                 }
 
-                            if !cancel.load(atomic::Ordering::SeqCst) {
-                                if let Some(results) = results {
-                                    let z3_cfg = z3::Config::new();
-                                    let z3_ctx = z3::Context::new(&z3_cfg);
-                                    let results = function
-                                        .results
-                                        .iter()
-                                        .zip(results)
-                                        .map(|(result, result_value)| {
-                                            (result.name.clone(), result_value)
-                                        })
-                                        .collect_vec();
-                                    let mut env = env.write().unwrap();
-                                    let result_resource_idxs = env.execute_function_effects(
-                                        &spec, &function, &params, &results,
-                                    );
-                                    let mut strategy =
-                                        self.strategy.into_call_strategy(&mut u, &ctx, &z3_ctx);
+            //                 if !cancel.load(atomic::Ordering::SeqCst) {
+            //                     if let Some(results) = results {
+            //                         let z3_cfg = z3::Config::new();
+            //                         let z3_ctx = z3::Context::new(&z3_cfg);
+            //                         let results = function
+            //                             .results
+            //                             .iter()
+            //                             .zip(results)
+            //                             .map(|(result, result_value)| {
+            //                                 (result.name.clone(), result_value)
+            //                             })
+            //                             .collect_vec();
+            //                         let mut env = env.write().unwrap();
+            //                         let result_resource_idxs = env.execute_function_effects(
+            //                             &spec, &function, &params, &results,
+            //                         );
+            //                         let mut strategy =
+            //                             self.strategy.into_call_strategy(&mut u, &ctx, &z3_ctx);
 
-                                    strategy
-                                        .handle_results(
-                                            &spec,
-                                            &function,
-                                            &mut env,
-                                            params,
-                                            result_resource_idxs,
-                                        )
-                                        .unwrap();
-                                }
-                            }
+            //                         strategy
+            //                             .handle_results(
+            //                                 &spec,
+            //                                 &function,
+            //                                 &mut env,
+            //                                 params,
+            //                                 result_resource_idxs,
+            //                             )
+            //                             .unwrap();
+            //                     }
+            //                 }
 
-                            let (resume_mu, resume_cond) = &*resume_pair;
-                            let mut resume_state = resume_mu.lock().unwrap();
+            //                 let (resume_mu, resume_cond) = &*select_func_done_pair;
+            //                 let mut resume_state = resume_mu.lock().unwrap();
 
-                            resume_state.0 = true;
-                            resume_state.1 = resume_state.1.wrapping_add(1);
-                            resume_cond.notify_all();
-                        }
+            //                 resume_state.0 = true;
+            //                 resume_state.1 = resume_state.1.wrapping_add(1);
+            //                 resume_cond.notify_all();
+            //             }
 
-                        Ok(())
-                    }
-                })
-                .wrap_err("failed to spawn differ thread")?;
+            //             Ok(())
+            //         }
+            //     })
+            //     .wrap_err("failed to spawn differ thread")?;
 
             for runtime_thread in runtime_threads {
                 runtime_thread.join().unwrap()?;

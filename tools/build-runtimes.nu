@@ -12,7 +12,7 @@ let wasmer_path = $"($root)/runtimes/wasmer"
 let wasmtime_path = $"($root)/runtimes/wasmtime"
 let wazero_path = $"($root)/runtimes/wazero"
 
-def build_node [path: string] string {
+def build_node [path: string] {
     cd $path
     ./configure --ninja
     make
@@ -20,7 +20,7 @@ def build_node [path: string] string {
     $path
 }
 
-def build_wamr [path: string] string {
+def build_wamr [path: string] {
     let build_path = $"($path)/product-mini/platforms/($os)/build"
 
     mkdir $build_path
@@ -31,7 +31,7 @@ def build_wamr [path: string] string {
     $build_path
 }
 
-def build_wasmedge [path: string] string {
+def build_wasmedge [path: string] {
     let build_path = $"($path)/build"
     let link_llvm_static = match $os {
         "darwin" => "ON",
@@ -40,27 +40,27 @@ def build_wasmedge [path: string] string {
 
     mkdir $build_path
     cd $build_path
-    cmake -DCMAKE_BUILD_TYPE=Release $"-DWASMEDGE_LINK_LLVM_STATIC=($link_llvm_static)" ..
+    cmake -DCMAKE_BUILD_TYPE=Release ..
     cmake --build .
 
     $"($build_path)/tools/wasmedge"
 }
 
-def build_wasmer [path: string] string {
+def build_wasmer [path: string] {
     cd $path
     make build-wasmer
 
     $"($path)/target/release"
 }
 
-def build_wasmtime [path: string] string {
+def build_wasmtime [path: string] {
     cd $path
     cargo build --release
 
     $"($path)/target/release"
 }
 
-def build_wazero [path: string] string {
+def build_wazero [path: string] {
     cd $path
     CGO_ENABLED=0 go build ./cmd/wazero
 
@@ -76,9 +76,10 @@ def main [] {
         (build_wasmtime $wasmtime_path),
         (build_wazero $wazero_path),
     ]
-    let source_path = $"($root)/tools/activate.nu"
+    let source_prefix = $"($root)/tools/activate"
 
-    cat (std null-device) out> $source_path
+    cat (std null-device) out> $"($source_prefix).nu"
+    cat (std null-device) out> $"($source_prefix).zsh"
 
     mut activate = '$env.path = (
     $env.path'
@@ -86,12 +87,12 @@ def main [] {
 
     for p in $paths {
         $activate = $"($activate)\n    | prepend ($p)"
-        $activate_zsh = $"($activate)\n  ($p)"
+        $activate_zsh = $"($activate_zsh)\n  ($p)"
     }
 
     $activate = $"($activate)\n)\n"
     $activate_zsh = $"($activate_zsh)\n)\nexport PATH"
 
-    $activate out> $source_path
-    $activate_zsh out> $"($source_path).zsh"
+    $activate out> $"($source_prefix).nu"
+    $activate_zsh out> $"($source_prefix).zsh"
 }

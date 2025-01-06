@@ -31,7 +31,11 @@ pub struct EnvironmentInitializer {
 pub fn apply_env_initializers(
     spec: &Spec,
     initializers: &[EnvironmentInitializer],
-) -> (Environment, Vec<RuntimeContext>) {
+) -> (
+    Environment,
+    Vec<RuntimeContext>,
+    BTreeMap<ResourceIdx, PathBuf>,
+) {
     let mut resources: Resources = Default::default();
     let mut fds: BTreeSet<ResourceIdx> = Default::default();
     let fd_tdef = spec.types.get_by_key("fd").unwrap();
@@ -39,6 +43,7 @@ pub fn apply_env_initializers(
     let mut preopen_state_members: Vec<WasiValue> = Default::default();
     let mut reverse_resource_index_fd = HashMap::new();
     let mut ctxs: Vec<RuntimeContext> = vec![RuntimeContext::new(); initializers.len()];
+    let mut preopens = BTreeMap::new();
 
     for member in &fd_type.members {
         preopen_state_members.push(match member.name.as_str() {
@@ -81,6 +86,10 @@ pub fn apply_env_initializers(
                     fds.insert(resource_idx);
                     preopen_ids_.insert(&preopen_name, resource_idx);
 
+                    if preopens.get(&resource_idx).is_none() {
+                        preopens.insert(resource_idx, host_path.clone());
+                    }
+
                     resource_idx
                 },
                 | Some(preopens_ids) => *preopens_ids.get(preopen_name.as_str()).unwrap(),
@@ -109,6 +118,7 @@ pub fn apply_env_initializers(
                 .collect(),
         },
         ctxs,
+        preopens,
     )
 }
 
@@ -392,21 +402,14 @@ impl RuntimeContext {
     }
 }
 
-fn execute_call(
+pub fn execute_call(
     spec: &Spec,
-    ctx: &RuntimeContext,
+    rtctx: &RuntimeContext,
     store: &mut TraceStore<Call>,
     function: &Function,
     params: Vec<HighLevelValue>,
-    strategy: &mut dyn CallStrategy,
     executor: &RunningExecutor,
-) -> Result<
-    (
-        Vec<(WasiValue, Option<ResourceIdx>)>,
-        Option<Vec<MaybeResourceValue>>,
-    ),
-    eyre::Error,
-> {
+) -> Result<(Vec<HighLevelValue>, Option<Vec<WasiValue>>), eyre::Error> {
     store.begin_call(&Call {
         function: function.name.clone(),
         errno:    None,
@@ -414,7 +417,7 @@ fn execute_call(
             .clone()
             .into_iter()
             .map(|value| {
-                let (value, resource_idx) = ctx.lower(value);
+                let (value, resource_idx) = rtctx.lower(value);
 
                 MaybeResourceValue {
                     value,
@@ -434,7 +437,7 @@ fn execute_call(
             .iter()
             .zip(params.clone())
             .map(|(param, value)| {
-                let (value, _resource_idx) = ctx.lower(value);
+                let (value, _resource_idx) = rtctx.lower(value);
 
                 value.into_pb(spec, &param.tref)
             })
@@ -471,16 +474,5 @@ fn execute_call(
         ),
     };
 
-    Ok((
-        params,
-        results.map(|results| {
-            results
-                .iter()
-                .map(|(value, resource_idx)| MaybeResourceValue {
-                    value:        value.to_owned(),
-                    resource_idx: resource_idx.to_owned(),
-                })
-                .collect_vec()
-        }),
-    ))
+    Ok((params, results))
 }

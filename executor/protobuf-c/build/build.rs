@@ -36,7 +36,6 @@ fn main() {
     }
 
     let protoc = PathBuf::from("protoc");
-
     let mut command = process::Command::new(upstream_dir.join("configure").canonicalize().unwrap());
 
     if let Some(protobuf) = protobuf {

@@ -1,4 +1,4 @@
-tools/activate.nu
+tools/activate.*
 
 # Latex paper
 *.aux
