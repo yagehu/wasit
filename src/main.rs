@@ -390,7 +390,7 @@ impl<'s> Fuzzer<'s> {
 
             thread::Builder::new()
                 .name("strategy".to_string())
-                .spawn_scoped(scope, {
+                .spawn({
                     let env = env.clone();
                     let strategy = self.strategy;
                     let select_func_pair = select_func_pair.clone();
@@ -753,11 +753,12 @@ impl<'s> Fuzzer<'s> {
                                         let (mu, cond) = &*diff_done_pair;
                                         let state = mu.lock().unwrap();
                                         let gen = state.1;
+                                        let mut state = cond
+                                            .wait_while(state, |(done, g)| !*done && gen == *g)
+                                            .unwrap();
 
-                                        drop(
-                                            cond.wait_while(state, |(done, g)| !*done && gen == *g)
-                                                .unwrap(),
-                                        );
+                                        state.0 = false;
+                                        state.1 = state.1.wrapping_add(1);
                                     }
 
                                     solve_output_contract_done_rx.recv().unwrap();
