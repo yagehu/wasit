@@ -419,7 +419,7 @@ impl State {
         decls2: &'ctx StateDecls2<'ctx>,
         spec: &Spec,
         function: &Function,
-        params: Option<&[(WasiValue, Option<ResourceIdx>)]>,
+        params: Option<&[HighLevelValue]>,
         contract: Option<&Term>,
     ) -> Bool<'ctx> {
         let mut clauses = Vec::new();
@@ -744,15 +744,16 @@ impl State {
 
         // Constrain non-resource param values.
         if let Some(params) = params {
-            for (function_param, (param_value, _idx)) in function.params.iter().zip(params.iter()) {
+            for (function_param, value) in function.params.iter().zip(params.iter()) {
                 let param_decl = decls.params.get(&function_param.name).unwrap();
                 let tdef = function_param.tref.resolve(spec);
+                let value = env.resolve_value(value);
 
                 if tdef.state.is_some() {
                     continue;
                 }
 
-                clauses.push(types.encode_wasi_value(ctx, spec, param_decl, tdef, param_value));
+                clauses.push(types.encode_wasi_value(ctx, spec, param_decl, tdef, &value));
             }
         }
 
@@ -883,7 +884,7 @@ impl State {
         decls2: &'ctx StateDecls2<'ctx>,
         term: &Term,
         function: &Function,
-        params: Option<&[(WasiValue, Option<ResourceIdx>)]>,
+        params: Option<&[HighLevelValue]>,
     ) -> (Dynamic<'ctx>, Type) {
         match term {
             | Term::Foldl(t) => {
@@ -1118,7 +1119,12 @@ impl State {
                     .enumerate()
                     .find(|(_, param)| &param.name == name)
                     .unwrap();
-                let resource_idx = params.unwrap().get(param_idx).unwrap().1.unwrap();
+                let resource_idx = params
+                    .unwrap()
+                    .get(param_idx)
+                    .unwrap()
+                    .as_resource()
+                    .unwrap();
 
                 (
                     Dynamic::from_ast(&Int::from_u64(ctx, resource_idx.0 as u64)),
@@ -1345,8 +1351,8 @@ impl State {
                     .enumerate()
                     .find(|(_, param)| param.name == t.path)
                     .unwrap();
-                let (_fd_value, fd_resource_idx) = params.unwrap().get(fd_param_idx).unwrap();
-                let (path_value, _path_resource_idx) = params.unwrap().get(path_param_idx).unwrap();
+                let fd_resource_idx = params.unwrap().get(fd_param_idx).unwrap().as_resource();
+                let path_value = env.resolve_value(params.unwrap().get(path_param_idx).unwrap());
                 let fd_resource_idx = fd_resource_idx.unwrap();
                 let mut fd_resource = env.resources.get(fd_resource_idx).unwrap();
                 let fd_tdef = spec.types.get_by_key("fd").unwrap();
@@ -2859,7 +2865,7 @@ impl<'u, 'data, 'ctx> CallStrategy for StatefulStrategy<'u, 'data, 'ctx> {
         spec: &Spec,
         function: &Function,
         env: &mut Environment,
-        params: Vec<(WasiValue, Option<ResourceIdx>)>,
+        params: Vec<HighLevelValue>,
         results: Vec<Option<ResourceIdx>>,
     ) -> Result<(), eyre::Error> {
         let mut state = State::new();
@@ -2884,7 +2890,8 @@ impl<'u, 'data, 'ctx> CallStrategy for StatefulStrategy<'u, 'data, 'ctx> {
             .zip(params.iter())
             .filter(|(function_param, _param)| function_param.tref.resolve(spec).name == "path")
             .map(|(function_param, param)| {
-                let s = String::from_utf8(param.0.string().unwrap().to_vec()).unwrap();
+                let s =
+                    String::from_utf8(env.resolve_value(param).string().unwrap().to_vec()).unwrap();
                 let mut segments = Vec::new();
                 let mut i = 0;
                 let mut last_i = 0;
@@ -2912,7 +2919,6 @@ impl<'u, 'data, 'ctx> CallStrategy for StatefulStrategy<'u, 'data, 'ctx> {
                 (function_param.name.clone(), segments.len())
             })
             .collect();
-
         let types = StateTypes::new(self.ctx, spec);
         let decls = state.declare(
             ArbitraryOrPresolved::Presolved(lens),
@@ -2944,11 +2950,11 @@ impl<'u, 'data, 'ctx> CallStrategy for StatefulStrategy<'u, 'data, 'ctx> {
             let value = match &tdef.state {
                 | Some(_) => {
                     &env.resources
-                        .get(params.get(i).unwrap().1.unwrap())
+                        .get(params.get(i).unwrap().as_resource().unwrap())
                         .unwrap()
                         .state
                 },
-                | None => &params.get(i).unwrap().0,
+                | None => &params.get(i).unwrap().as_concrete().unwrap(),
             };
             let param_node = decls.params.get(&function_param.name).unwrap();
 

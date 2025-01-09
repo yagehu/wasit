@@ -20,6 +20,7 @@ humantime-serde = "1"
 idxspace.workspace = true
 itertools = "0.12"
 memmap = "0.7.0"
+multiqueue = "0.3.2"
 num-bigint = "0.4"
 pest = "2"
 pest_derive = "2"

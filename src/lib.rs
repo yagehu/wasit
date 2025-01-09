@@ -1,13 +1,11 @@
 extern crate wazzi_executor_pb_rust as pb;
 
 pub mod normalization;
+pub mod resource;
 pub mod spec;
-
-mod resource;
 mod strategy;
 
 pub use resource::ResourceIdx;
-use resource::{HighLevelValue, Resource, Resources};
 pub use strategy::{CallStrategy, StatefulStrategy, StatelessStrategy};
 
 use std::{
@@ -17,6 +15,7 @@ use std::{
 
 use eyre::eyre as err;
 use itertools::Itertools;
+use resource::{HighLevelValue, Resource, Resources};
 use serde::{Deserialize, Serialize};
 use spec::{Function, RecordValue, Spec, TypeDef, WasiType, WasiValue};
 use wazzi_executor_pb_rust::WasiFunc;
@@ -187,82 +186,99 @@ impl Environment {
         result_resource_idxs
     }
 
-    pub fn add_resources_to_ctx_recursively(
+    pub fn resolve_value(&self, value: &HighLevelValue) -> WasiValue {
+        match value {
+            | &HighLevelValue::Resource(resource_idx) => {
+                self.resources.get(resource_idx).unwrap().state.clone()
+            },
+            | HighLevelValue::Concrete(wasi_value) => wasi_value.clone(),
+        }
+    }
+
+    pub fn lift_recursively(
         &mut self,
         spec: &Spec,
-        ctx: &mut RuntimeContext,
+        mut ctxs: Vec<(&mut RuntimeContext, &WasiValue)>,
         tdef: &TypeDef,
-        value: &WasiValue,
     ) -> Option<ResourceIdx> {
-        match (&tdef.wasi, value) {
-            | (WasiType::Handle, _)
-            | (WasiType::S64, _)
-            | (WasiType::U8, _)
-            | (WasiType::U16, _)
-            | (WasiType::U32, _)
-            | (WasiType::U64, _) => (),
-            | (WasiType::Record(record), WasiValue::Record(record_value)) => {
-                for (member, member_value) in record.members.iter().zip(record_value.members.iter())
-                {
-                    self.add_resources_to_ctx_recursively(
-                        spec,
-                        ctx,
-                        member.tref.resolve(spec),
-                        member_value,
-                    );
-                }
-            },
-            | (WasiType::Record(_), _) => panic!(),
-            | (WasiType::Flags(_), _) => (),
-            | (WasiType::Pointer(pointer), WasiValue::List(pointer_value)) => {
-                for item in &pointer_value.items {
-                    self.add_resources_to_ctx_recursively(
-                        spec,
-                        ctx,
-                        pointer.item.resolve(spec),
-                        item,
-                    );
-                }
-            },
-            | (WasiType::Pointer(_), _) => panic!(),
-            | (WasiType::List(list), WasiValue::List(list_value)) => {
-                for item in &list_value.items {
-                    self.add_resources_to_ctx_recursively(spec, ctx, list.item.resolve(spec), item);
-                }
-            },
-            | (WasiType::List(_), _) => panic!(),
-            | (WasiType::String, _) => (),
-            | (WasiType::Variant(variant), WasiValue::Variant(variant_value)) => {
-                let case = &variant.cases[variant_value.case_idx];
+        let mut passes = Vec::new();
+        let mut passes_tdef = None;
 
-                if let (Some(payload), Some(payload_value)) =
-                    (&case.payload, &variant_value.payload)
-                {
-                    self.add_resources_to_ctx_recursively(
-                        spec,
-                        ctx,
-                        payload.resolve(spec),
-                        payload_value,
-                    );
-                }
-            },
-            | (WasiType::Variant(_), _) => panic!(),
+        for (_ctx, value) in ctxs.iter() {
+            match (&tdef.wasi, value) {
+                | (WasiType::Handle, _)
+                | (WasiType::S64, _)
+                | (WasiType::U8, _)
+                | (WasiType::U16, _)
+                | (WasiType::U32, _)
+                | (WasiType::U64, _) => (),
+                | (WasiType::Record(record), WasiValue::Record(record_value)) => {
+                    for (member, member_value) in
+                        record.members.iter().zip(record_value.members.iter())
+                    {
+                        passes_tdef = Some(member.tref.resolve(spec));
+                        passes.push(member_value);
+                    }
+                },
+                | (WasiType::Record(_), _) => panic!(),
+                | (WasiType::Flags(_), _) => (),
+                | (WasiType::Pointer(pointer), WasiValue::List(pointer_value)) => {
+                    for item in &pointer_value.items {
+                        passes_tdef = Some(pointer.item.resolve(spec));
+                        passes.push(item);
+                    }
+                },
+                | (WasiType::Pointer(_), _) => panic!(),
+                | (WasiType::List(list), WasiValue::List(list_value)) => {
+                    for item in &list_value.items {
+                        passes_tdef = Some(list.item.resolve(spec));
+                        passes.push(item);
+                    }
+                },
+                | (WasiType::List(_), _) => panic!(),
+                | (WasiType::String, _) => (),
+                | (WasiType::Variant(variant), WasiValue::Variant(variant_value)) => {
+                    let case = &variant.cases[variant_value.case_idx];
+
+                    if let (Some(payload), Some(payload_value)) =
+                        (&case.payload, &variant_value.payload)
+                    {
+                        passes_tdef = Some(payload.resolve(spec));
+                        passes.push(payload_value);
+                    }
+                },
+                | (WasiType::Variant(_), _) => panic!(),
+            }
         }
 
+        let mut resource_id = None;
+
         if let Some(state) = &tdef.state {
-            let resource_id = self.new_resource(
+            let id = self.new_resource(
                 tdef.name.clone(),
                 Resource {
                     state: state.zero_value(spec),
                 },
             );
 
-            ctx.resources.insert(resource_id, value.to_owned());
+            for (ctx, value) in ctxs.iter_mut() {
+                ctx.resources.insert(id, (*value).clone());
+            }
 
-            return Some(resource_id);
+            resource_id = Some(id);
         }
 
-        None
+        if let Some(tdef) = passes_tdef {
+            let ctxs = ctxs
+                .into_iter()
+                .map(|(ctx, _)| ctx)
+                .zip(passes)
+                .collect_vec();
+
+            self.lift_recursively(spec, ctxs, tdef);
+        }
+
+        resource_id
     }
 
     fn register_result_value_resource_recursively(
@@ -371,27 +387,7 @@ impl RuntimeContext {
         }
     }
 
-    fn lift(
-        &mut self,
-        env: &mut Environment,
-        spec: &Spec,
-        tdef: &TypeDef,
-        value: WasiValue,
-    ) -> Option<ResourceIdx> {
-        match &tdef.state {
-            | None => return None,
-            | Some(state_type) => {
-                let state = state_type.zero_value(spec);
-                let resource_idx = env.new_resource(tdef.name.clone(), Resource { state });
-
-                self.resources.insert(resource_idx, value);
-
-                Some(resource_idx)
-            },
-        }
-    }
-
-    fn lower(&self, value: HighLevelValue) -> (WasiValue, Option<ResourceIdx>) {
+    pub fn lower(&self, value: HighLevelValue) -> (WasiValue, Option<ResourceIdx>) {
         match value {
             | HighLevelValue::Resource(resource_idx) => (
                 self.resources.get(&resource_idx).unwrap().to_owned(),
@@ -409,7 +405,7 @@ pub fn execute_call(
     function: &Function,
     params: Vec<HighLevelValue>,
     executor: &RunningExecutor,
-) -> Result<(Vec<HighLevelValue>, Option<Vec<WasiValue>>), eyre::Error> {
+) -> Result<(Option<i32>, Option<Vec<WasiValue>>), eyre::Error> {
     store.begin_call(&Call {
         function: function.name.clone(),
         errno:    None,
@@ -474,5 +470,5 @@ pub fn execute_call(
         ),
     };
 
-    Ok((params, results))
+    Ok((errno, results))
 }

@@ -44,3 +44,19 @@ pub enum HighLevelValue {
     Resource(ResourceIdx),
     Concrete(WasiValue),
 }
+
+impl HighLevelValue {
+    pub fn as_resource(&self) -> Option<ResourceIdx> {
+        match self {
+            | Self::Resource(r) => Some(*r),
+            | _ => None,
+        }
+    }
+
+    pub fn as_concrete(&self) -> Option<&WasiValue> {
+        match self {
+            | Self::Concrete(c) => Some(c),
+            | _ => None,
+        }
+    }
+}

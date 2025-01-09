@@ -83,7 +83,7 @@ def main [] {
 
     mut activate = '$env.path = (
     $env.path'
-    mut activate_zsh = 'path=('
+    mut activate_zsh = 'path+=('
 
     for p in $paths {
         $activate = $"($activate)\n    | prepend ($p)"
