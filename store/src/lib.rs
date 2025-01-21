@@ -4,37 +4,53 @@ use std::{
     io::{self, BufReader, BufWriter},
     marker::PhantomData,
     path::{Path, PathBuf},
+    sync::{
+        atomic::{self, AtomicUsize},
+        Arc,
+    },
 };
 
 use eyre::{Context, ContextCompat as _};
 use serde::{de::DeserializeOwned, Serialize};
 
-#[derive(Clone, Debug)]
-pub struct FuzzStore {
+#[derive(Debug)]
+pub struct Store {
     path: PathBuf,
-    next: usize,
+    next: Arc<AtomicUsize>,
 }
 
-impl FuzzStore {
+impl Store {
     pub fn new(path: &Path) -> Result<Self, io::Error> {
-        fs::create_dir_all(path)?;
-
-        let path = path.canonicalize()?;
-
-        Ok(Self { path, next: 0 })
+        Ok(Self {
+            path: path.canonicalize()?,
+            next: Arc::new(AtomicUsize::new(0)),
+        })
     }
 
-    pub fn new_run(&mut self) -> Result<RunStore, io::Error> {
-        let run_idx = self.next;
+    pub fn new_run(&self) -> Result<RunStore, io::Error> {
+        let idx = self.next.fetch_add(1, atomic::Ordering::SeqCst);
+        let id = format!("{idx}");
+        let path = self.path.join("runs").join(&id);
 
-        self.next += 1;
+        fs::create_dir_all(&path)?;
+        fs::create_dir(path.join("data"))?;
 
-        RunStore::new(&self.path.join(format!("{:03}", run_idx)))
+        Ok(RunStore {
+            id,
+            path: path.clone(),
+            data_next_idx: 0,
+            data_dir: path.join("data"),
+            runtimes_dir: path.canonicalize()?.join("runtimes"),
+            runtimes: Default::default(),
+        })
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct RunStore {
+    pub id:   String,
+    pub path: PathBuf,
+
     data_next_idx: usize,
     data_dir:      PathBuf,
     runtimes_dir:  PathBuf,
@@ -42,44 +58,6 @@ pub struct RunStore {
 }
 
 impl RunStore {
-    pub fn resume(path: &Path) -> Result<Self, io::Error> {
-        let path = path.canonicalize()?;
-        let data_dir = path.join("data");
-        let runtimes_dir = path.join("runtimes");
-        let mut runtimes = HashSet::new();
-
-        for entry in fs::read_dir(&runtimes_dir)? {
-            let entry = entry?;
-
-            runtimes.insert(entry.file_name().into_string().unwrap());
-        }
-
-        Ok(Self {
-            data_next_idx: 0,
-            data_dir,
-            runtimes_dir,
-            runtimes,
-        })
-    }
-
-    pub fn new(path: &Path) -> Result<Self, io::Error> {
-        fs::create_dir(path)?;
-
-        let path = path.canonicalize()?;
-        let data_dir = path.join("data");
-        let runtimes_dir = path.join("runtimes");
-
-        fs::create_dir(&data_dir)?;
-        fs::create_dir(&runtimes_dir)?;
-
-        Ok(Self {
-            data_next_idx: 0,
-            data_dir,
-            runtimes_dir,
-            runtimes: Default::default(),
-        })
-    }
-
     pub fn new_runtime<T: Serialize + DeserializeOwned>(
         &mut self,
         name: String,

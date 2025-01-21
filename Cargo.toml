@@ -11,10 +11,13 @@ wazzi-executor-pb-rust.workspace = true
 wazzi-runners.workspace = true
 wazzi-store.workspace = true
 
+actix = "0.13.5"
 arbitrary.workspace = true
 clap = { version = "4", features = ["derive"] }
 color-eyre.workspace = true
+dyn-clone.workspace = true
 eyre.workspace = true
+futures = "0.3.31"
 humantime = "2"
 humantime-serde = "1"
 idxspace.workspace = true
@@ -37,6 +40,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 walkdir = "2"
 z3 = { git = "https://github.com/yagehu/z3.rs.git", branch = "wazzi" }
 z3-sys = { git = "https://github.com/yagehu/z3.rs.git", branch = "wazzi" }
+threadpool = "1.8.1"
+actix-rt = "2.10.0"
 
 [build-dependencies]
 
@@ -75,6 +80,7 @@ arbitrary = "1"
 bimap = "0.6"
 cc = "*"
 color-eyre = "0.6"
+dyn-clone = "1"
 eyre = "0.6"
 gcollections = "1"
 nix = { version = "0.28", features = ["process", "signal"] }

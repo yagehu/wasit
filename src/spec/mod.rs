@@ -8,7 +8,7 @@ use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use witx::slang;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Spec {
     pub(crate) types:      IndexSpace<String, TypeDef>,
     pub(crate) interfaces: IndexSpace<String, Interface>,

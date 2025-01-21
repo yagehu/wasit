@@ -1,6 +1,8 @@
 mod stateful;
 mod stateless;
 
+use std::fmt::Debug;
+
 pub use stateful::StatefulStrategy;
 pub use stateless::StatelessStrategy;
 

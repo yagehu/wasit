@@ -12,6 +12,7 @@ use std::{
     thread,
 };
 
+use dyn_clone::DynClone;
 use eyre::Context;
 use protobuf::Message as _;
 use serde::{Deserialize, Serialize};
@@ -83,18 +84,23 @@ pub trait WasiRunner: fmt::Debug + Send + Sync {
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Node<'p> {
+    name: String,
     path: &'p Path,
 }
 
 impl<'p> Node<'p> {
-    pub fn new(path: &'p Path) -> Self {
-        Self { path }
+    pub fn new(name: String, path: &'p Path) -> Self {
+        Self { name, path }
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
     }
 }
 
 impl Default for Node<'_> {
     fn default() -> Self {
-        Self::new(Path::new("node"))
+        Self::new("node".to_string(), Path::new("node"))
     }
 }
 
@@ -132,18 +138,23 @@ impl WasiRunner for Node<'_> {
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Wasmedge<'p> {
+    name: String,
     path: &'p Path,
 }
 
 impl<'p> Wasmedge<'p> {
-    pub fn new(path: &'p Path) -> Self {
-        Self { path }
+    pub fn new(name: String, path: &'p Path) -> Self {
+        Self { name, path }
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
     }
 }
 
 impl Default for Wasmedge<'_> {
     fn default() -> Self {
-        Self::new(Path::new("wasmedge"))
+        Self::new("wasmedge".to_string(), Path::new("wasmedge"))
     }
 }
 
@@ -181,18 +192,23 @@ impl WasiRunner for Wasmedge<'_> {
 
 #[derive(Clone, Debug)]
 pub struct Wasmer<'p> {
-    pub path: &'p Path,
+    name: String,
+    path: &'p Path,
 }
 
 impl Default for Wasmer<'_> {
     fn default() -> Self {
-        Self::new(Path::new("wasmer"))
+        Self::new("wasmer".to_string(), Path::new("wasmer"))
     }
 }
 
 impl<'p> Wasmer<'p> {
-    pub fn new(path: &'p Path) -> Self {
-        Self { path }
+    pub fn new(name: String, path: &'p Path) -> Self {
+        Self { name, path }
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
     }
 }
 
@@ -230,18 +246,23 @@ impl WasiRunner for Wasmer<'_> {
 
 #[derive(Clone, Debug)]
 pub struct Wasmtime<'p> {
-    pub path: &'p Path,
+    name: String,
+    path: &'p Path,
 }
 
 impl Default for Wasmtime<'_> {
     fn default() -> Self {
-        Self::new(Path::new("wasmtime"))
+        Self::new("wasmtime".to_string(), Path::new("wasmtime"))
     }
 }
 
 impl<'p> Wasmtime<'p> {
-    pub fn new(path: &'p Path) -> Self {
-        Self { path }
+    pub fn new(name: String, path: &'p Path) -> Self {
+        Self { name, path }
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
     }
 }
 
@@ -278,18 +299,23 @@ impl WasiRunner for Wasmtime<'_> {
 
 #[derive(Clone, Debug)]
 pub struct Wamr<'p> {
+    name: String,
     path: &'p Path,
 }
 
 impl Default for Wamr<'_> {
     fn default() -> Self {
-        Self::new(Path::new("iwasm"))
+        Self::new("wamr".to_string(), Path::new("iwasm"))
     }
 }
 
 impl<'p> Wamr<'p> {
-    pub fn new(path: &'p Path) -> Self {
-        Self { path }
+    pub fn new(name: String, path: &'p Path) -> Self {
+        Self { name, path }
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
     }
 }
 
@@ -324,18 +350,23 @@ impl WasiRunner for Wamr<'_> {
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Wazero<'p> {
+    name: String,
     path: &'p Path,
 }
 
 impl<'p> Wazero<'p> {
-    pub fn new(path: &'p Path) -> Self {
-        Self { path }
+    pub fn new(name: String, path: &'p Path) -> Self {
+        Self { name, path }
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
     }
 }
 
 impl Default for Wazero<'_> {
     fn default() -> Self {
-        Self::new(Path::new("wazero"))
+        Self::new("wazero".to_string(), Path::new("wazero"))
     }
 }
 

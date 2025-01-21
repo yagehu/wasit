@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use dyn_clone::{clone_trait_object, DynClone};
 use wazzi_runners::{MappedDir, Node, Wamr, WasiRunner, Wasmedge, Wasmer, Wasmtime, Wazero};
 
 use crate::{
@@ -8,9 +9,52 @@ use crate::{
     RunningExecutor,
 };
 
-pub trait InitializeState: WasiRunner {
+pub trait Runtime: InitializeState + WasiRunner + DynClone {
+    fn name(&self) -> &str;
+}
+
+clone_trait_object!(Runtime);
+
+impl Runtime for Node<'_> {
+    fn name(&self) -> &str {
+        self.name()
+    }
+}
+
+impl Runtime for Wasmedge<'_> {
+    fn name(&self) -> &str {
+        self.name()
+    }
+}
+
+impl Runtime for Wasmer<'_> {
+    fn name(&self) -> &str {
+        self.name()
+    }
+}
+
+impl Runtime for Wasmtime<'_> {
+    fn name(&self) -> &str {
+        self.name()
+    }
+}
+
+impl Runtime for Wamr<'_> {
+    fn name(&self) -> &str {
+        self.name()
+    }
+}
+
+impl Runtime for Wazero<'_> {
+    fn name(&self) -> &str {
+        self.name()
+    }
+}
+
+pub trait InitializeState {
     fn initialize_state(
         &self,
+        name: String,
         spec: &Spec,
         executor: &RunningExecutor,
         mapped_dirs: Vec<MappedDir>,
@@ -18,6 +62,7 @@ pub trait InitializeState: WasiRunner {
 }
 
 fn initialize(
+    name: String,
     spec: &Spec,
     executor: &RunningExecutor,
     mapped_dirs: Vec<MappedDir>,
@@ -123,45 +168,49 @@ fn initialize(
         fd += 1;
     }
 
-    Ok(EnvironmentInitializer { preopens })
+    Ok(EnvironmentInitializer { name, preopens })
 }
 
 impl InitializeState for Node<'_> {
     fn initialize_state(
         &self,
+        name: String,
         spec: &Spec,
         executor: &RunningExecutor,
         mapped_dirs: Vec<MappedDir>,
     ) -> Result<EnvironmentInitializer, eyre::Error> {
-        initialize(spec, executor, mapped_dirs)
+        initialize(name, spec, executor, mapped_dirs)
     }
 }
 
 impl InitializeState for Wamr<'_> {
     fn initialize_state(
         &self,
+        name: String,
         spec: &Spec,
         executor: &RunningExecutor,
         mapped_dirs: Vec<MappedDir>,
     ) -> Result<EnvironmentInitializer, eyre::Error> {
-        initialize(spec, executor, mapped_dirs)
+        initialize(name, spec, executor, mapped_dirs)
     }
 }
 
 impl InitializeState for Wasmedge<'_> {
     fn initialize_state(
         &self,
+        name: String,
         spec: &Spec,
         executor: &RunningExecutor,
         mapped_dirs: Vec<MappedDir>,
     ) -> Result<EnvironmentInitializer, eyre::Error> {
-        initialize(spec, executor, mapped_dirs)
+        initialize(name, spec, executor, mapped_dirs)
     }
 }
 
 impl InitializeState for Wasmer<'_> {
     fn initialize_state(
         &self,
+        name: String,
         spec: &Spec,
         executor: &RunningExecutor,
         mapped_dirs: Vec<MappedDir>,
@@ -281,28 +330,30 @@ impl InitializeState for Wasmer<'_> {
             ));
         }
 
-        Ok(EnvironmentInitializer { preopens })
+        Ok(EnvironmentInitializer { name, preopens })
     }
 }
 
 impl InitializeState for Wasmtime<'_> {
     fn initialize_state(
         &self,
+        name: String,
         spec: &Spec,
         executor: &RunningExecutor,
         mapped_dirs: Vec<MappedDir>,
     ) -> Result<EnvironmentInitializer, eyre::Error> {
-        initialize(spec, executor, mapped_dirs)
+        initialize(name, spec, executor, mapped_dirs)
     }
 }
 
 impl InitializeState for Wazero<'_> {
     fn initialize_state(
         &self,
+        name: String,
         spec: &Spec,
         executor: &RunningExecutor,
         mapped_dirs: Vec<MappedDir>,
     ) -> Result<EnvironmentInitializer, eyre::Error> {
-        initialize(spec, executor, mapped_dirs)
+        initialize(name, spec, executor, mapped_dirs)
     }
 }

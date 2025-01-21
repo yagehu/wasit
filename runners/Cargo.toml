@@ -7,6 +7,7 @@ publish.workspace = true
 [dependencies]
 wazzi-executor-pb-rust.workspace = true
 
+dyn-clone.workspace = true
 eyre.workspace = true
 protobuf.workspace = true
 serde.workspace = true

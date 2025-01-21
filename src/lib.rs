@@ -24,6 +24,7 @@ use wazzi_store::TraceStore;
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct EnvironmentInitializer {
+    name:     String,
     preopens: Vec<(String, PathBuf, WasiValue)>,
 }
 

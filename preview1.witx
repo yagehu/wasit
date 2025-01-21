@@ -1209,21 +1209,21 @@
     ;;; The path at which to create the directory.
     (param $path $path)
     (result $error (expected (error $errno)))
-    (@input
-      (@and
-        ; $path should be non-empty.
-        ;(@int.gt (@list.len (param $path)) 0)
+    ;;(@input
+    ;;  (@and
+    ;;    ; $path should be non-empty.
+    ;;    ;(@int.gt (@list.len (param $path)) 0)
 
-        ; $path should not be absolute (begin with a `/`).
-        ;(@not (@value.eq (@str.at (param $path) 0) "/"))
-        
-        ; When generating path segments, if we generate one corresponding to a
-        ; non-existent directory, the next segment shall not be `..`.
-        ; This excludes uninteresting path normalization differences between
-        ; Windows and Linux.
-        ;(@no-nonexistent-dir-backtrack $fd $path)
-      )
-    )
+    ;;    ; $path should not be absolute (begin with a `/`).
+    ;;    ;(@not (@value.eq (@str.at (param $path) 0) "/"))
+    ;;    
+    ;;    ; When generating path segments, if we generate one corresponding to a
+    ;;    ; non-existent directory, the next segment shall not be `..`.
+    ;;    ; This excludes uninteresting path normalization differences between
+    ;;    ; Windows and Linux.
+    ;;    ;(@no-nonexistent-dir-backtrack $fd $path)
+    ;;  )
+    ;;)
   )
 
   (@interface func (export "path_open")
