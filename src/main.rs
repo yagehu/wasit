@@ -47,7 +47,6 @@ use wazzi::{
 use wazzi_runners::{MappedDir, Node, RunningExecutor, Wamr, Wasmedge, Wasmer, Wasmtime, Wazero};
 use wazzi_store::{RuntimeStore, Store};
 
-static FUZZER_COUNT: usize = 8;
 static BUF_SIZE: usize = 131072;
 
 #[derive(Parser, Debug)]
@@ -60,6 +59,9 @@ struct Cmd {
 
     #[arg(long, value_enum, default_value_t = Strategy::Stateful)]
     strategy: Strategy,
+
+    #[arg(short = 'c', default_value = "1")]
+    fuzzer_count: usize,
 }
 
 #[derive(clap::ValueEnum, Serialize, Deserialize, PartialEq, Eq, Clone, Copy, Debug)]
@@ -150,7 +152,7 @@ fn main() -> Result<(), eyre::Error> {
         runtimes,
     );
 
-    fuzzer.fuzz_loop(config.limit)?;
+    fuzzer.fuzz_loop(cmd.fuzzer_count, config.limit)?;
 
     Ok(())
 }
@@ -178,13 +180,13 @@ impl Fuzzer {
         }
     }
 
-    pub fn fuzz_loop(&mut self, limit: Option<FuzzLoopLimit>) -> Result<(), eyre::Error> {
-        let pool = ThreadPool::new(FUZZER_COUNT);
+    pub fn fuzz_loop(&mut self, fuzzer_count: usize, limit: Option<FuzzLoopLimit>) -> Result<(), eyre::Error> {
+        let pool = ThreadPool::new(fuzzer_count);
         let cancel = Arc::new(AtomicBool::new(false));
         let runtime_initializers = Arc::new(self.runtimes.clone());
 
         while !cancel.load(atomic::Ordering::SeqCst) {
-            if pool.active_count() >= pool.max_count() - 1 {
+            if pool.active_count() >= pool.max_count() {
                 thread::sleep(Duration::from_millis(100));
                 continue;
             }
