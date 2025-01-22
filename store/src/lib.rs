@@ -109,6 +109,7 @@ impl RunStore<Setup> {
 }
 
 impl RunStore<Running> {
+    /// Should be called only once per thread.
     pub fn configure_progress_logging(&mut self) {
         let progress_file = fs::OpenOptions::new()
             .create(true)

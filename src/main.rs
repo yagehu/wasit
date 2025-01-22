@@ -19,7 +19,7 @@ use std::{
 };
 
 use arbitrary::Unstructured;
-use clap::Parser;
+use clap::{builder::TypedValueParser, Parser};
 use eyre::{eyre as err, Context as _};
 use itertools::{EitherOrBoth, Itertools as _};
 use memmap::MmapOptions;
@@ -49,6 +49,23 @@ use wazzi_store::{RuntimeStore, Store};
 
 static BUF_SIZE: usize = 131072;
 
+#[derive(Clone, Debug)]
+struct HumantimeParser;
+
+impl TypedValueParser for HumantimeParser {
+    type Value = Duration;
+
+    fn parse_ref(
+        &self,
+        _cmd: &clap::Command,
+        _arg: Option<&clap::Arg>,
+        value: &std::ffi::OsStr,
+    ) -> Result<Self::Value, clap::Error> {
+        Ok(humantime::parse_duration(&value.to_string_lossy())
+            .map_err(|e| clap::Error::raw(clap::error::ErrorKind::ValueValidation, e))?)
+    }
+}
+
 #[derive(Parser, Debug)]
 struct Cmd {
     #[arg()]
@@ -59,6 +76,9 @@ struct Cmd {
 
     #[arg(long, value_enum, default_value_t = Strategy::Stateful)]
     strategy: Strategy,
+
+    #[arg(long, value_parser = HumantimeParser)]
+    time_limit: Option<Duration>,
 
     #[arg(short = 'c', default_value = "1")]
     fuzzer_count: usize,
@@ -152,7 +172,7 @@ fn main() -> Result<(), eyre::Error> {
         runtimes,
     );
 
-    fuzzer.fuzz_loop(cmd.fuzzer_count, config.limit)?;
+    fuzzer.fuzz_loop(cmd.fuzzer_count, cmd.time_limit)?;
 
     Ok(())
 }
@@ -180,13 +200,33 @@ impl Fuzzer {
         }
     }
 
-    pub fn fuzz_loop(&mut self, fuzzer_count: usize, limit: Option<FuzzLoopLimit>) -> Result<(), eyre::Error> {
-        let pool = ThreadPool::new(fuzzer_count);
+    pub fn fuzz_loop(&mut self, fuzzer_count: usize, time_limit: Option<Duration>) -> Result<(), eyre::Error> {
         let cancel = Arc::new(AtomicBool::new(false));
+
+        if let Some(limit) = &time_limit {
+            thread::Builder::new()
+                .name(format!("diva-timer"))
+                .spawn({
+                    let cancel = cancel.clone();
+                    let limit = limit.to_owned();
+
+                    move || {
+                        thread::sleep(limit);
+                        cancel.store(true, atomic::Ordering::SeqCst);
+                        tracing::warn!(
+                            duration = humantime::Duration::from(limit).to_string(),
+                            "Time's up. Cancelling."
+                        );
+                    }
+                })
+                .wrap_err("failed to spawn timer thread")?;
+        }
+
+        let pool = ThreadPool::new(fuzzer_count);
         let runtime_initializers = Arc::new(self.runtimes.clone());
 
         while !cancel.load(atomic::Ordering::SeqCst) {
-            if pool.active_count() >= pool.max_count() {
+            if pool.active_count() + pool.queued_count() >= pool.max_count() {
                 thread::sleep(Duration::from_millis(100));
                 continue;
             }
@@ -194,7 +234,6 @@ impl Fuzzer {
             pool.execute({
                 let store = self.store.clone();
                 let spec = self.spec.clone();
-                let limit = limit.clone();
                 let cancel = cancel.clone();
                 let strategy = self.strategy.clone();
                 let runtime_initializers = runtime_initializers.clone();
@@ -207,36 +246,6 @@ impl Fuzzer {
                         let spec = Spec::preview1(&spec).wrap_err("failed to init spec")?;
                         let mut initializers: Vec<(String, EnvironmentInitializer)> = Default::default();
                         let mut runtimes: Vec<_> = Default::default();
-                        let data_files = match &limit {
-                            | None => None,
-                            | Some(limit) => match limit {
-                                | FuzzLoopLimit::Time(duration) => {
-                                    thread::Builder::new()
-                                        .name(format!("diva-timer-{run_id}"))
-                                        .spawn({
-                                            let cancel = cancel.clone();
-                                            let duration = duration.clone();
-
-                                            move || {
-                                                thread::sleep(duration);
-                                                cancel.store(true, atomic::Ordering::SeqCst);
-                                                tracing::warn!(
-                                                    duration = humantime::Duration::from(duration).to_string(),
-                                                    "Time's up. Cancelling."
-                                                );
-                                            }
-                                        })
-                                        .wrap_err("failed to spawn timer thread")?;
-
-                                    None
-                                },
-                                | FuzzLoopLimit::Epochs(epochs) => match epochs.get(run_id) {
-                                    | None => return Ok(()),
-                                    | Some(cfg) => Some(&cfg.data_files),
-                                },
-                            },
-                        };
-
                         let mut run = run.start_setup();
 
                         for (runtime_name, runtime) in runtime_initializers.iter() {
@@ -297,21 +306,36 @@ impl Fuzzer {
                                 let data_blk_idx = data_blk_idx.clone();
                                 let fill_init = fill_init.clone();
                                 let mmap = mmap.clone();
+                                let over = over.clone();
+                                let cancel = cancel.clone();
 
                                 move || {
                                     run.lock().unwrap().configure_progress_logging();
 
                                     loop {
-                                        {
+                                        loop {
                                             let (mu, cond) = &*fill_init;
                                             let state = mu.lock().unwrap();
                                             let gen = state.1;
-                                            let mut state = cond
-                                                .wait_while(state, |(ready, g)| *ready != n_runtimes && gen == *g)
+                                            let (mut state, result) = cond
+                                                .wait_timeout_while(state, Duration::from_micros(100), |(ready, g)| {
+                                                    *ready != n_runtimes && gen == *g
+                                                })
                                                 .unwrap();
+
+                                            if cancel.load(atomic::Ordering::SeqCst) {
+                                                over.store(true, atomic::Ordering::SeqCst);
+                                                return;
+                                            }
+
+                                            if result.timed_out() {
+                                                continue;
+                                            }
 
                                             state.0 = 0;
                                             state.1 = state.1.wrapping_add(1);
+
+                                            break;
                                         }
 
                                         match data_blk_idx {
@@ -319,13 +343,14 @@ impl Fuzzer {
                                                 thread_rng().fill_bytes(&mut mmap.lock().unwrap());
                                             },
                                             | Some(ref idx) => {
-                                                let data_file_path = data_files
-                                                    .unwrap()
-                                                    .get(idx.fetch_add(1, atomic::Ordering::SeqCst))
-                                                    .unwrap();
-                                                let data = fs::read(data_file_path).unwrap();
+                                                // let data_file_path = data_files
+                                                //     .unwrap()
+                                                //     .get(idx.fetch_add(1, atomic::Ordering::SeqCst))
+                                                //     .unwrap();
+                                                // let data = fs::read(data_file_path).unwrap();
 
-                                                mmap.lock().unwrap().copy_from_slice(&data);
+                                                // mmap.lock().unwrap().copy_from_slice(&data);
+                                                unimplemented!()
                                             },
                                         }
 
@@ -345,7 +370,10 @@ impl Fuzzer {
                                 cond.notify_all();
                             }
 
-                            fill_done_rx.recv().unwrap();
+                            match fill_done_rx.recv() {
+                                | Ok(_) => (),
+                                | Err(_) => return Ok(()),
+                            }
 
                             unsafe { std::slice::from_raw_parts(mmap.lock().unwrap().as_ptr(), BUF_SIZE) }
                         };
@@ -850,7 +878,7 @@ impl Fuzzer {
                                                 let diff_result = match diff_done_rx.recv() {
                                                     | Ok(result) => result,
                                                     | Err(_) => {
-                                                        tracing::info!("Diff failed. Stopping fuzz run.");
+                                                        tracing::info!("Diff thread terminated. Stopping fuzz run.");
                                                         over.store(true, atomic::Ordering::SeqCst);
                                                         break;
                                                     },
@@ -912,20 +940,12 @@ enum FuzzError {
 struct FuzzConfig {
     runtimes: Vec<RuntimeFuzzConfig>,
     spec:     PathBuf,
-    limit:    Option<FuzzLoopLimit>,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
 enum FuzzLoopLimit {
     #[serde(with = "humantime_serde")]
     Time(Duration),
-
-    Epochs(Vec<EpochConfig>),
-}
-
-#[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
-struct EpochConfig {
-    data_files: Vec<PathBuf>,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone, Debug)]
