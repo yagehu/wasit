@@ -1,24 +1,18 @@
 mod stateful;
 mod stateless;
 
-use std::fmt::Debug;
-
 pub use stateful::StatefulStrategy;
 pub use stateless::StatelessStrategy;
 
 use crate::{
     resource::HighLevelValue,
-    spec::{Function, Spec, WasiValue},
+    spec::{Function, Spec},
     Environment,
     ResourceIdx,
 };
 
 pub trait CallStrategy {
-    fn select_function<'spec>(
-        &mut self,
-        spec: &'spec Spec,
-        env: &Environment,
-    ) -> Result<&'spec Function, eyre::Error>;
+    fn select_function<'spec>(&mut self, spec: &'spec Spec, env: &Environment) -> Result<&'spec Function, eyre::Error>;
 
     fn prepare_arguments(
         &mut self,

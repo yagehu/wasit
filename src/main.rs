@@ -159,7 +159,7 @@ fn main() -> Result<(), eyre::Error> {
 struct Fuzzer {
     spec:     String,
     strategy: Strategy,
-    store:    Store,
+    store:    Arc<Store>,
     runtimes: Vec<(String, Box<dyn Runtime>)>,
 }
 
@@ -173,7 +173,7 @@ impl Fuzzer {
         Self {
             spec,
             strategy,
-            store,
+            store: Arc::new(store),
             runtimes: runtimes.into_iter().collect(),
         }
     }
@@ -189,12 +189,8 @@ impl Fuzzer {
                 continue;
             }
 
-            let run = self.store.new_run()?;
-
-            tracing::info!(run_id = run.id, "Starting new fuzz run.");
-
             pool.execute({
-                let run = Arc::new(Mutex::new(run));
+                let store = self.store.clone();
                 let spec = self.spec.clone();
                 let limit = limit.clone();
                 let cancel = cancel.clone();
@@ -204,7 +200,8 @@ impl Fuzzer {
 
                 move || {
                     thread::scope(|scope| -> Result<(), eyre::Error> {
-                        let run_id: usize = run.lock().unwrap().id.parse().unwrap();
+                        let run = store.new_run()?;
+                        let run_id: usize = run.id.parse().unwrap();
                         let spec = Spec::preview1(&spec).wrap_err("failed to init spec")?;
                         let mut initializers: Vec<(String, EnvironmentInitializer)> = Default::default();
                         let mut runtimes: Vec<_> = Default::default();
@@ -238,10 +235,10 @@ impl Fuzzer {
                             },
                         };
 
+                        let mut run = run.start_setup();
+
                         for (runtime_name, runtime) in runtime_initializers.iter() {
                             let store: RuntimeStore<Call> = run
-                                .lock()
-                                .unwrap()
                                 .new_runtime(runtime_name.to_string(), "-")
                                 .wrap_err("failed to init runtime store")?;
                             let stderr = fs::OpenOptions::new()
@@ -279,6 +276,7 @@ impl Fuzzer {
                             runtimes.push((runtime_name.to_string(), store, executor));
                         }
 
+                        let run = Arc::new(Mutex::new(run.start_run()));
                         let n_runtimes = runtimes.len();
                         let rts = initializers.iter().map(|(name, _)| name.to_string()).collect_vec();
                         let (env, rtctxs, preopens) =
@@ -299,35 +297,39 @@ impl Fuzzer {
                                 let mmap = mmap.clone();
 
                                 move || {
-                                    {
-                                        let (mu, cond) = &*fill_init;
-                                        let state = mu.lock().unwrap();
-                                        let gen = state.1;
-                                        let mut state = cond
-                                            .wait_while(state, |(ready, g)| *ready != n_runtimes && gen == *g)
-                                            .unwrap();
+                                    run.lock().unwrap().configure_progress_logging();
 
-                                        state.0 = 0;
-                                        state.1 = state.1.wrapping_add(1);
-                                    }
-
-                                    match data_blk_idx {
-                                        | None => {
-                                            thread_rng().fill_bytes(&mut mmap.lock().unwrap());
-                                        },
-                                        | Some(ref idx) => {
-                                            let data_file_path = data_files
-                                                .unwrap()
-                                                .get(idx.fetch_add(1, atomic::Ordering::SeqCst))
+                                    loop {
+                                        {
+                                            let (mu, cond) = &*fill_init;
+                                            let state = mu.lock().unwrap();
+                                            let gen = state.1;
+                                            let mut state = cond
+                                                .wait_while(state, |(ready, g)| *ready != n_runtimes && gen == *g)
                                                 .unwrap();
-                                            let data = fs::read(data_file_path).unwrap();
 
-                                            mmap.lock().unwrap().copy_from_slice(&data);
-                                        },
+                                            state.0 = 0;
+                                            state.1 = state.1.wrapping_add(1);
+                                        }
+
+                                        match data_blk_idx {
+                                            | None => {
+                                                thread_rng().fill_bytes(&mut mmap.lock().unwrap());
+                                            },
+                                            | Some(ref idx) => {
+                                                let data_file_path = data_files
+                                                    .unwrap()
+                                                    .get(idx.fetch_add(1, atomic::Ordering::SeqCst))
+                                                    .unwrap();
+                                                let data = fs::read(data_file_path).unwrap();
+
+                                                mmap.lock().unwrap().copy_from_slice(&data);
+                                            },
+                                        }
+
+                                        run.lock().unwrap().write_data(&mmap.lock().unwrap()).unwrap();
+                                        fill_done_tx.try_send(()).unwrap();
                                     }
-
-                                    run.lock().unwrap().write_data(&mmap.lock().unwrap()).unwrap();
-                                    fill_done_tx.try_send(()).unwrap();
                                 }
                             })
                             .wrap_err("failed to spawn buf filler thread")?;
@@ -364,6 +366,7 @@ impl Fuzzer {
                             .spawn_scoped(scope, {
                                 let data = data.to_vec();
                                 let env = env.clone();
+                                let run = run.clone();
                                 let spec = spec.clone();
                                 let over = over.clone();
                                 let select_func_init = select_func_init.clone();
@@ -373,6 +376,8 @@ impl Fuzzer {
                                 let rtctxs = rtctxs.clone();
 
                                 move || {
+                                    run.lock().unwrap().configure_progress_logging();
+
                                     let mut u = Unstructured::new(&data);
                                     let cfg = z3::Config::new();
                                     let ctx = z3::Context::new(&cfg);
@@ -500,11 +505,14 @@ impl Fuzzer {
                         thread::Builder::new()
                             .name(format!("diva-diff-{run_id}"))
                             .spawn_scoped(scope, {
+                                let run = run.clone();
                                 let over = over.clone();
                                 let cancel = cancel.clone();
                                 let diff_init = diff_init.clone();
 
                                 move || -> Result<(), FuzzError> {
+                                    run.lock().unwrap().configure_progress_logging();
+
                                     loop {
                                         let errnos: Vec<_> = loop {
                                             let (mu, cond) = &*diff_init;
@@ -628,16 +636,14 @@ impl Fuzzer {
                                                                             .wrap_err("failed to read file")?)
                                                             {
                                                                 tracing::error!("Fs diff found.");
-
-                                                                cancel.store(true, atomic::Ordering::SeqCst);
-                                                                break 'outer;
+                                                                diff_done_tx.try_send(DiffResult::Filesystem).unwrap();
+                                                                return Ok(());
                                                             }
                                                         },
                                                         | EitherOrBoth::Left(_) | EitherOrBoth::Right(_) => {
                                                             tracing::error!("Fs diff found.");
-
-                                                            cancel.store(true, atomic::Ordering::SeqCst);
-                                                            break 'outer;
+                                                            diff_done_tx.try_send(DiffResult::Filesystem).unwrap();
+                                                            return Ok(());
                                                         },
                                                     }
                                                 }
@@ -657,6 +663,7 @@ impl Fuzzer {
                                 thread::Builder::new()
                                     .name(format!("diva-driver-{run_id}-{runtime_name}"))
                                     .spawn_scoped(scope, {
+                                        let run = run.clone();
                                         let mmap = mmap.clone();
                                         let over = over.clone();
                                         let cancel = cancel.clone();
@@ -677,6 +684,8 @@ impl Fuzzer {
                                         let runtime_name = runtime_name.clone();
 
                                         move || -> Result<(), FuzzError> {
+                                            run.lock().unwrap().configure_progress_logging();
+
                                             let mut iteration = 0;
                                             let mut u = Unstructured::new(data);
 

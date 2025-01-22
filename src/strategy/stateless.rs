@@ -5,7 +5,7 @@ use itertools::Itertools;
 use super::CallStrategy;
 use crate::{
     resource::HighLevelValue,
-    spec::{Function, Spec, WasiValue},
+    spec::{Function, Spec},
     Environment,
     ResourceIdx,
 };
@@ -21,11 +21,7 @@ impl<'u, 'data> StatelessStrategy<'u, 'data> {
 }
 
 impl CallStrategy for StatelessStrategy<'_, '_> {
-    fn select_function<'spec>(
-        &mut self,
-        spec: &'spec Spec,
-        env: &Environment,
-    ) -> Result<&'spec Function, eyre::Error> {
+    fn select_function<'spec>(&mut self, spec: &'spec Spec, env: &Environment) -> Result<&'spec Function, eyre::Error> {
         let mut pool: Vec<&Function> = Default::default();
 
         for (_interface_name, interface) in spec.interfaces.iter() {
@@ -59,10 +55,7 @@ impl CallStrategy for StatelessStrategy<'_, '_> {
             }
         }
 
-        Ok(self
-            .u
-            .choose(pool.as_slice())
-            .wrap_err("failed to choose a function")?)
+        Ok(self.u.choose(pool.as_slice()).wrap_err("failed to choose a function")?)
     }
 
     #[tracing::instrument(skip(self, spec))]
@@ -79,9 +72,7 @@ impl CallStrategy for StatelessStrategy<'_, '_> {
 
             match &tdef.state {
                 | None => {
-                    params.push(HighLevelValue::Concrete(
-                        tdef.wasi.arbitrary_value(spec, self.u)?,
-                    ));
+                    params.push(HighLevelValue::Concrete(tdef.wasi.arbitrary_value(spec, self.u)?));
                 },
                 | Some(_state_type) => {
                     let resources = env
@@ -91,10 +82,7 @@ impl CallStrategy for StatelessStrategy<'_, '_> {
                         .iter()
                         .cloned()
                         .collect_vec();
-                    let resource_id = *self
-                        .u
-                        .choose(&resources)
-                        .wrap_err("failed to choose a resource")?;
+                    let resource_id = *self.u.choose(&resources).wrap_err("failed to choose a resource")?;
 
                     params.push(HighLevelValue::Resource(resource_id));
                 },

@@ -1,5 +1,5 @@
-limit: !Time "30m"
+limit: !Time "1m"
 spec: preview1.witx
 runtimes:
   - name: wamr
-  - name: wasmtime
+  - name: wasmedge

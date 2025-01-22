@@ -36,7 +36,7 @@ tempfile.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 tracing-error = "0.2"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-subscriber.workspace = true
 walkdir = "2"
 z3 = { git = "https://github.com/yagehu/z3.rs.git", branch = "wazzi" }
 z3-sys = { git = "https://github.com/yagehu/z3.rs.git", branch = "wazzi" }
@@ -95,3 +95,4 @@ tempfile = "3"
 tera = "1"
 thiserror = "1"
 tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }

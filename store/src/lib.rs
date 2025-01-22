@@ -1,17 +1,20 @@
 use std::{
     collections::HashSet,
-    fs,
-    io::{self, BufReader, BufWriter},
+    fs::{self, File},
+    io::{self, BufReader, BufWriter, Write},
     marker::PhantomData,
     path::{Path, PathBuf},
     sync::{
         atomic::{self, AtomicUsize},
         Arc,
     },
+    thread,
 };
 
 use eyre::{Context, ContextCompat as _};
 use serde::{de::DeserializeOwned, Serialize};
+use tracing::instrument::WithSubscriber as _;
+use tracing_subscriber::layer::SubscriberExt as _;
 
 #[derive(Debug)]
 pub struct Store {
@@ -27,7 +30,7 @@ impl Store {
         })
     }
 
-    pub fn new_run(&self) -> Result<RunStore, io::Error> {
+    pub fn new_run(&self) -> Result<RunStore<Init>, io::Error> {
         let idx = self.next.fetch_add(1, atomic::Ordering::SeqCst);
         let id = format!("{idx}");
         let path = self.path.join("runs").join(&id);
@@ -42,22 +45,56 @@ impl Store {
             data_dir: path.join("data"),
             runtimes_dir: path.canonicalize()?.join("runtimes"),
             runtimes: Default::default(),
+            progress: PhantomData,
+            tracing_guards: Vec::new(),
         })
     }
 }
 
 #[derive(Debug)]
-pub struct RunStore {
+pub struct RunStore<P> {
     pub id:   String,
     pub path: PathBuf,
 
-    data_next_idx: usize,
-    data_dir:      PathBuf,
-    runtimes_dir:  PathBuf,
-    runtimes:      HashSet<String>,
+    data_next_idx:  usize,
+    data_dir:       PathBuf,
+    runtimes_dir:   PathBuf,
+    runtimes:       HashSet<String>,
+    progress:       PhantomData<P>,
+    tracing_guards: Vec<tracing::dispatcher::DefaultGuard>,
 }
 
-impl RunStore {
+impl RunStore<Init> {
+    pub fn start_setup(self) -> RunStore<Setup> {
+        RunStore {
+            id:             self.id,
+            path:           self.path,
+            data_next_idx:  self.data_next_idx,
+            data_dir:       self.data_dir,
+            runtimes_dir:   self.runtimes_dir,
+            runtimes:       self.runtimes,
+            tracing_guards: self.tracing_guards,
+            progress:       PhantomData,
+        }
+    }
+}
+
+impl RunStore<Setup> {
+    pub fn start_run(self) -> RunStore<Running> {
+        RunStore {
+            id:             self.id,
+            path:           self.path,
+            data_next_idx:  self.data_next_idx,
+            data_dir:       self.data_dir,
+            runtimes_dir:   self.runtimes_dir,
+            runtimes:       self.runtimes,
+            tracing_guards: self.tracing_guards,
+            progress:       PhantomData,
+        }
+    }
+}
+
+impl RunStore<Setup> {
     pub fn new_runtime<T: Serialize + DeserializeOwned>(
         &mut self,
         name: String,
@@ -69,8 +106,29 @@ impl RunStore {
 
         Ok(store)
     }
+}
+
+impl RunStore<Running> {
+    pub fn configure_progress_logging(&mut self) {
+        let progress_file = fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .append(true)
+            .open(self.path.join("progress"))
+            .unwrap();
+        let fuzzer_tracing_subscriber = tracing_subscriber::fmt::layer()
+            .with_ansi(false)
+            .with_thread_names(true)
+            .with_writer(progress_file);
+        let tracing_guard =
+            tracing::subscriber::set_default(tracing_subscriber::Registry::default().with(fuzzer_tracing_subscriber));
+
+        self.tracing_guards.push(tracing_guard);
+    }
 
     pub fn write_data(&mut self, data: &[u8]) -> Result<(), io::Error> {
+        tracing::debug!("Recording newly filled buffer.",);
+
         fs::write(&self.data_dir.join(format!("{}", self.data_next_idx)), data)?;
         self.data_next_idx += 1;
 
@@ -88,6 +146,15 @@ impl RunStore {
             .into_iter())
     }
 }
+
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+pub struct Init;
+
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+pub struct Setup;
+
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+pub struct Running;
 
 #[derive(Debug)]
 pub struct RuntimeStore<T> {
@@ -181,12 +248,7 @@ where
 
         for entry in fs::read_dir(&path)? {
             let entry = entry?;
-            let idx = match entry
-                .file_name()
-                .to_string_lossy()
-                .to_string()
-                .parse::<usize>()
-            {
+            let idx = match entry.file_name().to_string_lossy().to_string().parse::<usize>() {
                 | Ok(idx) => idx,
                 | Err(_) => continue,
             };
