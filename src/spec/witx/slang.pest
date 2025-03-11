@@ -32,6 +32,7 @@ term =
   | value_eq
   | variant_const
 
+  | fs_file_size_get
   | fs_file_type_get
 
   | no_nonexistent_dir_backtrack
@@ -103,6 +104,14 @@ resource_id = { "(" ~ "@resource-id" ~ id ~ ")" }
 value_eq = { "(" ~ "@value.eq" ~ term ~ term ~ ")" }
 
 variant_const = { "(" ~ "@variant.const" ~ id ~ id ~ term? ~ ")" }
+
+fs_file_size_get =
+  { "("
+  ~ "@fs.file.size.get"
+  ~ "(" ~ "param" ~ id ~ ")"
+  ~ term
+  ~ ")"
+  }
 
 fs_file_type_get =
   { "("

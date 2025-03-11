@@ -19,11 +19,7 @@ fn main() {
 
     env::set_current_dir(&upstream_dir).unwrap();
 
-    let status = process::Command::new("./autogen.sh")
-        .spawn()
-        .unwrap()
-        .wait()
-        .unwrap();
+    let status = process::Command::new("./autogen.sh").spawn().unwrap().wait().unwrap();
 
     assert!(status.success());
 
@@ -40,10 +36,7 @@ fn main() {
 
     if let Some(protobuf) = protobuf {
         command
-            .env(
-                "protobuf_CFLAGS",
-                format!("-I{}", protobuf.join("include").display(),),
-            )
+            .env("protobuf_CFLAGS", format!("-I{}", protobuf.join("include").display(),))
             .env(
                 "PKG_CONFIG_PATH",
                 format!(
@@ -53,6 +46,9 @@ fn main() {
                 ),
             );
     }
+
+    command.env("CC", "clang");
+    command.env("CXX", "clang++");
 
     #[cfg(target_os = "macos")]
     command.env("LDFLAGS", "-framework CoreFoundation");

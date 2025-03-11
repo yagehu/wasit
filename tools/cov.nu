@@ -3,12 +3,14 @@
 def main [path: string, runtime: string] {
     let cov_command = match $runtime {
         "wamr" => wamr_cov,
+        "wasmedge" => wasmedge_cov,
+        "wasmedge-wasi" => wasmedge_wasi_cov,
         "wasmtime" => wasmtime_cov,
         "wasmtime-wasi" => wasmtime_wasi_cov,
         _ => ( error make { msg: $"unknown runtime ($runtime)" } )
     }
     let rt = $cov_command.runtime
-    let llvm_prefix = $env.LLVM | default "/usr/local"
+    let llvm_prefix = $env.LLVM? | default "/usr/local"
     let llvm_profdata = [$llvm_prefix, "bin", "llvm-profdata"] | path join
     let llvm_cov = [$llvm_prefix, "bin", "llvm-cov"] | path join
     let prof_raws = glob $"($path)/*"
@@ -37,6 +39,48 @@ def wamr_cov [] {
         runtime: "wamr",
         target: $"runtimes/wasm-micro-runtime/product-mini/platforms/($os)/build/iwasm",
         options: [
+        ]
+    }
+}
+
+def wasmedge_cov [] {
+    let bin = which "wasmedge" | first | get "path"
+    let lib = ldd $bin | find "wasmedge" | ansi strip | split row " " | get 2 | path expand
+
+    {
+        runtime: "wasmedge",
+        target: $lib,
+        options: []
+    }
+}
+
+def wasmedge_wasi_cov [] {
+    let bin = which "wasmedge" | first | get "path"
+    let lib = ldd $bin | find "wasmedge" | ansi strip | split row " " | get 2 | path expand
+
+    {
+        runtime: "wasmedge",
+        target: $lib,
+        options: [
+            "-ignore-filename-regex=/spdlog/",
+            "-ignore-filename-regex=/lld/",
+            "-ignore-filename-regex=/aot/",
+            "-ignore-filename-regex=/ast/",
+            "-ignore-filename-regex=/common/",
+            "-ignore-filename-regex=/driver/",
+            "-ignore-filename-regex=/executor/",
+            "-ignore-filename-regex=/experimental/",
+            "-ignore-filename-regex=/host/mock/",
+            "-ignore-filename-regex=/host/loader/",
+            "-ignore-filename-regex=/host/po/",
+            "-ignore-filename-regex=/loader/",
+            "-ignore-filename-regex=/plugin/",
+            "-ignore-filename-regex=/po/",
+            "-ignore-filename-regex=/system/",
+            "-ignore-filename-regex=/validator/",
+            "-ignore-filename-regex=/vm/",
+            "-ignore-filename-regex=/runtime/",
+            "-ignore-filename-regex=/lib/api/",
         ]
     }
 }

@@ -31,11 +31,7 @@ pub struct EnvironmentInitializer {
 pub fn apply_env_initializers(
     spec: &Spec,
     initializers: &[EnvironmentInitializer],
-) -> (
-    Environment,
-    Vec<RuntimeContext>,
-    BTreeMap<ResourceIdx, PathBuf>,
-) {
+) -> (Environment, Vec<RuntimeContext>, BTreeMap<ResourceIdx, PathBuf>) {
     let mut resources: Resources = Default::default();
     let mut fds: BTreeSet<ResourceIdx> = Default::default();
     let fd_tdef = spec.types.get_by_key("fd").unwrap();
@@ -78,9 +74,7 @@ pub fn apply_env_initializers(
                     let state = WasiValue::Record(RecordValue {
                         members: preopen_state_members.clone(),
                     });
-                    let resource_idx = resources.push(Resource {
-                        state: state.clone(),
-                    });
+                    let resource_idx = resources.push(Resource { state: state.clone() });
 
                     reverse_resource_index_fd.insert(state, resource_idx);
                     fds.insert(resource_idx);
@@ -95,12 +89,8 @@ pub fn apply_env_initializers(
                 | Some(preopens_ids) => *preopens_ids.get(preopen_name.as_str()).unwrap(),
             };
 
-            ctxs[i]
-                .resources
-                .insert(resource_id, preopen_value.to_owned());
-            ctxs[i]
-                .preopens
-                .insert(resource_id, host_path.to_path_buf());
+            ctxs[i].resources.insert(resource_id, preopen_value.to_owned());
+            ctxs[i].preopens.insert(resource_id, host_path.to_path_buf());
         }
 
         if preopens_ids.is_none() {
@@ -113,9 +103,6 @@ pub fn apply_env_initializers(
             resources,
             resources_by_types: [("fd".to_string(), fds.clone())].into_iter().collect(),
             resources_types: fds.into_iter().map(|fd| (fd, "fd".to_string())).collect(),
-            reverse_resource_index: [("fd".to_string(), reverse_resource_index_fd)]
-                .into_iter()
-                .collect(),
         },
         ctxs,
         preopens,
@@ -129,34 +116,22 @@ pub struct Environment {
 
     #[serde(skip)]
     resources_types: HashMap<ResourceIdx, String>,
-
-    #[serde(skip)]
-    reverse_resource_index: HashMap<String, HashMap<WasiValue, ResourceIdx>>,
 }
 
 impl Environment {
     pub fn new() -> Self {
         Self {
-            resources:              Default::default(),
-            resources_by_types:     Default::default(),
-            resources_types:        Default::default(),
-            reverse_resource_index: Default::default(),
+            resources:          Default::default(),
+            resources_by_types: Default::default(),
+            resources_types:    Default::default(),
         }
     }
 
     pub fn new_resource(&mut self, r#type: String, resource: Resource) -> ResourceIdx {
-        let state = resource.state.clone();
         let resource_idx = self.resources.push(resource);
 
-        self.reverse_resource_index
-            .entry(r#type.clone())
-            .or_default()
-            .insert(state, resource_idx);
         self.resources_types.insert(resource_idx, r#type.clone());
-        self.resources_by_types
-            .entry(r#type)
-            .or_default()
-            .insert(resource_idx);
+        self.resources_by_types.entry(r#type).or_default().insert(resource_idx);
 
         resource_idx
     }
@@ -172,11 +147,9 @@ impl Environment {
         let mut result_resource_idxs = Vec::new();
 
         for (result, (name, result_value)) in function.results.iter().zip(results.iter()) {
-            if let Some(id) = self.register_result_value_resource_recursively(
-                spec,
-                result.tref.resolve(spec),
-                &result_value.value,
-            ) {
+            if let Some(id) =
+                self.register_result_value_resource_recursively(spec, result.tref.resolve(spec), &result_value.value)
+            {
                 result_resource_idxs.push(Some(id));
                 resources.insert(name, id);
             } else {
@@ -189,9 +162,7 @@ impl Environment {
 
     pub fn resolve_value(&self, value: &HighLevelValue) -> WasiValue {
         match value {
-            | &HighLevelValue::Resource(resource_idx) => {
-                self.resources.get(resource_idx).unwrap().state.clone()
-            },
+            | &HighLevelValue::Resource(resource_idx) => self.resources.get(resource_idx).unwrap().state.clone(),
             | HighLevelValue::Concrete(wasi_value) => wasi_value.clone(),
         }
     }
@@ -214,9 +185,7 @@ impl Environment {
                 | (WasiType::U32, _)
                 | (WasiType::U64, _) => (),
                 | (WasiType::Record(record), WasiValue::Record(record_value)) => {
-                    for (member, member_value) in
-                        record.members.iter().zip(record_value.members.iter())
-                    {
+                    for (member, member_value) in record.members.iter().zip(record_value.members.iter()) {
                         passes_tdef = Some(member.tref.resolve(spec));
                         passes.push(member_value);
                     }
@@ -241,9 +210,7 @@ impl Environment {
                 | (WasiType::Variant(variant), WasiValue::Variant(variant_value)) => {
                     let case = &variant.cases[variant_value.case_idx];
 
-                    if let (Some(payload), Some(payload_value)) =
-                        (&case.payload, &variant_value.payload)
-                    {
+                    if let (Some(payload), Some(payload_value)) = (&case.payload, &variant_value.payload) {
                         passes_tdef = Some(payload.resolve(spec));
                         passes.push(payload_value);
                     }
@@ -270,11 +237,7 @@ impl Environment {
         }
 
         if let Some(tdef) = passes_tdef {
-            let ctxs = ctxs
-                .into_iter()
-                .map(|(ctx, _)| ctx)
-                .zip(passes)
-                .collect_vec();
+            let ctxs = ctxs.into_iter().map(|(ctx, _)| ctx).zip(passes).collect_vec();
 
             self.lift_recursively(spec, ctxs, tdef);
         }
@@ -297,34 +260,21 @@ impl Environment {
             | (WasiType::U32, _)
             | (WasiType::U64, _) => (),
             | (WasiType::Record(record), WasiValue::Record(record_value)) => {
-                for (member, member_value) in record.members.iter().zip(record_value.members.iter())
-                {
-                    self.register_result_value_resource_recursively(
-                        spec,
-                        member.tref.resolve(spec),
-                        member_value,
-                    );
+                for (member, member_value) in record.members.iter().zip(record_value.members.iter()) {
+                    self.register_result_value_resource_recursively(spec, member.tref.resolve(spec), member_value);
                 }
             },
             | (WasiType::Record(_), _) => panic!(),
             | (WasiType::Flags(_), _) => (),
             | (WasiType::Pointer(pointer), WasiValue::Pointer(pointer_value)) => {
                 for item in &pointer_value.items {
-                    self.register_result_value_resource_recursively(
-                        spec,
-                        pointer.item.resolve(spec),
-                        item,
-                    );
+                    self.register_result_value_resource_recursively(spec, pointer.item.resolve(spec), item);
                 }
             },
             | (WasiType::Pointer(_), _) => panic!(),
             | (WasiType::List(list), WasiValue::List(list_value)) => {
                 for item in &list_value.items {
-                    self.register_result_value_resource_recursively(
-                        spec,
-                        list.item.resolve(spec),
-                        item,
-                    );
+                    self.register_result_value_resource_recursively(spec, list.item.resolve(spec), item);
                 }
             },
             | (WasiType::List(_), _) => panic!(),
@@ -332,14 +282,8 @@ impl Environment {
             | (WasiType::Variant(variant), WasiValue::Variant(variant_value)) => {
                 let case = &variant.cases[variant_value.case_idx];
 
-                if let (Some(payload), Some(payload_value)) =
-                    (&case.payload, &variant_value.payload)
-                {
-                    self.register_result_value_resource_recursively(
-                        spec,
-                        payload.resolve(spec),
-                        payload_value,
-                    );
+                if let (Some(payload), Some(payload_value)) = (&case.payload, &variant_value.payload) {
+                    self.register_result_value_resource_recursively(spec, payload.resolve(spec), payload_value);
                 }
             },
             | (WasiType::Variant(_), _) => panic!(),
@@ -416,10 +360,7 @@ pub fn execute_call(
             .map(|value| {
                 let (value, resource_idx) = rtctx.lower(value);
 
-                MaybeResourceValue {
-                    value,
-                    resource_idx,
-                }
+                MaybeResourceValue { value, resource_idx }
             })
             .collect_vec(),
         results:  None,
@@ -464,9 +405,7 @@ pub fn execute_call(
                 .results
                 .into_iter()
                 .zip(function.results.iter())
-                .map(|(result_value, result)| {
-                    WasiValue::from_pb(result_value, spec, result.tref.resolve(spec))
-                })
+                .map(|(result_value, result)| WasiValue::from_pb(result_value, spec, result.tref.resolve(spec)))
                 .collect_vec(),
         ),
     };

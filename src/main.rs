@@ -8,7 +8,7 @@ use std::{
     path::{Path, PathBuf},
     process,
     sync::{
-        atomic::{self, AtomicBool, AtomicUsize},
+        atomic::{self, AtomicBool},
         Arc,
         Condvar,
         Mutex,
@@ -260,7 +260,7 @@ impl Fuzzer {
                             let executor = RunningExecutor::from_wasi_runner(
                                 runtime.as_ref(),
                                 Path::new("target")
-                                    .join("debug")
+                                    .join("release")
                                     .join("wazzi-executor.wasm")
                                     .canonicalize()
                                     .unwrap()
@@ -297,13 +297,11 @@ impl Fuzzer {
                         let fill_init = Arc::new((Mutex::new((0, 0usize)), Condvar::new()));
                         let (fill_done_tx, fill_done_rx) = broadcast_queue(1);
                         let mmap = Arc::new(Mutex::new(MmapOptions::new().len(BUF_SIZE).map_anon().unwrap()));
-                        let data_blk_idx = Option::<Arc<AtomicUsize>>::None;
 
                         thread::Builder::new()
                             .name(format!("diva-buf-filler-{run_id}"))
                             .spawn_scoped(scope, {
                                 let run = run.clone();
-                                let data_blk_idx = data_blk_idx.clone();
                                 let fill_init = fill_init.clone();
                                 let mmap = mmap.clone();
                                 let over = over.clone();
@@ -312,7 +310,7 @@ impl Fuzzer {
                                 move || {
                                     run.lock().unwrap().configure_progress_logging();
 
-                                    loop {
+                                    'outer: loop {
                                         loop {
                                             let (mu, cond) = &*fill_init;
                                             let state = mu.lock().unwrap();
@@ -323,9 +321,13 @@ impl Fuzzer {
                                                 })
                                                 .unwrap();
 
+                                            if over.load(atomic::Ordering::SeqCst) {
+                                                break 'outer;
+                                            }
+
                                             if cancel.load(atomic::Ordering::SeqCst) {
                                                 over.store(true, atomic::Ordering::SeqCst);
-                                                return;
+                                                break 'outer;
                                             }
 
                                             if result.timed_out() {
@@ -338,25 +340,12 @@ impl Fuzzer {
                                             break;
                                         }
 
-                                        match data_blk_idx {
-                                            | None => {
-                                                thread_rng().fill_bytes(&mut mmap.lock().unwrap());
-                                            },
-                                            | Some(ref idx) => {
-                                                // let data_file_path = data_files
-                                                //     .unwrap()
-                                                //     .get(idx.fetch_add(1, atomic::Ordering::SeqCst))
-                                                //     .unwrap();
-                                                // let data = fs::read(data_file_path).unwrap();
-
-                                                // mmap.lock().unwrap().copy_from_slice(&data);
-                                                unimplemented!()
-                                            },
-                                        }
-
+                                        thread_rng().fill_bytes(&mut mmap.lock().unwrap());
                                         run.lock().unwrap().write_data(&mmap.lock().unwrap()).unwrap();
                                         fill_done_tx.try_send(()).unwrap();
                                     }
+
+                                    tracing::info!("Fuzz over. Stopping thread.");
                                 }
                             })
                             .wrap_err("failed to spawn buf filler thread")?;
@@ -413,7 +402,7 @@ impl Fuzzer {
                                     let ctx = z3::Context::new(&cfg);
                                     let mut strategy = strategy.into_call_strategy(&mut u, &ctx, preopens);
 
-                                    loop {
+                                    'outer: loop {
                                         loop {
                                             let (mu, cond) = &*select_func_init;
                                             let state = mu.lock().unwrap();
@@ -425,7 +414,7 @@ impl Fuzzer {
                                                 .unwrap();
 
                                             if over.load(atomic::Ordering::SeqCst) {
-                                                return;
+                                                break 'outer;
                                             }
 
                                             if result.timed_out() {
@@ -441,16 +430,28 @@ impl Fuzzer {
 
                                         select_func_done_tx.try_send(function.to_owned()).unwrap();
 
-                                        {
+                                        loop {
                                             let (mu, cond) = &*prep_params_init;
                                             let state = mu.lock().unwrap();
                                             let gen = state.1;
-                                            let mut state = cond
-                                                .wait_while(state, |(ready, g)| (*ready != n_runtimes) && *g == gen)
+                                            let (mut state, result) = cond
+                                                .wait_timeout_while(state, Duration::from_micros(100), |(ready, g)| {
+                                                    (*ready != n_runtimes) && *g == gen
+                                                })
                                                 .unwrap();
+
+                                            if over.load(atomic::Ordering::SeqCst) {
+                                                break 'outer;
+                                            }
+
+                                            if result.timed_out() {
+                                                continue;
+                                            }
 
                                             state.0 = 0;
                                             state.1 = state.1.wrapping_add(1);
+
+                                            break;
                                         }
 
                                         let params = strategy
@@ -459,22 +460,32 @@ impl Fuzzer {
 
                                         prep_params_done_tx.try_send(params.clone()).unwrap();
 
-                                        let (results, errno) = {
+                                        let (results, errno) = loop {
                                             let (mu, cond) = &*lift_results_init_pair;
                                             let state = mu.lock().unwrap();
                                             let gen = state.1;
-                                            let mut state = cond
-                                                .wait_while(state, |(ready, g, _results, _errno)| {
-                                                    (*ready != n_runtimes) && *g == gen
-                                                })
+                                            let (mut state, result) = cond
+                                                .wait_timeout_while(
+                                                    state,
+                                                    Duration::from_micros(100),
+                                                    |(ready, g, _results, _errno)| (*ready != n_runtimes) && *g == gen,
+                                                )
                                                 .unwrap();
                                             let mut results = HashMap::new();
+
+                                            if over.load(atomic::Ordering::SeqCst) {
+                                                break 'outer;
+                                            }
+
+                                            if result.timed_out() {
+                                                continue;
+                                            }
 
                                             state.0 = 0;
                                             state.1 = state.1.wrapping_add(1);
                                             std::mem::swap(&mut state.2, &mut results);
 
-                                            (results, state.3.take())
+                                            break (results, state.3.take());
                                         };
 
                                         let mut resource_idxs = Vec::new();
@@ -503,19 +514,34 @@ impl Fuzzer {
 
                                         lift_results_done_tx.try_send(resource_idxs.clone()).unwrap();
 
-                                        {
+                                        loop {
                                             let (mu, cond) = &*solve_output_contract_init;
                                             let state = mu.lock().unwrap();
                                             let gen = state.1;
-                                            let mut state = cond
-                                                .wait_while(state, |(ready, g)| (*ready != n_runtimes) && *g == gen)
+                                            let (mut state, result) = cond
+                                                .wait_timeout_while(state, Duration::from_millis(100), |(ready, g)| {
+                                                    (*ready != n_runtimes) && *g == gen
+                                                })
                                                 .unwrap();
+
+                                            if over.load(atomic::Ordering::SeqCst) {
+                                                tracing::info!("Fuzz over. Stopping thread.");
+                                                break 'outer;
+                                            }
+
+                                            if result.timed_out() {
+                                                continue;
+                                            }
 
                                             state.0 = 0;
                                             state.1 = state.1.wrapping_add(1);
+
+                                            break;
                                         }
 
                                         if errno.is_none() || errno.unwrap() == 0 {
+                                            let result_values = results.get(rts.first().unwrap()).unwrap().clone();
+
                                             strategy
                                                 .handle_results(
                                                     &spec,
@@ -523,12 +549,15 @@ impl Fuzzer {
                                                     &mut env.write().unwrap(),
                                                     params,
                                                     resource_idxs,
+                                                    result_values.as_ref().map(Vec::as_slice),
                                                 )
                                                 .unwrap();
                                         }
 
                                         solve_output_contract_done_tx.try_send(()).unwrap();
                                     }
+
+                                    tracing::info!("Strategy thread exiting.");
                                 }
                             })?;
 
@@ -556,7 +585,9 @@ impl Fuzzer {
                                                 )
                                                 .unwrap();
 
-                                            if over.load(atomic::Ordering::SeqCst) {
+                                            if over.load(atomic::Ordering::SeqCst)
+                                                || cancel.load(atomic::Ordering::SeqCst)
+                                            {
                                                 return Ok(());
                                             }
 
@@ -636,7 +667,7 @@ impl Fuzzer {
                                                             "Errno diff found!"
                                                         );
 
-                                                        cancel.store(true, atomic::Ordering::SeqCst);
+                                                        over.store(true, atomic::Ordering::SeqCst);
                                                         break 'outer;
                                                     },
                                                 }
@@ -761,7 +792,16 @@ impl Fuzzer {
                                                     }
                                                 }
 
-                                                let params = prep_params_done_rx.recv().unwrap();
+                                                let params = match prep_params_done_rx.recv() {
+                                                    | Ok(x) => x,
+                                                    | Err(_) => {
+                                                        tracing::info!(
+                                                            "Strategy thread terminated. Stopping fuzz run."
+                                                        );
+                                                        over.store(true, atomic::Ordering::SeqCst);
+                                                        break;
+                                                    },
+                                                };
                                                 let (errno, results) = execute_call(
                                                     &spec,
                                                     rtctxs.read().unwrap().get(i).unwrap(),
@@ -785,7 +825,16 @@ impl Fuzzer {
                                                     }
                                                 }
 
-                                                let resource_idxs = lift_results_done_rx.recv().unwrap();
+                                                let resource_idxs = match lift_results_done_rx.recv() {
+                                                    | Ok(x) => x,
+                                                    | Err(_) => {
+                                                        tracing::info!(
+                                                            "Strategy thread terminated. Stopping fuzz run."
+                                                        );
+                                                        over.store(true, atomic::Ordering::SeqCst);
+                                                        break;
+                                                    },
+                                                };
 
                                                 store
                                                     .trace_mut()
@@ -817,17 +866,6 @@ impl Fuzzer {
                                                         }),
                                                     })
                                                     .unwrap();
-
-                                                {
-                                                    let (mu, cond) = &*solve_output_contract_init;
-                                                    let mut state = mu.lock().unwrap();
-
-                                                    state.0 += 1;
-
-                                                    if state.0 == n_runtimes {
-                                                        cond.notify_all();
-                                                    }
-                                                }
 
                                                 if u.is_empty() {
                                                     // If the data has been exhausted. Refill it.
@@ -873,8 +911,6 @@ impl Fuzzer {
                                                     }
                                                 }
 
-                                                solve_output_contract_done_rx.recv().unwrap();
-
                                                 let diff_result = match diff_done_rx.recv() {
                                                     | Ok(result) => result,
                                                     | Err(_) => {
@@ -885,7 +921,7 @@ impl Fuzzer {
                                                 };
 
                                                 match diff_result {
-                                                    | DiffResult::Ok => continue,
+                                                    | DiffResult::Ok => (),
                                                     | DiffResult::Errno => {
                                                         tracing::info!("Errno diff found. Stopping fuzz run.");
                                                         over.store(true, atomic::Ordering::SeqCst);
@@ -893,6 +929,25 @@ impl Fuzzer {
                                                     },
                                                     | DiffResult::Filesystem => {
                                                         tracing::info!("Filesystem diff found. Stopping fuzz run.");
+                                                        over.store(true, atomic::Ordering::SeqCst);
+                                                        break;
+                                                    },
+                                                }
+                                                {
+                                                    let (mu, cond) = &*solve_output_contract_init;
+                                                    let mut state = mu.lock().unwrap();
+
+                                                    state.0 += 1;
+
+                                                    if state.0 == n_runtimes {
+                                                        cond.notify_all();
+                                                    }
+                                                }
+
+                                                match solve_output_contract_done_rx.recv() {
+                                                    | Ok(_) => (),
+                                                    | Err(_) => {
+                                                        tracing::info!("Diff thread terminated. Stopping fuzz run.");
                                                         over.store(true, atomic::Ordering::SeqCst);
                                                         break;
                                                     },

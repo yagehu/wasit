@@ -5,7 +5,7 @@ use itertools::Itertools;
 use super::CallStrategy;
 use crate::{
     resource::HighLevelValue,
-    spec::{Function, Spec},
+    spec::{Function, Spec, WasiValue},
     Environment,
     ResourceIdx,
 };
@@ -99,6 +99,7 @@ impl CallStrategy for StatelessStrategy<'_, '_> {
         _env: &mut Environment,
         _params: Vec<HighLevelValue>,
         _results: Vec<Option<ResourceIdx>>,
+        _result_values: Option<&[WasiValue]>,
     ) -> Result<(), eyre::Error> {
         Ok(())
     }

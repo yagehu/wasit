@@ -36,6 +36,7 @@ pub(crate) enum Term {
     ValueEq(Box<ValueEq>),
     VariantConst(Box<VariantConst>),
 
+    FsFileSizeGet(Box<FsFileSizeGet>),
     FsFileTypeGet(FsFileTypeGet),
     NoNonExistentDirBacktrack(Box<NoNonExistentDirBacktrack>),
 }
@@ -49,6 +50,12 @@ pub(crate) struct UnaryTerm {
 pub(crate) struct BinaryTerm {
     pub(crate) lhs: Term,
     pub(crate) rhs: Term,
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub(crate) struct FsFileSizeGet {
+    pub(crate) fd:   String,
+    pub(crate) path: Term,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -200,9 +207,7 @@ pub(super) fn to_term(pair: Pair<'_, Rule>) -> Result<Term, eyre::Error> {
                     let id = pairs.next().unwrap();
                     let tref = pairs.next().unwrap();
                     let tref = match tref.as_rule() {
-                        | Rule::id => {
-                            TypeRef::Wasi(tref.as_str().strip_prefix('$').unwrap().to_string())
-                        },
+                        | Rule::id => TypeRef::Wasi(tref.as_str().strip_prefix('$').unwrap().to_string()),
                         | Rule::r#bool => TypeRef::Wazzi(WazziType::Bool),
                         | Rule::int => TypeRef::Wazzi(WazziType::Int),
                         | _ => panic!("{:#?}", tref),
@@ -244,27 +249,14 @@ pub(super) fn to_term(pair: Pair<'_, Rule>) -> Result<Term, eyre::Error> {
                 .collect::<Result<_, _>>()?,
         }),
         | Rule::or => Term::Or(Or {
-            clauses: pair
-                .into_inner()
-                .map(|p| to_term(p))
-                .collect::<Result<_, _>>()?,
+            clauses: pair.into_inner().map(|p| to_term(p)).collect::<Result<_, _>>()?,
         }),
         | Rule::record_field => {
             let mut pairs = pair.into_inner();
-            let target = to_term(pairs.next().unwrap())
-                .wrap_err("failed to handle @record.field.get target")?;
-            let attr = pairs
-                .next()
-                .unwrap()
-                .as_str()
-                .strip_prefix('$')
-                .unwrap()
-                .to_owned();
+            let target = to_term(pairs.next().unwrap()).wrap_err("failed to handle @record.field.get target")?;
+            let attr = pairs.next().unwrap().as_str().strip_prefix('$').unwrap().to_owned();
 
-            Term::RecordField(Box::new(RecordField {
-                target,
-                member: attr,
-            }))
+            Term::RecordField(Box::new(RecordField { target, member: attr }))
         },
         | Rule::param => Term::Param(Param {
             name: pair
@@ -297,15 +289,8 @@ pub(super) fn to_term(pair: Pair<'_, Rule>) -> Result<Term, eyre::Error> {
         ),
         | Rule::flags_get => {
             let mut pairs = pair.into_inner();
-            let target =
-                to_term(pairs.next().unwrap()).wrap_err("failed to handle @flags.get target")?;
-            let field = pairs
-                .next()
-                .unwrap()
-                .as_str()
-                .strip_prefix('$')
-                .unwrap()
-                .to_owned();
+            let target = to_term(pairs.next().unwrap()).wrap_err("failed to handle @flags.get target")?;
+            let field = pairs.next().unwrap().as_str().strip_prefix('$').unwrap().to_owned();
 
             Term::FlagsGet(Box::new(FlagsGet { target, field }))
         },
@@ -367,20 +352,8 @@ pub(super) fn to_term(pair: Pair<'_, Rule>) -> Result<Term, eyre::Error> {
         },
         | Rule::variant_const => {
             let mut pairs = pair.into_inner();
-            let ty = pairs
-                .next()
-                .unwrap()
-                .as_str()
-                .strip_prefix('$')
-                .unwrap()
-                .to_owned();
-            let case = pairs
-                .next()
-                .unwrap()
-                .as_str()
-                .strip_prefix('$')
-                .unwrap()
-                .to_owned();
+            let ty = pairs.next().unwrap().as_str().strip_prefix('$').unwrap().to_owned();
+            let case = pairs.next().unwrap().as_str().strip_prefix('$').unwrap().to_owned();
             let payload = match pairs.next() {
                 | Some(pair) => Some(to_term(pair)?),
                 | None => None,
@@ -388,46 +361,26 @@ pub(super) fn to_term(pair: Pair<'_, Rule>) -> Result<Term, eyre::Error> {
 
             Term::VariantConst(Box::new(VariantConst { ty, case, payload }))
         },
+        | Rule::fs_file_size_get => {
+            let mut pairs = pair.into_inner();
+            let fd = pairs.next().unwrap().as_str().strip_prefix('$').unwrap().to_string();
+            let path = to_term(pairs.next().unwrap())?;
+
+            Term::FsFileSizeGet(Box::new(FsFileSizeGet { fd, path }))
+        },
         | Rule::fs_file_type_get => {
             let mut pairs = pair.into_inner();
-            let fd = pairs
-                .next()
-                .unwrap()
-                .as_str()
-                .strip_prefix('$')
-                .unwrap()
-                .to_string();
-            let path = pairs
-                .next()
-                .unwrap()
-                .as_str()
-                .strip_prefix('$')
-                .unwrap()
-                .to_string();
+            let fd = pairs.next().unwrap().as_str().strip_prefix('$').unwrap().to_string();
+            let path = pairs.next().unwrap().as_str().strip_prefix('$').unwrap().to_string();
 
             Term::FsFileTypeGet(FsFileTypeGet { fd, path })
         },
         | Rule::no_nonexistent_dir_backtrack => {
             let mut pairs = pair.into_inner();
-            let fd_param = pairs
-                .next()
-                .unwrap()
-                .as_str()
-                .strip_prefix('$')
-                .unwrap()
-                .to_string();
-            let path_param = pairs
-                .next()
-                .unwrap()
-                .as_str()
-                .strip_prefix('$')
-                .unwrap()
-                .to_string();
+            let fd_param = pairs.next().unwrap().as_str().strip_prefix('$').unwrap().to_string();
+            let path_param = pairs.next().unwrap().as_str().strip_prefix('$').unwrap().to_string();
 
-            Term::NoNonExistentDirBacktrack(Box::new(NoNonExistentDirBacktrack {
-                fd_param,
-                path_param,
-            }))
+            Term::NoNonExistentDirBacktrack(Box::new(NoNonExistentDirBacktrack { fd_param, path_param }))
         },
         | _ => panic!("{:?} {:?}", pair.as_rule(), pair.as_str()),
     })

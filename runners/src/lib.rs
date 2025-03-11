@@ -12,7 +12,6 @@ use std::{
     thread,
 };
 
-use dyn_clone::DynClone;
 use eyre::Context;
 use protobuf::Message as _;
 use serde::{Deserialize, Serialize};
@@ -39,9 +38,8 @@ impl RunningExecutor {
             .run(executor_bin, working_dir, preopens)
             .wrap_err(format!("failed to run executor {}", executor_bin.display()))?;
         let mut stderr = child.stderr.take().unwrap();
-        let _stderr_copy_handle = thread::spawn(move || {
-            io::copy(&mut stderr, stderr_logger.lock().unwrap().deref_mut()).unwrap()
-        });
+        let _stderr_copy_handle =
+            thread::spawn(move || io::copy(&mut stderr, stderr_logger.lock().unwrap().deref_mut()).unwrap());
         let stdin = child.stdin.take().unwrap();
         let stdout = child.stdout.take().unwrap();
 

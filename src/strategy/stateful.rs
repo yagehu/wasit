@@ -9,6 +9,7 @@ use arbitrary::Unstructured;
 use eyre::{eyre as err, Context};
 use idxspace::IndexSpace;
 use itertools::Itertools;
+use openat::Dir;
 use petgraph::{data::DataMap as _, graph::DiGraph, visit::IntoNeighborsDirected};
 use z3::{
     ast::{lambda_const, Ast, Bool, Dynamic, Int, Seq},
@@ -89,8 +90,7 @@ impl State {
             self.fds_idxs.insert(idx, node_idx);
 
             if !path.is_empty() {
-                let parent_resource_idx =
-                    ResourceIdx(parent_value.u64().unwrap().try_into().unwrap());
+                let parent_resource_idx = ResourceIdx(parent_value.u64().unwrap().try_into().unwrap());
                 let parent_node_idx = *self.fds_idxs.get(&parent_resource_idx).unwrap();
 
                 self.fds_graph.add_edge(node_idx, parent_node_idx, path);
@@ -125,9 +125,7 @@ impl State {
                 | None => continue,
             };
 
-            for child_node_idx in
-                fds_graph_rev.neighbors_directed(node_idx, petgraph::Direction::Outgoing)
-            {
+            for child_node_idx in fds_graph_rev.neighbors_directed(node_idx, petgraph::Direction::Outgoing) {
                 let mut curr = FileEncodingRef::Directory(&dir);
                 let mut prevs = Vec::new();
                 let child_fd_resource_idx = *fds_graph_rev.node_weight(child_node_idx).unwrap();
@@ -188,11 +186,7 @@ impl State {
             }
 
             for (parent, filename, child) in children_entries {
-                let children = match children_vec
-                    .iter()
-                    .enumerate()
-                    .find(|&(_i, p)| p == &parent)
-                {
+                let children = match children_vec.iter().enumerate().find(|&(_i, p)| p == &parent) {
                     | Some((i, _p)) => children.get_mut(i).unwrap(),
                     | None => {
                         children_vec.push(parent.clone());
@@ -240,7 +234,7 @@ impl State {
                     ctx,
                     &format!("{}--", env.resources_types.get(&idx).unwrap()),
                     &types
-                        .resources
+                        .resource_wrappers
                         .get(env.resources_types.get(&idx).unwrap())
                         .unwrap()
                         .sort,
@@ -269,91 +263,69 @@ impl State {
                     | Term::Not(_t) => todo!(),
                     | Term::And(t) => {
                         for clause in &t.clauses {
-                            scan_primed_in_output_contract(
-                                ctx, types, spec, function, clause, to_solves,
-                            );
+                            scan_primed_in_output_contract(ctx, types, spec, function, clause, to_solves);
                         }
                     },
                     | Term::Or(t) => {
                         for clause in &t.clauses {
-                            scan_primed_in_output_contract(
-                                ctx, types, spec, function, clause, to_solves,
-                            );
+                            scan_primed_in_output_contract(ctx, types, spec, function, clause, to_solves);
                         }
                     },
-                    | Term::RecordField(t) => scan_primed_in_output_contract(
-                        ctx, types, spec, function, &t.target, to_solves,
-                    ),
+                    | Term::RecordField(t) => {
+                        scan_primed_in_output_contract(ctx, types, spec, function, &t.target, to_solves)
+                    },
                     | Term::Param(t) => {
                         if let Some(name) = t.name.strip_suffix('\'') {
-                            let function_param = function
-                                .params
-                                .iter()
-                                .find(|param| param.name == name)
-                                .unwrap();
+                            let function_param = function.params.iter().find(|param| param.name == name).unwrap();
                             let tdef = function_param.tref.resolve(spec);
                             let datatype = types.resources.get(&tdef.name).unwrap();
 
                             to_solves.params.insert(
                                 name.to_string(),
-                                Dynamic::new_const(
-                                    ctx,
-                                    format!("result--{}", t.name),
-                                    &datatype.sort,
-                                ),
+                                Dynamic::new_const(ctx, format!("param--{}", t.name), &datatype.sort),
                             );
                         }
                     },
                     | Term::Result(t) => {
-                        let function_result = function
-                            .results
-                            .iter()
-                            .find(|result| result.name == t.name.strip_suffix('\'').unwrap())
-                            .unwrap();
-                        let tdef = function_result.tref.resolve(spec);
-                        let datatype = types.resources.get(&tdef.name).unwrap();
+                        if let Some(name) = t.name.strip_suffix('\'') {
+                            let function_result = function.results.iter().find(|result| result.name == name).unwrap();
+                            let tdef = function_result.tref.resolve(spec);
+                            let datatype = types.resources.get(&tdef.name).unwrap();
 
-                        to_solves.results.insert(
-                            t.name.strip_suffix('\'').unwrap().to_string(),
-                            Dynamic::new_const(ctx, format!("result--{}", t.name), &datatype.sort),
-                        );
+                            to_solves.results.insert(
+                                t.name.strip_suffix('\'').unwrap().to_string(),
+                                Dynamic::new_const(ctx, format!("result--{}", t.name), &datatype.sort),
+                            );
+                        }
                     },
                     | Term::ResourceId(_) => (),
                     | Term::FlagsGet(_t) => todo!(),
                     | Term::ListLen(_t) => todo!(),
-                    | Term::IntWrap(t) => {
-                        scan_primed_in_output_contract(ctx, types, spec, function, &t.op, to_solves)
-                    },
+                    | Term::IntWrap(t) => scan_primed_in_output_contract(ctx, types, spec, function, &t.op, to_solves),
                     | Term::IntConst(_t) => (),
-                    | Term::IntAdd(_t) => todo!(),
+                    | Term::IntAdd(t) => {
+                        scan_primed_in_output_contract(ctx, types, spec, function, &t.lhs, to_solves);
+                        scan_primed_in_output_contract(ctx, types, spec, function, &t.rhs, to_solves);
+                    },
                     | Term::IntGt(_t) => todo!(),
                     | Term::IntLe(_t) => todo!(),
-                    | Term::U64Const(t) => scan_primed_in_output_contract(
-                        ctx, types, spec, function, &t.term, to_solves,
-                    ),
+                    | Term::U64Const(t) => {
+                        scan_primed_in_output_contract(ctx, types, spec, function, &t.term, to_solves)
+                    },
                     | Term::StrAt(t) => {
-                        scan_primed_in_output_contract(
-                            ctx, types, spec, function, &t.lhs, to_solves,
-                        );
-                        scan_primed_in_output_contract(
-                            ctx, types, spec, function, &t.rhs, to_solves,
-                        );
+                        scan_primed_in_output_contract(ctx, types, spec, function, &t.lhs, to_solves);
+                        scan_primed_in_output_contract(ctx, types, spec, function, &t.rhs, to_solves);
                     },
                     | Term::ValueEq(t) => {
-                        scan_primed_in_output_contract(
-                            ctx, types, spec, function, &t.lhs, to_solves,
-                        );
-                        scan_primed_in_output_contract(
-                            ctx, types, spec, function, &t.rhs, to_solves,
-                        );
+                        scan_primed_in_output_contract(ctx, types, spec, function, &t.lhs, to_solves);
+                        scan_primed_in_output_contract(ctx, types, spec, function, &t.rhs, to_solves);
                     },
                     | Term::VariantConst(t) => {
                         if let Some(payload) = &t.payload {
-                            scan_primed_in_output_contract(
-                                ctx, types, spec, function, payload, to_solves,
-                            );
+                            scan_primed_in_output_contract(ctx, types, spec, function, payload, to_solves);
                         }
                     },
+                    | Term::FsFileSizeGet(_t) => (),
                     | Term::FsFileTypeGet(_t) => (),
                     | Term::NoNonExistentDirBacktrack(_t) => todo!(),
                 }
@@ -366,39 +338,31 @@ impl State {
             .params
             .iter()
             .map(|param| (&param.name, param.tref.resolve(spec)))
-            .map(|(param_name, tdef)| {
-                let datatype = types.resources.get(&tdef.name).unwrap();
+            .map(|(param_name, tdef)| match tdef.name.as_str() {
+                | "path" => {
+                    let len = match &mut aop {
+                        | ArbitraryOrPresolved::Arbitrary(u) => u.choose(&[0, 8]).unwrap() + 1,
+                        | ArbitraryOrPresolved::Presolved(lens) => *lens.get(param_name).unwrap(),
+                    };
+                    let len = if len == 2 { 1 } else { len };
 
-                match tdef.name.as_str() {
-                    | "path" => {
-                        let len = match &mut aop {
-                            | ArbitraryOrPresolved::Arbitrary(u) => u.choose(&[0, 2]).unwrap() + 1,
-                            | ArbitraryOrPresolved::Presolved(lens) => {
-                                *lens.get(param_name).unwrap()
-                            },
-                        };
-                        let len = if len == 2 { 1 } else { len };
+                    (
+                        param_name.to_owned(),
+                        ParamDecl::Path {
+                            segments: (0..len)
+                                .map(|_i| Dynamic::fresh_const(ctx, "param-segment--", &types.segment.sort))
+                                .collect_vec(),
+                        },
+                    )
+                },
+                | _ => {
+                    let datatype = types.resource_wrappers.get(&tdef.name).expect(&tdef.name);
 
-                        (
-                            param_name.to_owned(),
-                            ParamDecl::Path {
-                                segments: (0..len)
-                                    .map(|_i| {
-                                        Dynamic::fresh_const(
-                                            ctx,
-                                            "param-segment--",
-                                            &types.segment.sort,
-                                        )
-                                    })
-                                    .collect_vec(),
-                            },
-                        )
-                    },
-                    | _ => (
+                    (
                         param_name.to_owned(),
                         ParamDecl::Node(Dynamic::fresh_const(ctx, "param--", &datatype.sort)),
-                    ),
-                }
+                    )
+                },
             })
             .collect();
 
@@ -420,6 +384,7 @@ impl State {
         spec: &Spec,
         function: &Function,
         params: Option<&[HighLevelValue]>,
+        results: Option<&[WasiValue]>,
         contract: Option<&Term>,
     ) -> Bool<'ctx> {
         let mut clauses = Vec::new();
@@ -443,11 +408,7 @@ impl State {
         }
 
         {
-            let mut all_dirs = decls
-                .preopens
-                .values()
-                .map(|preopen| &preopen.root.node)
-                .collect_vec();
+            let mut all_dirs = decls.preopens.values().map(|preopen| &preopen.root.node).collect_vec();
             let mut all_files = vec![];
 
             for (_idx, preopen) in decls.preopens.iter() {
@@ -470,13 +431,7 @@ impl State {
                 ctx,
                 all_dirs
                     .iter()
-                    .map(|&dir| {
-                        types.file.variants[0]
-                            .tester
-                            .apply(&[dir])
-                            .as_bool()
-                            .unwrap()
-                    })
+                    .map(|&dir| types.file.variants[0].tester.apply(&[dir]).as_bool().unwrap())
                     .collect_vec()
                     .as_slice(),
             ));
@@ -484,13 +439,7 @@ impl State {
                 ctx,
                 all_files
                     .into_iter()
-                    .map(|dir| {
-                        types.file.variants[1]
-                            .tester
-                            .apply(&[dir])
-                            .as_bool()
-                            .unwrap()
-                    })
+                    .map(|dir| types.file.variants[1].tester.apply(&[dir]).as_bool().unwrap())
                     .collect_vec()
                     .as_slice(),
             ));
@@ -561,19 +510,11 @@ impl State {
                     .params
                     .iter()
                     .filter_map(|(param_name, param_node)| {
-                        let param = function
-                            .params
-                            .iter()
-                            .find(|p| &p.name == param_name)
-                            .unwrap();
+                        let param = function.params.iter().find(|p| &p.name == param_name).unwrap();
                         let tdef = param.tref.resolve(spec);
 
                         if tdef.state.is_some() {
-                            let idxs = env
-                                .resources_by_types
-                                .get(&tdef.name)
-                                .cloned()
-                                .unwrap_or_default();
+                            let idxs = env.resources_by_types.get(&tdef.name).cloned().unwrap_or_default();
 
                             Some(Bool::or(
                                 ctx,
@@ -581,19 +522,30 @@ impl State {
                                     .map(|&idx| {
                                         let resource = env.resources.get(idx).unwrap();
 
-                                        types.encode_wasi_value(
+                                        types.encode_wasi_value_decl(
                                             ctx,
                                             spec,
                                             param_node,
                                             tdef,
                                             &resource.state,
+                                            Some(idx),
                                         )
                                     })
                                     .collect_vec()
                                     .as_slice(),
                             ))
                         } else {
-                            None
+                            if let ParamDecl::Node(node) = param_node {
+                                let datatype = types.resource_wrappers.get(&tdef.name).unwrap();
+
+                                Some(
+                                    datatype.variants[0].accessors[0]
+                                        .apply(&[node])
+                                        ._eq(&Dynamic::from_ast(&Int::from_i64(ctx, -1))),
+                                )
+                            } else {
+                                None
+                            }
                         }
                     })
                     .collect_vec()
@@ -621,73 +573,52 @@ impl State {
                     .map(|(i, segment)| {
                         Bool::and(
                             ctx,
-                            &[
-                                &separator
-                                    .tester
-                                    .apply(&[segment])
-                                    .as_bool()
-                                    .unwrap()
-                                    .implies(&Bool::and(
-                                        ctx,
-                                        &[&separator.accessors[0]
+                            &[&component
+                                .tester
+                                .apply(&[segment])
+                                .as_bool()
+                                .unwrap()
+                                .implies(&Bool::and(
+                                    ctx,
+                                    &[
+                                        &component.accessors[0]
                                             .apply(&[segment])
-                                            .as_int()
+                                            .as_string()
                                             .unwrap()
-                                            ._eq(&Int::from_u64(ctx, i as u64))],
-                                    )),
-                                &component
-                                    .tester
-                                    .apply(&[segment])
-                                    .as_bool()
-                                    .unwrap()
-                                    .implies(&Bool::and(
-                                        ctx,
-                                        &[
-                                            &component.accessors[0]
-                                                .apply(&[segment])
-                                                .as_int()
-                                                .unwrap()
-                                                ._eq(&Int::from_u64(ctx, i as u64)),
-                                            &component.accessors[1]
-                                                .apply(&[segment])
-                                                .as_string()
-                                                .unwrap()
-                                                .length()
-                                                .gt(&Int::from_u64(ctx, 0)),
-                                            // &Bool::or(
-                                            //     ctx,
-                                            //     &[
-                                            //         &component.accessors[1]
-                                            //             .apply(&[segment])
-                                            //             .as_string()
-                                            //             .unwra
-
-                                            //            p()
-                                            //             ._eq(
-                                            //                 &z3::ast::String::from_str(ctx, "a")
-                                            //                     .unwrap(),
-                                            //             ),
-                                            //         &component.accessors[1]
-                                            //             .apply(&[segment])
-                                            //             .as_string()
-                                            //             .unwrap()
-                                            //             ._eq(
-                                            //                 &z3::ast::String::from_str(ctx, ".")
-                                            //                     .unwrap(),
-                                            //             ),
-                                            //         &component.accessors[1]
-                                            //             .apply(&[segment])
-                                            //             .as_string()
-                                            //             .unwrap()
-                                            //             ._eq(
-                                            //                 &z3::ast::String::from_str(ctx, "..")
-                                            //                     .unwrap(),
-                                            //             ),
-                                            //     ],
-                                            // ),
-                                        ],
-                                    )),
-                            ],
+                                            .length()
+                                            .gt(&Int::from_u64(ctx, 0)),
+                                        &Bool::or(
+                                            ctx,
+                                            &[
+                                                &component.accessors[0]
+                                                    .apply(&[segment])
+                                                    .as_string()
+                                                    .unwrap()
+                                                    ._eq(&z3::ast::String::from_str(ctx, "a").unwrap()),
+                                                &component.accessors[0]
+                                                    .apply(&[segment])
+                                                    .as_string()
+                                                    .unwrap()
+                                                    ._eq(&z3::ast::String::from_str(ctx, "b").unwrap()),
+                                                &component.accessors[0]
+                                                    .apply(&[segment])
+                                                    .as_string()
+                                                    .unwrap()
+                                                    ._eq(&z3::ast::String::from_str(ctx, "c").unwrap()),
+                                                &component.accessors[0]
+                                                    .apply(&[segment])
+                                                    .as_string()
+                                                    .unwrap()
+                                                    ._eq(&z3::ast::String::from_str(ctx, ".").unwrap()),
+                                                &component.accessors[0]
+                                                    .apply(&[segment])
+                                                    .as_string()
+                                                    .unwrap()
+                                                    ._eq(&z3::ast::String::from_str(ctx, "..").unwrap()),
+                                            ],
+                                        ),
+                                    ],
+                                ))],
                         )
                     })
                     .collect_vec()
@@ -733,12 +664,7 @@ impl State {
             ));
             clauses.push(Bool::and(
                 ctx,
-                &[separator
-                    .tester
-                    .apply(&[path.last().unwrap()])
-                    .as_bool()
-                    .unwrap()
-                    .not()],
+                &[separator.tester.apply(&[path.last().unwrap()]).as_bool().unwrap().not()],
             ));
         }
 
@@ -753,17 +679,13 @@ impl State {
                     continue;
                 }
 
-                clauses.push(types.encode_wasi_value(ctx, spec, param_decl, tdef, &value));
+                clauses.push(types.encode_wasi_value_decl(ctx, spec, param_decl, tdef, &value, None));
             }
         }
 
         // Constrain param resources.
         for (param_name, param_node) in decls.params.iter() {
-            let param = function
-                .params
-                .iter()
-                .find(|param| &param.name == param_name)
-                .unwrap();
+            let param = function.params.iter().find(|param| &param.name == param_name).unwrap();
             let param_tdef = param.tref.resolve(spec);
 
             if param_tdef.wasi == WasiType::String && params.is_none() {
@@ -863,6 +785,7 @@ impl State {
                     term,
                     function,
                     params,
+                    results,
                 )
                 .0
                 .as_bool()
@@ -885,26 +808,22 @@ impl State {
         term: &Term,
         function: &Function,
         params: Option<&[HighLevelValue]>,
+        results: Option<&[WasiValue]>,
     ) -> (Dynamic<'ctx>, Type) {
         match term {
             | Term::Foldl(t) => {
                 let (target, target_type) = self.term_to_z3_ast(
-                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.target, function, params,
+                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.target, function, params, results,
                 );
                 let (acc, acc_type) = self.term_to_z3_ast(
-                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.acc, function, params,
+                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.acc, function, params, results,
                 );
                 let (func, _func_type) = self.term_to_z3_ast(
-                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.func, function, params,
+                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.func, function, params, results,
                 );
 
                 (
-                    types
-                        .resources
-                        .get(&target_type.wasi().unwrap().name)
-                        .unwrap()
-                        .variants[0]
-                        .accessors[0]
+                    types.resources.get(&target_type.wasi().unwrap().name).unwrap().variants[0].accessors[0]
                         .apply(&[&target])
                         .as_seq()
                         .unwrap()
@@ -923,12 +842,8 @@ impl State {
                                 Type::Wasi(spec.types.get_by_key(wasi).unwrap().clone()),
                             ),
                             | slang::TypeRef::Wazzi(wazzi_type) => match wazzi_type {
-                                | slang::WazziType::Bool => {
-                                    (z3::Sort::bool(ctx), Type::Wazzi(WazziType::Bool))
-                                },
-                                | slang::WazziType::Int => {
-                                    (z3::Sort::int(ctx), Type::Wazzi(WazziType::Int))
-                                },
+                                | slang::WazziType::Bool => (z3::Sort::bool(ctx), Type::Wazzi(WazziType::Bool)),
+                                | slang::WazziType::Int => (z3::Sort::int(ctx), Type::Wazzi(WazziType::Int)),
                             },
                         };
 
@@ -941,7 +856,7 @@ impl State {
                     .map(|b| (b.0.to_owned(), (b.1.clone(), b.2.clone())))
                     .collect();
                 let (body, r#type) = self.term_to_z3_ast(
-                    ctx, env, &eval_ctx, spec, types, decls, decls2, &t.body, function, params,
+                    ctx, env, &eval_ctx, spec, types, decls, decls2, &t.body, function, params, results,
                 );
 
                 (
@@ -951,10 +866,10 @@ impl State {
             },
             | Term::Map(t) => {
                 let (target, target_type) = self.term_to_z3_ast(
-                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.target, function, params,
+                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.target, function, params, results,
                 );
                 let (func, func_type) = self.term_to_z3_ast(
-                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.func, function, params,
+                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.func, function, params, results,
                 );
                 let range = match &func_type {
                     | Type::Wasi(_type_def) => panic!(),
@@ -968,12 +883,7 @@ impl State {
                 };
 
                 (
-                    types
-                        .resources
-                        .get(&target_type.wasi().unwrap().name)
-                        .unwrap()
-                        .variants[0]
-                        .accessors[0]
+                    types.resources.get(&target_type.wasi().unwrap().name).unwrap().variants[0].accessors[0]
                         .apply(&[&target])
                         .as_seq()
                         .unwrap()
@@ -992,7 +902,7 @@ impl State {
             ),
             | Term::Not(t) => {
                 let (term, r#type) = self.term_to_z3_ast(
-                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.term, function, params,
+                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.term, function, params, results,
                 );
 
                 (Dynamic::from_ast(&term.as_bool().unwrap().not()), r#type)
@@ -1004,8 +914,7 @@ impl State {
                         .iter()
                         .map(|clause| {
                             self.term_to_z3_ast(
-                                ctx, env, eval_ctx, spec, types, decls, decls2, clause, function,
-                                params,
+                                ctx, env, eval_ctx, spec, types, decls, decls2, clause, function, params, results,
                             )
                             .0
                             .simplify()
@@ -1024,8 +933,7 @@ impl State {
                         .iter()
                         .map(|clause| {
                             self.term_to_z3_ast(
-                                ctx, env, eval_ctx, spec, types, decls, decls2, clause, function,
-                                params,
+                                ctx, env, eval_ctx, spec, types, decls, decls2, clause, function, params, results,
                             )
                             .0
                             .as_bool()
@@ -1038,7 +946,7 @@ impl State {
             ),
             | Term::RecordField(t) => {
                 let (target, target_type) = self.term_to_z3_ast(
-                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.target, function, params,
+                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.target, function, params, results,
                 );
                 let target_tdef = target_type.wasi().unwrap();
                 let target_datatype = types.resources.get(&target_tdef.name).unwrap();
@@ -1060,35 +968,47 @@ impl State {
                 )
             },
             | Term::Param(t) => {
-                let param_name = if t.name.ends_with('\'') {
-                    t.name.strip_suffix('\'').unwrap()
+                if t.name.ends_with('\'') {
+                    let function_param = function
+                        .params
+                        .iter()
+                        .find(|param| param.name == t.name.strip_suffix('\'').unwrap())
+                        .unwrap();
+                    let tdef = function_param.tref.resolve(spec);
+
+                    (
+                        decls
+                            .to_solves
+                            .params
+                            .get(t.name.strip_suffix('\'').unwrap())
+                            .unwrap()
+                            .clone(),
+                        Type::Wasi(tdef.to_owned()),
+                    )
                 } else {
-                    t.name.as_str()
-                };
+                    let tdef = function
+                        .params
+                        .iter()
+                        .find(|p| p.name == t.name)
+                        .unwrap()
+                        .tref
+                        .resolve(spec);
+                    let param = decls.params.get(&t.name).expect(&format!("{}", t.name));
+                    let node = match param {
+                        | ParamDecl::Node(node) => {
+                            types.resource_wrappers.get(&tdef.name).unwrap().variants[0].accessors[1].apply(&[node])
+                        },
+                        | ParamDecl::Path { segments } => {
+                            let path_type = types.resources.get("path").unwrap();
+                            let segments = segments.iter().map(|segment| Seq::unit(ctx, segment)).collect_vec();
+                            let segments = Seq::concat(ctx, &segments);
 
-                let tdef = function
-                    .params
-                    .iter()
-                    .find(|p| p.name == param_name)
-                    .unwrap()
-                    .tref
-                    .resolve(spec);
-                let param = decls.params.get(param_name).expect(&format!("{}", t.name));
-                let node = match param {
-                    | ParamDecl::Node(node) => node.to_owned(),
-                    | ParamDecl::Path { segments } => {
-                        let path_type = types.resources.get("path").unwrap();
-                        let segments = segments
-                            .iter()
-                            .map(|segment| Seq::unit(ctx, segment))
-                            .collect_vec();
-                        let segments = Seq::concat(ctx, &segments);
+                            path_type.variants[0].constructor.apply(&[&segments])
+                        },
+                    };
 
-                        path_type.variants[0].constructor.apply(&[&segments])
-                    },
-                };
-
-                (node, Type::Wasi(tdef.to_owned()))
+                    (node, Type::Wasi(tdef.to_owned()))
+                }
             },
             | Term::Result(t) => {
                 if t.name.ends_with('\'') {
@@ -1109,31 +1029,51 @@ impl State {
                         Type::Wasi(tdef.to_owned()),
                     )
                 } else {
-                    todo!()
+                    let (idx, result) = function
+                        .results
+                        .iter()
+                        .enumerate()
+                        .find(|(_i, r)| r.name == t.name)
+                        .unwrap();
+                    let result_value = results.unwrap().get(idx).unwrap();
+
+                    (
+                        types.encode_wasi_value(ctx, spec, result.tref.resolve(spec), result_value),
+                        Type::Wasi(result.tref.resolve(spec).clone()),
+                    )
                 }
             },
             | Term::ResourceId(name) => {
-                let (param_idx, _function_param) = function
+                let (_param_idx, function_param) = function
                     .params
                     .iter()
                     .enumerate()
                     .find(|(_, param)| &param.name == name)
                     .unwrap();
-                let resource_idx = params
-                    .unwrap()
-                    .get(param_idx)
-                    .unwrap()
-                    .as_resource()
+                let datatype = types
+                    .resource_wrappers
+                    .get(&function_param.tref.resolve(spec).name)
                     .unwrap();
+                let param_decl = decls.params.get(&function_param.name).unwrap();
 
-                (
-                    Dynamic::from_ast(&Int::from_u64(ctx, resource_idx.0 as u64)),
-                    Type::Wazzi(WazziType::Int),
-                )
+                match param_decl {
+                    | ParamDecl::Node(node) => {
+                        let node = datatype.variants[0].accessors[0].apply(&[node]);
+                        (node, Type::Wazzi(WazziType::Int))
+                    },
+                    | ParamDecl::Path { .. } => unimplemented!(),
+                }
+
+                // let resource_idx = params.unwrap().get(param_idx).unwrap().as_resource().unwrap();
+
+                // (
+                //     Dynamic::from_ast(&Int::from_u64(ctx, resource_idx.0 as u64)),
+                //     Type::Wazzi(WazziType::Int),
+                // )
             },
             | Term::FlagsGet(t) => {
                 let (target, target_type) = self.term_to_z3_ast(
-                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.target, function, params,
+                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.target, function, params, results,
                 );
                 let target_tdef = target_type.wasi().unwrap();
                 let target_datatype = types.resources.get(&target_tdef.name).unwrap();
@@ -1160,7 +1100,7 @@ impl State {
             ),
             | Term::IntWrap(t) => {
                 let (op, op_type) = self.term_to_z3_ast(
-                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.op, function, params,
+                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.op, function, params, results,
                 );
 
                 (
@@ -1170,10 +1110,10 @@ impl State {
             },
             | Term::IntAdd(t) => {
                 let (lhs, lhs_type) = self.term_to_z3_ast(
-                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.lhs, function, params,
+                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.lhs, function, params, results,
                 );
                 let (rhs, rhs_type) = self.term_to_z3_ast(
-                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.rhs, function, params,
+                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.rhs, function, params, results,
                 );
 
                 (
@@ -1189,10 +1129,10 @@ impl State {
             },
             | Term::IntGt(t) => {
                 let (lhs, lhs_type) = self.term_to_z3_ast(
-                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.lhs, function, params,
+                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.lhs, function, params, results,
                 );
                 let (rhs, rhs_type) = self.term_to_z3_ast(
-                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.rhs, function, params,
+                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.rhs, function, params, results,
                 );
 
                 (
@@ -1206,10 +1146,10 @@ impl State {
             },
             | Term::IntLe(t) => {
                 let (lhs, lhs_type) = self.term_to_z3_ast(
-                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.lhs, function, params,
+                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.lhs, function, params, results,
                 );
                 let (rhs, rhs_type) = self.term_to_z3_ast(
-                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.rhs, function, params,
+                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.rhs, function, params, results,
                 );
 
                 (
@@ -1223,7 +1163,7 @@ impl State {
             },
             | Term::ListLen(t) => {
                 let (op, op_type) = self.term_to_z3_ast(
-                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.op, function, params,
+                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.op, function, params, results,
                 );
                 let tdef = op_type.wasi().unwrap();
                 let datatype = types.resources.get(&tdef.name).unwrap();
@@ -1255,7 +1195,7 @@ impl State {
             },
             | Term::U64Const(t) => {
                 let (value, _type) = self.term_to_z3_ast(
-                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.term, function, params,
+                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.term, function, params, results,
                 );
 
                 let datatype = types.resources.get("u64").unwrap();
@@ -1267,10 +1207,10 @@ impl State {
             },
             | Term::StrAt(t) => {
                 let (mut s, s_type) = self.term_to_z3_ast(
-                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.lhs, function, params,
+                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.lhs, function, params, results,
                 );
                 let (i, _type) = self.term_to_z3_ast(
-                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.rhs, function, params,
+                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.rhs, function, params, results,
                 );
 
                 if let Type::Wasi(tdef) = s_type {
@@ -1286,16 +1226,13 @@ impl State {
             },
             | Term::ValueEq(t) => {
                 let (lhs, _lhs_type) = self.term_to_z3_ast(
-                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.lhs, function, params,
+                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.lhs, function, params, results,
                 );
                 let (rhs, _rhs_type) = self.term_to_z3_ast(
-                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.rhs, function, params,
+                    ctx, env, eval_ctx, spec, types, decls, decls2, &t.rhs, function, params, results,
                 );
 
-                (
-                    Dynamic::from_ast(&lhs._eq(&rhs)),
-                    Type::Wazzi(WazziType::Bool),
-                )
+                (Dynamic::from_ast(&lhs._eq(&rhs)), Type::Wazzi(WazziType::Bool))
             },
             | Term::VariantConst(t) => {
                 let datatype = types.resources.get(&t.ty).unwrap();
@@ -1320,6 +1257,7 @@ impl State {
                             payload_term,
                             function,
                             params,
+                            results,
                         );
 
                         vec![payload]
@@ -1328,31 +1266,24 @@ impl State {
                 };
 
                 (
-                    datatype.variants[i].constructor.apply(
-                        payload
-                            .iter()
-                            .map(|p| p as &dyn z3::ast::Ast)
-                            .collect_vec()
-                            .as_slice(),
-                    ),
+                    datatype.variants[i]
+                        .constructor
+                        .apply(payload.iter().map(|p| p as &dyn z3::ast::Ast).collect_vec().as_slice()),
                     Type::Wasi(variant_tdef.to_owned()),
                 )
             },
-            | Term::FsFileTypeGet(t) => {
+            | Term::FsFileSizeGet(t) => {
+                let path = match &t.path {
+                    | Term::String(string) => string,
+                    | _ => unimplemented!(),
+                };
                 let (fd_param_idx, _fd_function_param) = function
                     .params
                     .iter()
                     .enumerate()
                     .find(|(_, param)| param.name == t.fd)
                     .unwrap();
-                let (path_param_idx, _path_function_param) = function
-                    .params
-                    .iter()
-                    .enumerate()
-                    .find(|(_, param)| param.name == t.path)
-                    .unwrap();
                 let fd_resource_idx = params.unwrap().get(fd_param_idx).unwrap().as_resource();
-                let path_value = env.resolve_value(params.unwrap().get(path_param_idx).unwrap());
                 let fd_resource_idx = fd_resource_idx.unwrap();
                 let mut fd_resource = env.resources.get(fd_resource_idx).unwrap();
                 let fd_tdef = spec.types.get_by_key("fd").unwrap();
@@ -1370,8 +1301,7 @@ impl State {
                     .find(|(_i, member)| member.name == "path")
                     .unwrap();
                 let mut curr_fd_resource_idx = fd_resource_idx;
-                let mut paths =
-                    vec![String::from_utf8(path_value.string().unwrap().to_vec()).unwrap()];
+                let mut paths = if path.is_empty() { vec![] } else { vec![path.clone()] };
 
                 loop {
                     let parent_resource_idx = ResourceIdx(
@@ -1422,9 +1352,121 @@ impl State {
                     let path = Path::new(path);
 
                     for component in path.components() {
-                        let filename =
-                            String::from_utf8(component.as_os_str().as_encoded_bytes().to_vec())
-                                .unwrap();
+                        let filename = String::from_utf8(component.as_os_str().as_encoded_bytes().to_vec()).unwrap();
+                        let f = files.last().unwrap();
+
+                        match filename.as_str() {
+                            | ".." => {
+                                files.pop();
+                            },
+                            | "." => (),
+                            | filename => match f {
+                                | FileEncodingRef::Directory(d) => files.push(
+                                    d.children
+                                        .get(filename)
+                                        .expect(&format!("{filename} {:#?}", d.children))
+                                        .as_ref(),
+                                ),
+                                | FileEncodingRef::RegularFile(_f) => unreachable!(),
+                            },
+                        }
+                    }
+                }
+
+                let size = match files.last().unwrap() {
+                    | FileEncodingRef::Directory(_d) => unimplemented!(),
+                    | FileEncodingRef::RegularFile(f) => f.size,
+                };
+
+                (
+                    Dynamic::from_ast(&Int::from_u64(ctx, size)),
+                    Type::Wazzi(WazziType::Int),
+                )
+            },
+            | Term::FsFileTypeGet(t) => {
+                let (fd_param_idx, _fd_function_param) = function
+                    .params
+                    .iter()
+                    .enumerate()
+                    .find(|(_, param)| param.name == t.fd)
+                    .unwrap();
+                let (path_param_idx, _path_function_param) = function
+                    .params
+                    .iter()
+                    .enumerate()
+                    .find(|(_, param)| param.name == t.path)
+                    .unwrap();
+                let fd_resource_idx = params.unwrap().get(fd_param_idx).unwrap().as_resource();
+                let path_value = env.resolve_value(params.unwrap().get(path_param_idx).unwrap());
+                let fd_resource_idx = fd_resource_idx.unwrap();
+                let mut fd_resource = env.resources.get(fd_resource_idx).unwrap();
+                let fd_tdef = spec.types.get_by_key("fd").unwrap();
+                let fd_type = fd_tdef.state.as_ref().unwrap().record().unwrap();
+                let (parent_member_idx, _parent_member_type) = fd_type
+                    .members
+                    .iter()
+                    .enumerate()
+                    .find(|(_i, member)| member.name == "parent")
+                    .unwrap();
+                let (path_member_idx, _path_member_type) = fd_type
+                    .members
+                    .iter()
+                    .enumerate()
+                    .find(|(_i, member)| member.name == "path")
+                    .unwrap();
+                let mut curr_fd_resource_idx = fd_resource_idx;
+                let mut paths = vec![String::from_utf8(path_value.string().unwrap().to_vec()).unwrap()];
+
+                loop {
+                    let parent_resource_idx = ResourceIdx(
+                        fd_resource
+                            .state
+                            .record()
+                            .unwrap()
+                            .members
+                            .get(parent_member_idx)
+                            .unwrap()
+                            .u64()
+                            .unwrap() as usize,
+                    );
+
+                    if curr_fd_resource_idx == parent_resource_idx {
+                        break;
+                    }
+
+                    paths.push(
+                        String::from_utf8(
+                            fd_resource
+                                .state
+                                .record()
+                                .unwrap()
+                                .members
+                                .get(path_member_idx)
+                                .unwrap()
+                                .string()
+                                .unwrap()
+                                .to_vec(),
+                        )
+                        .unwrap(),
+                    );
+                    curr_fd_resource_idx = parent_resource_idx;
+                    fd_resource = env.resources.get(curr_fd_resource_idx).unwrap();
+                }
+
+                let preopen_fd_resource_idx = curr_fd_resource_idx;
+                let (_preopen_resource_idx, preopen) = decls
+                    .preopens
+                    .iter()
+                    .find(|&(&resource_idx, _preopen)| resource_idx == preopen_fd_resource_idx)
+                    .unwrap();
+                let file = FileEncodingRef::Directory(&preopen.root);
+                let mut files = vec![file];
+
+                for path in paths.iter().rev() {
+                    let path = Path::new(path);
+
+                    for component in path.components() {
+                        let filename = String::from_utf8(component.as_os_str().as_encoded_bytes().to_vec()).unwrap();
                         let f = files.last().unwrap();
 
                         match filename.as_str() {
@@ -1491,6 +1533,46 @@ impl State {
         &self,
         ctx: &'ctx z3::Context,
         spec: &Spec,
+        types: &'ctx StateTypes<'ctx>,
+        tdef: &TypeDef,
+        decl: &ParamDecl,
+        model: &z3::Model<'ctx>,
+    ) -> (WasiValue, Option<ResourceIdx>) {
+        match decl {
+            | ParamDecl::Node(node) => {
+                let datatype = types.resource_wrappers.get(&tdef.name).unwrap();
+                let resource_idx = if tdef.state.is_some() {
+                    Some(ResourceIdx(
+                        model
+                            .eval(
+                                &datatype.variants[0].accessors[0].apply(&[node]).as_int().unwrap(),
+                                true,
+                            )
+                            .unwrap()
+                            .as_u64()
+                            .unwrap() as usize,
+                    ))
+                } else {
+                    None
+                };
+                let node = datatype.variants[0].accessors[1].apply(&[node]);
+
+                (
+                    self.decode_to_wasi_value_inner(ctx, spec, types, tdef, &ParamDecl::Node(node), model),
+                    resource_idx,
+                )
+            },
+            | ParamDecl::Path { .. } => (
+                self.decode_to_wasi_value_inner(ctx, spec, types, tdef, &decl, model),
+                None,
+            ),
+        }
+    }
+
+    fn decode_to_wasi_value_inner<'ctx>(
+        &self,
+        ctx: &'ctx z3::Context,
+        spec: &Spec,
         types: &StateTypes,
         tdef: &TypeDef,
         decl: &ParamDecl<'ctx>,
@@ -1532,10 +1614,7 @@ impl State {
             | WasiType::U16 => todo!(),
             | WasiType::U32 => {
                 let i = model
-                    .eval(
-                        &datatype.variants[0].accessors[0].apply(&[decl.node()]),
-                        true,
-                    )
+                    .eval(&datatype.variants[0].accessors[0].apply(&[decl.node()]), true)
                     .unwrap()
                     .as_int()
                     .unwrap();
@@ -1544,10 +1623,7 @@ impl State {
             },
             | WasiType::U64 => WasiValue::U64(
                 model
-                    .eval(
-                        &datatype.variants[0].accessors[0].apply(&[decl.node()]),
-                        true,
-                    )
+                    .eval(&datatype.variants[0].accessors[0].apply(&[decl.node()]), true)
                     .unwrap()
                     .as_int()
                     .unwrap()
@@ -1562,10 +1638,7 @@ impl State {
                     .enumerate()
                     .map(|(i, _field)| {
                         model
-                            .eval(
-                                &datatype.variants[0].accessors[i].apply(&[decl.node()]),
-                                true,
-                            )
+                            .eval(&datatype.variants[0].accessors[i].apply(&[decl.node()]), true)
                             .unwrap()
                             .as_bool()
                             .unwrap()
@@ -1592,14 +1665,12 @@ impl State {
                 }
 
                 let payload = match &variant.cases[case_idx].payload {
-                    | Some(payload_tref) => Some(self.decode_to_wasi_value(
+                    | Some(payload_tref) => Some(self.decode_to_wasi_value_inner(
                         ctx,
                         spec,
                         types,
                         payload_tref.resolve(spec),
-                        &ParamDecl::Node(
-                            datatype.variants[case_idx].accessors[0].apply(&[decl.node()]),
-                        ),
+                        &ParamDecl::Node(datatype.variants[case_idx].accessors[0].apply(&[decl.node()])),
                         model,
                     )),
                     | None => None,
@@ -1613,14 +1684,12 @@ impl State {
                     .iter()
                     .enumerate()
                     .map(|(i, member)| {
-                        self.decode_to_wasi_value(
+                        self.decode_to_wasi_value_inner(
                             ctx,
                             spec,
                             types,
                             member.tref.resolve(spec),
-                            &ParamDecl::Node(
-                                datatype.variants[0].accessors[i].apply(&[decl.node()]),
-                            ),
+                            &ParamDecl::Node(datatype.variants[0].accessors[i].apply(&[decl.node()])),
                             model,
                         )
                     })
@@ -1633,8 +1702,7 @@ impl State {
                     | ParamDecl::Node(node) => {
                         let seq = model
                             .eval(
-                                &types.resources.get("path").unwrap().variants[0].accessors[0]
-                                    .apply(&[node]),
+                                &types.resources.get("path").unwrap().variants[0].accessors[0].apply(&[node]),
                                 true,
                             )
                             .unwrap()
@@ -1658,7 +1726,7 @@ impl State {
                                 s.push_str(
                                     model
                                         .eval(
-                                            &types.segment.variants[1].accessors[1]
+                                            &types.segment.variants[1].accessors[0]
                                                 .apply(&[&seg])
                                                 .as_string()
                                                 .unwrap(),
@@ -1681,11 +1749,7 @@ impl State {
 
                     if model
                         .eval(
-                            &types.segment.variants[0]
-                                .tester
-                                .apply(&[segment])
-                                .as_bool()
-                                .unwrap(),
+                            &types.segment.variants[0].tester.apply(&[segment]).as_bool().unwrap(),
                             true,
                         )
                         .unwrap()
@@ -1696,10 +1760,7 @@ impl State {
                     } else {
                         string.push_str(
                             model
-                                .eval(
-                                    &types.segment.variants[1].accessors[1].apply(&[segment]),
-                                    true,
-                                )
+                                .eval(&types.segment.variants[1].accessors[0].apply(&[segment]), true)
                                 .unwrap()
                                 .as_string()
                                 .unwrap()
@@ -1722,7 +1783,7 @@ impl State {
                 let mut items = Vec::with_capacity(length as usize);
 
                 for i in 0..length {
-                    items.push(self.decode_to_wasi_value(
+                    items.push(self.decode_to_wasi_value_inner(
                         ctx,
                         spec,
                         types,
@@ -1744,7 +1805,7 @@ impl State {
                 let mut items = Vec::with_capacity(length as usize);
 
                 for i in 0..length {
-                    items.push(self.decode_to_wasi_value(
+                    items.push(self.decode_to_wasi_value_inner(
                         ctx,
                         spec,
                         types,
@@ -1767,20 +1828,23 @@ enum ArbitraryOrPresolved<'u, 'data> {
 
 #[derive(Debug)]
 pub(crate) struct StateTypes<'ctx> {
-    resources: BTreeMap<String, z3::DatatypeSort<'ctx>>,
-    file:      z3::DatatypeSort<'ctx>,
-    segment:   z3::DatatypeSort<'ctx>,
+    resource_wrappers: BTreeMap<String, z3::DatatypeSort<'ctx>>,
+    resources:         BTreeMap<String, z3::DatatypeSort<'ctx>>,
+    file:              z3::DatatypeSort<'ctx>,
+    segment:           z3::DatatypeSort<'ctx>,
 }
 
 impl<'ctx> StateTypes<'ctx> {
     fn new(ctx: &'ctx z3::Context, spec: &Spec) -> Self {
         let mut resources = BTreeMap::new();
+        let mut resource_wrappers = BTreeMap::new();
 
         fn encode_type<'ctx>(
             ctx: &'ctx z3::Context,
             spec: &Spec,
             name: &str,
             tdef: &TypeDef,
+            resource_wrappers: &mut BTreeMap<String, z3::DatatypeSort<'ctx>>,
             resource_types: &mut BTreeMap<String, z3::DatatypeSort<'ctx>>,
         ) {
             if resource_types.get(name).is_some() {
@@ -1794,26 +1858,15 @@ impl<'ctx> StateTypes<'ctx> {
             let mut datatype = z3::DatatypeBuilder::new(ctx, name);
 
             datatype = match wasi_type {
-                | WasiType::S64
-                | WasiType::U8
-                | WasiType::U16
-                | WasiType::U32
-                | WasiType::U64
-                | WasiType::Handle => datatype.variant(
-                    name,
-                    vec![(name, z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))],
-                ),
+                | WasiType::S64 | WasiType::U8 | WasiType::U16 | WasiType::U32 | WasiType::U64 | WasiType::Handle => {
+                    datatype.variant(name, vec![(name, z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))])
+                },
                 | WasiType::Flags(flags_type) => datatype.variant(
                     name,
                     flags_type
                         .fields
                         .iter()
-                        .map(|field| {
-                            (
-                                field.as_str(),
-                                z3::DatatypeAccessor::Sort(z3::Sort::bool(ctx)),
-                            )
-                        })
+                        .map(|field| (field.as_str(), z3::DatatypeAccessor::Sort(z3::Sort::bool(ctx))))
                         .collect_vec(),
                 ),
                 | WasiType::Variant(variant_type) => {
@@ -1827,17 +1880,14 @@ impl<'ctx> StateTypes<'ctx> {
                                     spec,
                                     &payload_tdef.name,
                                     payload_tdef,
+                                    resource_wrappers,
                                     resource_types,
                                 );
 
                                 vec![(
                                     "payload",
                                     z3::DatatypeAccessor::Sort(
-                                        resource_types
-                                            .get(&payload_tdef.name)
-                                            .unwrap()
-                                            .sort
-                                            .clone(),
+                                        resource_types.get(&payload_tdef.name).unwrap().sort.clone(),
                                     ),
                                 )]
                             },
@@ -1862,11 +1912,11 @@ impl<'ctx> StateTypes<'ctx> {
                                 spec,
                                 &member_tdef.name,
                                 member.tref.resolve(spec),
+                                resource_wrappers,
                                 resource_types,
                             );
 
-                            let member_datatype =
-                                resource_types.get(&member.tref.resolve(spec).name).unwrap();
+                            let member_datatype = resource_types.get(&member.tref.resolve(spec).name).unwrap();
                             (
                                 member.name.as_str(),
                                 z3::DatatypeAccessor::Sort(member_datatype.sort.clone()),
@@ -1905,28 +1955,32 @@ impl<'ctx> StateTypes<'ctx> {
                 },
             };
 
-            resource_types.insert(tdef.name.clone(), datatype.finish());
+            let datatype = datatype.finish();
+            let wrapper_datatype = z3::DatatypeBuilder::new(ctx, format!("{name}--wrapper"))
+                .variant(
+                    name,
+                    vec![
+                        ("id", z3::DatatypeAccessor::Sort(z3::Sort::int(ctx))),
+                        (name, z3::DatatypeAccessor::Sort(datatype.sort.clone())),
+                    ],
+                )
+                .finish();
+
+            resource_wrappers.insert(tdef.name.clone(), wrapper_datatype);
+            resource_types.insert(tdef.name.clone(), datatype);
         }
 
         let segment_type = z3::DatatypeBuilder::new(ctx, "segment")
             .variant(
                 "separator",
-                vec![(
-                    "segment-idx",
-                    z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)),
-                )],
+                vec![],
+                // vec![("segment-idx", z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))],
             )
             .variant(
                 "component",
                 vec![
-                    (
-                        "segment-idx",
-                        z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)),
-                    ),
-                    (
-                        "component-str",
-                        z3::DatatypeAccessor::Sort(z3::Sort::string(ctx)),
-                    ),
+                    // ("segment-idx", z3::DatatypeAccessor::Sort(z3::Sort::int(ctx))),
+                    ("component-str", z3::DatatypeAccessor::Sort(z3::Sort::string(ctx))),
                 ],
             )
             .finish();
@@ -1949,27 +2003,22 @@ impl<'ctx> StateTypes<'ctx> {
                 continue;
             }
 
-            encode_type(ctx, spec, name, tdef, &mut resources);
+            encode_type(ctx, spec, name, tdef, &mut resource_wrappers, &mut resources);
         }
 
         let file = z3::DatatypeBuilder::new(ctx, "file")
             .variant(
                 "directory",
-                vec![(
-                    "directory-id",
-                    z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)),
-                )],
+                vec![("directory-id", z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))],
             )
             .variant(
                 "regular-file",
-                vec![(
-                    "regular-file-id",
-                    z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)),
-                )],
+                vec![("regular-file-id", z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))],
             )
             .finish();
 
         Self {
+            resource_wrappers,
             resources,
             segment: segment_type,
             file,
@@ -1977,6 +2026,93 @@ impl<'ctx> StateTypes<'ctx> {
     }
 
     fn encode_wasi_value(
+        &self,
+        ctx: &'ctx z3::Context,
+        spec: &Spec,
+        tdef: &TypeDef,
+        value: &WasiValue,
+    ) -> Dynamic<'ctx> {
+        let datatype = self.resources.get(&tdef.name).unwrap();
+
+        match (&tdef.wasi, value) {
+            | (_, &WasiValue::U8(i)) => datatype.variants[0].constructor.apply(&[&Int::from_u64(ctx, i.into())]),
+            | (_, &WasiValue::U16(i)) => datatype.variants[0].constructor.apply(&[&Int::from_u64(ctx, i.into())]),
+            | (_, &WasiValue::U32(i)) => datatype.variants[0].constructor.apply(&[&Int::from_u64(ctx, i.into())]),
+            | (_, &WasiValue::U64(i)) => datatype.variants[0].constructor.apply(&[&Int::from_u64(ctx, i)]),
+            | (_, &WasiValue::S64(i)) => datatype.variants[0].constructor.apply(&[&Int::from_i64(ctx, i)]),
+            | (_, &WasiValue::Handle(h)) => datatype.variants[0].constructor.apply(&[&Int::from_u64(ctx, h.into())]),
+            | (WasiType::Record(record), WasiValue::Record(record_value)) => {
+                let members = record
+                    .members
+                    .iter()
+                    .zip(record_value.members.iter())
+                    .map(|(member, member_value)| {
+                        self.encode_wasi_value(ctx, spec, member.tref.resolve(spec), member_value)
+                    })
+                    .collect_vec();
+
+                datatype.variants[0]
+                    .constructor
+                    .apply(members.iter().map(|x| x as &dyn Ast).collect_vec().as_slice())
+            },
+            | (_, WasiValue::Record(_)) => unreachable!(),
+            | (WasiType::Flags(flags), WasiValue::Flags(flags_value)) => {
+                let fields = flags
+                    .fields
+                    .iter()
+                    .zip(flags_value.fields.iter())
+                    .map(|(_name, &field_value)| Bool::from_bool(ctx, field_value))
+                    .collect_vec();
+
+                datatype.variants[0]
+                    .constructor
+                    .apply(fields.iter().map(|x| x as &dyn Ast).collect_vec().as_slice())
+            },
+            | (_, WasiValue::Flags(_)) => unreachable!(),
+            | _ => unimplemented!(),
+        }
+    }
+
+    fn encode_wasi_value_decl(
+        &self,
+        ctx: &'ctx z3::Context,
+        spec: &Spec,
+        param: &ParamDecl<'ctx>,
+        tdef: &TypeDef,
+        value: &WasiValue,
+        resource_idx: Option<ResourceIdx>,
+    ) -> Bool<'ctx> {
+        match param {
+            | ParamDecl::Node(node) => {
+                let datatype = self.resource_wrappers.get(&tdef.name).unwrap();
+                let clause = match resource_idx {
+                    | Some(resource_idx) => datatype.variants[0].accessors[0]
+                        .apply(&[node])
+                        ._eq(&Dynamic::from_ast(&Int::from_u64(ctx, resource_idx.0 as u64))),
+                    | None => datatype.variants[0].accessors[0]
+                        .apply(&[node])
+                        ._eq(&Dynamic::from_ast(&Int::from_i64(ctx, -1))),
+                };
+
+                Bool::and(
+                    ctx,
+                    &[
+                        clause,
+                        self.encode_wasi_value_decl_inner(
+                            ctx,
+                            spec,
+                            &ParamDecl::Node(datatype.variants[0].accessors[1].apply(&[node])),
+                            tdef,
+                            value,
+                        ),
+                    ],
+                )
+            },
+            | ParamDecl::Path { .. } => self.encode_wasi_value_decl_inner(ctx, spec, param, tdef, value),
+        }
+    }
+
+    fn encode_wasi_value_decl_inner(
         &self,
         ctx: &'ctx z3::Context,
         spec: &Spec,
@@ -2029,12 +2165,10 @@ impl<'ctx> StateTypes<'ctx> {
                     .enumerate()
                     .zip(record_value.members.iter())
                     .map(|((i, member), member_value)| {
-                        self.encode_wasi_value(
+                        self.encode_wasi_value_decl_inner(
                             ctx,
                             spec,
-                            &ParamDecl::Node(
-                                datatype.variants[0].accessors[i].apply(&[param.node()]),
-                            ),
+                            &ParamDecl::Node(datatype.variants[0].accessors[i].apply(&[param.node()])),
                             member.tref.resolve(spec),
                             member_value,
                         )
@@ -2084,15 +2218,12 @@ impl<'ctx> StateTypes<'ctx> {
                 }
 
                 if last_i < i {
-                    segments.push(Segment::Component(&s[last_i..i]));
+                    segments.push(Segment::Component(&s[last_i..]));
                 }
 
                 match param {
                     | ParamDecl::Node(dynamic) => {
-                        let seq = datatype.variants[0].accessors[0]
-                            .apply(&[dynamic])
-                            .as_seq()
-                            .unwrap();
+                        let seq = datatype.variants[0].accessors[0].apply(&[dynamic]).as_seq().unwrap();
                         Bool::and(
                             ctx,
                             &[
@@ -2113,21 +2244,14 @@ impl<'ctx> StateTypes<'ctx> {
                                                 &[
                                                     self.segment.variants[1]
                                                         .tester
-                                                        .apply(&[
-                                                            &seq.nth(&Int::from_u64(ctx, i as u64))
-                                                        ])
+                                                        .apply(&[&seq.nth(&Int::from_u64(ctx, i as u64))])
                                                         .as_bool()
                                                         .unwrap(),
-                                                    self.segment.variants[1].accessors[1]
-                                                        .apply(&[
-                                                            &seq.nth(&Int::from_u64(ctx, i as u64))
-                                                        ])
+                                                    self.segment.variants[1].accessors[0]
+                                                        .apply(&[&seq.nth(&Int::from_u64(ctx, i as u64))])
                                                         .as_string()
                                                         .unwrap()
-                                                        ._eq(
-                                                            &z3::ast::String::from_str(ctx, s)
-                                                                .unwrap(),
-                                                        ),
+                                                        ._eq(&z3::ast::String::from_str(ctx, s).unwrap()),
                                                 ],
                                             ),
                                         })
@@ -2143,20 +2267,14 @@ impl<'ctx> StateTypes<'ctx> {
                             .iter()
                             .zip(segments)
                             .map(|(node, segment)| match segment {
-                                | Segment::Separator => self.segment.variants[0]
-                                    .tester
-                                    .apply(&[node])
-                                    .as_bool()
-                                    .unwrap(),
+                                | Segment::Separator => {
+                                    self.segment.variants[0].tester.apply(&[node]).as_bool().unwrap()
+                                },
                                 | Segment::Component(s) => Bool::and(
                                     ctx,
                                     &[
-                                        self.segment.variants[1]
-                                            .tester
-                                            .apply(&[node])
-                                            .as_bool()
-                                            .unwrap(),
-                                        self.segment.variants[1].accessors[1]
+                                        self.segment.variants[1].tester.apply(&[node]).as_bool().unwrap(),
+                                        self.segment.variants[1].accessors[0]
                                             .apply(&[node])
                                             .as_string()
                                             .unwrap()
@@ -2169,42 +2287,39 @@ impl<'ctx> StateTypes<'ctx> {
                     ),
                 }
             },
-            | (WasiType::Variant(variant), WasiValue::Variant(variant_value)) => {
-                match &variant_value.payload {
-                    | Some(payload) => {
-                        let payload_tdef = variant.cases[variant_value.case_idx]
-                            .payload
-                            .as_ref()
-                            .unwrap()
-                            .resolve(spec);
+            | (WasiType::Variant(variant), WasiValue::Variant(variant_value)) => match &variant_value.payload {
+                | Some(payload) => {
+                    let payload_tdef = variant.cases[variant_value.case_idx]
+                        .payload
+                        .as_ref()
+                        .unwrap()
+                        .resolve(spec);
 
-                        Bool::and(
-                            ctx,
-                            &[
-                                datatype.variants[variant_value.case_idx]
-                                    .tester
-                                    .apply(&[param.node()])
-                                    .as_bool()
-                                    .unwrap(),
-                                self.encode_wasi_value(
-                                    ctx,
-                                    spec,
-                                    &ParamDecl::Node(
-                                        datatype.variants[variant_value.case_idx].accessors[0]
-                                            .apply(&[param.node()]),
-                                    ),
-                                    payload_tdef,
-                                    payload,
+                    Bool::and(
+                        ctx,
+                        &[
+                            datatype.variants[variant_value.case_idx]
+                                .tester
+                                .apply(&[param.node()])
+                                .as_bool()
+                                .unwrap(),
+                            self.encode_wasi_value_decl_inner(
+                                ctx,
+                                spec,
+                                &ParamDecl::Node(
+                                    datatype.variants[variant_value.case_idx].accessors[0].apply(&[param.node()]),
                                 ),
-                            ],
-                        )
-                    },
-                    | None => datatype.variants[variant_value.case_idx]
-                        .tester
-                        .apply(&[param.node()])
-                        .as_bool()
-                        .unwrap(),
-                }
+                                payload_tdef,
+                                payload,
+                            ),
+                        ],
+                    )
+                },
+                | None => datatype.variants[variant_value.case_idx]
+                    .tester
+                    .apply(&[param.node()])
+                    .as_bool()
+                    .unwrap(),
             },
             | (_, WasiValue::Variant(_variant_value)) => unreachable!(),
             | (WasiType::Pointer(pointer), WasiValue::Pointer(pointer_value)) => {
@@ -2212,7 +2327,7 @@ impl<'ctx> StateTypes<'ctx> {
 
                 for i in 0..pointer_value.items.len() {
                     clauses.push(
-                        self.encode_wasi_value(
+                        self.encode_wasi_value_decl_inner(
                             ctx,
                             spec,
                             &ParamDecl::Node(
@@ -2236,7 +2351,7 @@ impl<'ctx> StateTypes<'ctx> {
 
                 for i in 0..list_value.items.len() {
                     clauses.push(
-                        self.encode_wasi_value(
+                        self.encode_wasi_value_decl_inner(
                             ctx,
                             spec,
                             &ParamDecl::Node(
@@ -2343,10 +2458,7 @@ fn no_nonexistent_dir_backtrack<'ctx>(
                                 &component.tester.apply(&[segment]).as_bool().unwrap(),
                                 &segments_between_are_separators,
                                 // prev segment maps to a file.
-                                &segment_file_exists
-                                    .apply(&[prev_segment])
-                                    .as_bool()
-                                    .unwrap(),
+                                &segment_file_exists.apply(&[prev_segment]).as_bool().unwrap(),
                                 // prev segment maps to the current directory.
                                 &segment_file.apply(&[prev_segment])._eq(&preopen.root.node),
                             ],
@@ -2391,11 +2503,7 @@ fn no_nonexistent_dir_backtrack<'ctx>(
                         &Bool::and(
                             ctx,
                             &[
-                                &segment_file_exists
-                                    .apply(&[segment])
-                                    .as_bool()
-                                    .unwrap()
-                                    .not(),
+                                &segment_file_exists.apply(&[segment]).as_bool().unwrap().not(),
                                 &Bool::or(
                                     ctx,
                                     &[
@@ -2403,28 +2511,18 @@ fn no_nonexistent_dir_backtrack<'ctx>(
                                         Bool::and(
                                             ctx,
                                             &[
-                                                component
-                                                    .tester
-                                                    .apply(&[segment])
-                                                    .as_bool()
-                                                    .unwrap(),
+                                                component.tester.apply(&[segment]).as_bool().unwrap(),
                                                 component.accessors[1]
                                                     .apply(&[segment])
                                                     .as_string()
                                                     .unwrap()
-                                                    ._eq(
-                                                        &z3::ast::String::from_str(ctx, ".")
-                                                            .unwrap(),
-                                                    )
+                                                    ._eq(&z3::ast::String::from_str(ctx, ".").unwrap())
                                                     .not(),
                                                 component.accessors[1]
                                                     .apply(&[segment])
                                                     .as_string()
                                                     .unwrap()
-                                                    ._eq(
-                                                        &z3::ast::String::from_str(ctx, "..")
-                                                            .unwrap(),
-                                                    )
+                                                    ._eq(&z3::ast::String::from_str(ctx, "..").unwrap())
                                                     .not(),
                                             ],
                                         ),
@@ -2464,9 +2562,7 @@ fn no_nonexistent_dir_backtrack<'ctx>(
                                     ctx,
                                     segments_between
                                         .iter()
-                                        .map(|seg| {
-                                            separator.tester.apply(&[seg]).as_bool().unwrap()
-                                        })
+                                        .map(|seg| separator.tester.apply(&[seg]).as_bool().unwrap())
                                         .collect_vec()
                                         .as_slice(),
                                 );
@@ -2479,10 +2575,7 @@ fn no_nonexistent_dir_backtrack<'ctx>(
                                         &component.tester.apply(&[segment]).as_bool().unwrap(),
                                         &segments_between_are_separators,
                                         // prev segment maps to a file.
-                                        &segment_file_exists
-                                            .apply(&[prev_segment])
-                                            .as_bool()
-                                            .unwrap(),
+                                        &segment_file_exists.apply(&[prev_segment]).as_bool().unwrap(),
                                         // prev segment maps to the current directory.
                                         &segment_file.apply(&[prev_segment])._eq(&dir.node),
                                     ],
@@ -2512,9 +2605,7 @@ fn no_nonexistent_dir_backtrack<'ctx>(
                                             .apply(&[segment])
                                             .as_string()
                                             .unwrap()
-                                            ._eq(
-                                                &z3::ast::String::from_str(ctx, filename).unwrap(),
-                                            ),
+                                            ._eq(&z3::ast::String::from_str(ctx, filename).unwrap()),
                                         // Then the current segments maps to the child file.
                                         &segment_file_exists.apply(&[segment]).as_bool().unwrap(),
                                         &segment_file.apply(&[segment])._eq(child.node()),
@@ -2552,48 +2643,26 @@ fn no_nonexistent_dir_backtrack<'ctx>(
                                 Bool::and(
                                     ctx,
                                     &[
-                                        &segment_file_exists
-                                            .apply(&[segment])
-                                            .as_bool()
-                                            .unwrap()
-                                            .not(),
+                                        &segment_file_exists.apply(&[segment]).as_bool().unwrap().not(),
                                         &Bool::or(
                                             ctx,
                                             &[
-                                                separator
-                                                    .tester
-                                                    .apply(&[segment])
-                                                    .as_bool()
-                                                    .unwrap(),
+                                                separator.tester.apply(&[segment]).as_bool().unwrap(),
                                                 Bool::and(
                                                     ctx,
                                                     &[
-                                                        component
-                                                            .tester
-                                                            .apply(&[segment])
-                                                            .as_bool()
-                                                            .unwrap(),
+                                                        component.tester.apply(&[segment]).as_bool().unwrap(),
                                                         component.accessors[1]
                                                             .apply(&[segment])
                                                             .as_string()
                                                             .unwrap()
-                                                            ._eq(
-                                                                &z3::ast::String::from_str(
-                                                                    ctx, ".",
-                                                                )
-                                                                .unwrap(),
-                                                            )
+                                                            ._eq(&z3::ast::String::from_str(ctx, ".").unwrap())
                                                             .not(),
                                                         component.accessors[1]
                                                             .apply(&[segment])
                                                             .as_string()
                                                             .unwrap()
-                                                            ._eq(
-                                                                &z3::ast::String::from_str(
-                                                                    ctx, "..",
-                                                                )
-                                                                .unwrap(),
-                                                            )
+                                                            ._eq(&z3::ast::String::from_str(ctx, "..").unwrap())
                                                             .not(),
                                                     ],
                                                 ),
@@ -2666,15 +2735,8 @@ impl<'u, 'data, 'ctx> StatefulStrategy<'u, 'data, 'ctx> {
 }
 
 impl<'u, 'data, 'ctx> CallStrategy for StatefulStrategy<'u, 'data, 'ctx> {
-    fn select_function<'spec>(
-        &mut self,
-        spec: &'spec Spec,
-        env: &Environment,
-    ) -> Result<&'spec Function, eyre::Error> {
-        let interface = spec
-            .interfaces
-            .get_by_key("wasi_snapshot_preview1")
-            .unwrap();
+    fn select_function<'spec>(&mut self, spec: &'spec Spec, env: &Environment) -> Result<&'spec Function, eyre::Error> {
+        let interface = spec.interfaces.get_by_key("wasi_snapshot_preview1").unwrap();
         let mut candidates = Vec::new();
 
         for (_name, function) in &interface.functions {
@@ -2716,6 +2778,7 @@ impl<'u, 'data, 'ctx> CallStrategy for StatefulStrategy<'u, 'data, 'ctx> {
                 spec,
                 function,
                 None,
+                None,
                 function.input_contract.as_ref(),
             ));
 
@@ -2725,10 +2788,7 @@ impl<'u, 'data, 'ctx> CallStrategy for StatefulStrategy<'u, 'data, 'ctx> {
             };
         }
 
-        let function = *self
-            .u
-            .choose(&candidates)
-            .wrap_err("failed to choose a function")?;
+        let function = *self.u.choose(&candidates).wrap_err("failed to choose a function")?;
 
         Ok(function)
     }
@@ -2786,11 +2846,12 @@ impl<'u, 'data, 'ctx> CallStrategy for StatefulStrategy<'u, 'data, 'ctx> {
             spec,
             function,
             None,
+            None,
             function.input_contract.as_ref(),
         ));
 
         loop {
-            if solver.check() != z3::SatResult::Sat || nsolutions == 4 {
+            if solver.check() != z3::SatResult::Sat || nsolutions == 16 {
                 break;
             }
 
@@ -2833,24 +2894,11 @@ impl<'u, 'data, 'ctx> CallStrategy for StatefulStrategy<'u, 'data, 'ctx> {
         for param in function.params.iter() {
             let tdef = param.tref.resolve(spec);
             let param_node_value = decls.params.get(&param.name).unwrap();
-            let wasi_value = state.decode_to_wasi_value(
-                self.ctx,
-                spec,
-                &types,
-                &tdef,
-                &param_node_value,
-                &model,
-            );
+            let (wasi_value, resource_idx) =
+                state.decode_to_wasi_value(self.ctx, spec, &types, &tdef, &param_node_value, &model);
 
-            match &tdef.state {
-                | Some(_state) => {
-                    let x = env.reverse_resource_index.get(&tdef.name).unwrap();
-                    let resource_idx = x.get(&wasi_value);
-                    let resource_idx = match resource_idx {
-                        | Some(resource_idx) => *resource_idx,
-                        | None => panic!("{:#?} -> {:#?}", wasi_value, x),
-                    };
-
+            match resource_idx {
+                | Some(resource_idx) => {
                     params.push(HighLevelValue::Resource(resource_idx));
                 },
                 | None => params.push(HighLevelValue::Concrete(wasi_value)),
@@ -2867,6 +2915,7 @@ impl<'u, 'data, 'ctx> CallStrategy for StatefulStrategy<'u, 'data, 'ctx> {
         env: &mut Environment,
         params: Vec<HighLevelValue>,
         results: Vec<Option<ResourceIdx>>,
+        result_values: Option<&[WasiValue]>,
     ) -> Result<(), eyre::Error> {
         let mut state = State::new();
 
@@ -2890,8 +2939,7 @@ impl<'u, 'data, 'ctx> CallStrategy for StatefulStrategy<'u, 'data, 'ctx> {
             .zip(params.iter())
             .filter(|(function_param, _param)| function_param.tref.resolve(spec).name == "path")
             .map(|(function_param, param)| {
-                let s =
-                    String::from_utf8(env.resolve_value(param).string().unwrap().to_vec()).unwrap();
+                let s = String::from_utf8(env.resolve_value(param).string().unwrap().to_vec()).unwrap();
                 let mut segments = Vec::new();
                 let mut i = 0;
                 let mut last_i = 0;
@@ -2908,7 +2956,7 @@ impl<'u, 'data, 'ctx> CallStrategy for StatefulStrategy<'u, 'data, 'ctx> {
                     }
 
                     segments.push(Segment::Separator);
-                    last_i = i;
+                    last_i = i + 1;
                     i += 1;
                 }
 
@@ -2941,24 +2989,33 @@ impl<'u, 'data, 'ctx> CallStrategy for StatefulStrategy<'u, 'data, 'ctx> {
             spec,
             function,
             Some(&params),
+            result_values,
             function.output_contract.as_ref(),
         ));
 
         // Concretize the param values.
         for (i, function_param) in function.params.iter().enumerate() {
             let tdef = function_param.tref.resolve(spec);
-            let value = match &tdef.state {
-                | Some(_) => {
-                    &env.resources
-                        .get(params.get(i).unwrap().as_resource().unwrap())
-                        .unwrap()
-                        .state
-                },
-                | None => &params.get(i).unwrap().as_concrete().unwrap(),
-            };
             let param_node = decls.params.get(&function_param.name).unwrap();
+            let hl_value = params.get(i).unwrap();
 
-            solver.assert(&types.encode_wasi_value(self.ctx, spec, param_node, &tdef, value));
+            match hl_value {
+                | &HighLevelValue::Resource(resource_idx) => {
+                    let value = &env.resources.get(resource_idx).unwrap().state;
+
+                    solver.assert(&types.encode_wasi_value_decl(
+                        self.ctx,
+                        spec,
+                        param_node,
+                        &tdef,
+                        value,
+                        Some(resource_idx),
+                    ));
+                },
+                | HighLevelValue::Concrete(value) => {
+                    solver.assert(&types.encode_wasi_value_decl(self.ctx, spec, param_node, &tdef, value, None));
+                },
+            }
         }
 
         match solver.check() {
@@ -2971,6 +3028,33 @@ impl<'u, 'data, 'ctx> CallStrategy for StatefulStrategy<'u, 'data, 'ctx> {
         let model = solver.get_model().unwrap();
         let mut clauses = Vec::new();
 
+        for (name, param) in &decls.to_solves.params {
+            let param_value = model.eval(param, true).unwrap().simplify();
+            let (param_idx, function_param) = function
+                .params
+                .iter()
+                .enumerate()
+                .find(|(_, param)| &param.name == name)
+                .unwrap();
+            let tdef = function_param.tref.resolve(spec);
+            let wasi_value = state.decode_to_wasi_value_inner(
+                self.ctx,
+                spec,
+                &types,
+                &tdef,
+                &ParamDecl::Node(param_value.clone()),
+                &model,
+            );
+            let param_resource_idx = match params.get(param_idx).unwrap() {
+                | HighLevelValue::Resource(resource_idx) => *resource_idx,
+                | HighLevelValue::Concrete(_wasi_value) => todo!(),
+            };
+            let resource = env.resources.get_mut(param_resource_idx).unwrap();
+
+            resource.state = wasi_value;
+            clauses.push(param._eq(&param_value).not());
+        }
+
         for (name, result) in &decls.to_solves.results {
             let result_value = model.eval(result, true).unwrap().simplify();
             let (result_idx, function_result) = function
@@ -2980,7 +3064,7 @@ impl<'u, 'data, 'ctx> CallStrategy for StatefulStrategy<'u, 'data, 'ctx> {
                 .find(|(_, result)| &result.name == name)
                 .unwrap();
             let tdef = function_result.tref.resolve(spec);
-            let wasi_value = state.decode_to_wasi_value(
+            let wasi_value = state.decode_to_wasi_value_inner(
                 self.ctx,
                 spec,
                 &types,
@@ -2990,19 +3074,8 @@ impl<'u, 'data, 'ctx> CallStrategy for StatefulStrategy<'u, 'data, 'ctx> {
             );
             let result_resource_idx = results.get(result_idx).unwrap().unwrap();
             let resource = env.resources.get_mut(result_resource_idx).unwrap();
-            let idx = env
-                .reverse_resource_index
-                .get_mut(&tdef.name)
-                .unwrap()
-                .remove(&resource.state)
-                .unwrap();
 
-            env.reverse_resource_index
-                .get_mut(&tdef.name)
-                .unwrap()
-                .insert(wasi_value.clone(), idx);
             resource.state = wasi_value;
-
             clauses.push(result._eq(&result_value).not());
         }
 
@@ -3051,30 +3124,24 @@ enum File {
 }
 
 impl File {
-    fn declare<'ctx>(
-        &self,
-        ctx: &'ctx z3::Context,
-        types: &StateTypes<'ctx>,
-    ) -> FileEncoding<'ctx> {
+    fn declare<'ctx>(&self, ctx: &'ctx z3::Context, types: &StateTypes<'ctx>) -> FileEncoding<'ctx> {
         match self {
             | File::Directory(directory) => {
                 let dir = directory.declare(ctx, types);
 
                 FileEncoding::Directory(dir)
             },
-            | File::RegularFile(regular_file) => {
-                FileEncoding::RegularFile(regular_file.declare(ctx, types))
-            },
+            | File::RegularFile(regular_file) => FileEncoding::RegularFile(regular_file.declare(ctx, types)),
         }
     }
 
-    fn ingest(path: &Path) -> Result<Self, eyre::Error> {
+    fn ingest(dir: &Dir, path: &Path) -> Result<Self, eyre::Error> {
         let metadata = fs::metadata(path)?;
 
         if metadata.file_type().is_dir() {
             Ok(Self::Directory(Directory::ingest(path)?))
         } else if metadata.file_type().is_file() {
-            Ok(Self::RegularFile(RegularFile::ingest(path)?))
+            Ok(Self::RegularFile(RegularFile::ingest(dir, path)?))
         } else {
             unimplemented!("unsupported file type")
         }
@@ -3131,11 +3198,7 @@ struct Directory {
 }
 
 impl Directory {
-    fn declare<'ctx>(
-        &self,
-        ctx: &'ctx z3::Context,
-        types: &StateTypes<'ctx>,
-    ) -> DirectoryEncoding<'ctx> {
+    fn declare<'ctx>(&self, ctx: &'ctx z3::Context, types: &StateTypes<'ctx>) -> DirectoryEncoding<'ctx> {
         let node = Dynamic::fresh_const(ctx, "file--", &types.file.sort);
         let mut children = BTreeMap::new();
 
@@ -3160,9 +3223,10 @@ impl Directory {
         paths.sort();
 
         let mut children = IndexSpace::new();
+        let dir = Dir::open(path)?;
 
         for path in &paths {
-            let file = File::ingest(&path)?;
+            let file = File::ingest(&dir, &path)?;
 
             children.push(
                 String::from_utf8(path.file_name().unwrap().as_encoded_bytes().to_vec()).unwrap(),
@@ -3187,27 +3251,30 @@ struct DirectoryEncoding<'ctx> {
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
-struct RegularFile {}
+struct RegularFile {
+    size: u64,
+}
 
 impl RegularFile {
-    fn declare<'ctx>(
-        &self,
-        ctx: &'ctx z3::Context,
-        types: &StateTypes<'ctx>,
-    ) -> RegularFileEncoding<'ctx> {
+    fn declare<'ctx>(&self, ctx: &'ctx z3::Context, types: &StateTypes<'ctx>) -> RegularFileEncoding<'ctx> {
         let node = Dynamic::fresh_const(ctx, "file--", &types.file.sort);
 
-        RegularFileEncoding { node }
+        RegularFileEncoding { node, size: self.size }
     }
 
-    fn ingest(_path: &Path) -> Result<Self, io::Error> {
-        Ok(Self {})
+    fn ingest(dir: &Dir, path: &Path) -> Result<Self, io::Error> {
+        let file = dir.metadata(path)?;
+
+        Ok(Self {
+            size: file.len() as u64,
+        })
     }
 }
 
 #[derive(Clone, Debug)]
 struct RegularFileEncoding<'ctx> {
     node: Dynamic<'ctx>,
+    size: u64,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -3224,11 +3291,7 @@ impl Type {
         }
     }
 
-    fn unwrap_ast_as_int<'ctx>(
-        &self,
-        types: &'ctx StateTypes<'ctx>,
-        ast: &Dynamic<'ctx>,
-    ) -> Int<'ctx> {
+    fn unwrap_ast_as_int<'ctx>(&self, types: &'ctx StateTypes<'ctx>, ast: &Dynamic<'ctx>) -> Int<'ctx> {
         match &self {
             | Type::Wasi(tdef) => match &tdef.wasi {
                 | WasiType::S64 | WasiType::U8 | WasiType::U16 | WasiType::U32 | WasiType::U64 => {

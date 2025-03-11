@@ -946,7 +946,7 @@
       (@and
         ; Must not be the base directory.
         (@not (@value.eq
-          (@int.const (@record.field (param $fd) $parent))
+          (@resource-id $fd)
           0
         ))
       )
@@ -1159,6 +1159,46 @@
         )
       )
     )
+    (@output
+      (@and
+        (@value.eq (@record.field (param $fd') $flags) (@record.field (param $fd) $flags))
+        (@value.eq (@record.field (param $fd') $type) (@record.field (param $fd) $type))
+        (@value.eq (@record.field (param $fd') $path) (@record.field (param $fd) $path))
+        (@value.eq (@record.field (param $fd') $parent) (@record.field (param $fd) $parent))
+
+        (@or
+          (@and
+            ; Frame condition: whence::set Seek relative to start-of-file.
+            (@value.eq (param $whence) (@variant.const $whence $set))
+
+            (@value.eq
+              (@record.field (param $fd') $offset)
+              (result $ok)
+            )
+          )
+
+          (@and
+            ; Frame condition: whence::cur Seek relative to current position.
+            (@value.eq (param $whence) (@variant.const $whence $cur))
+
+            (@value.eq
+              (@int.const (@record.field (param $fd') $offset))
+              (@int.const (result $ok))
+            )
+          )
+
+          (@and
+            ; Frame condition: whence::end Seek relative to end-of-file.
+            (@value.eq (param $whence) (@variant.const $whence $end))
+
+            (@value.eq
+              (@int.const (@record.field (param $fd') $offset))
+              (@int.const (result $ok))
+            )
+          )
+        )
+      )
+    )
   )
 
   ;;; Write to a file descriptor.
@@ -1237,6 +1277,8 @@
     (result $error (expected $fd (error $errno)))
     (@input
       (@and
+        (@flags.get (param $oflags) $creat)
+
         ; In general, the behavior of O_EXCL is undefined
         ; if it is used without O_CREAT.
         (@not (@and
