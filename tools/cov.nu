@@ -15,7 +15,7 @@ def main [path: string, runtime: string] {
     let llvm_cov = [$llvm_prefix, "bin", "llvm-cov"] | path join
     let prof_raws = glob $"($path)/*"
         | sort
-        | each { |run| [$run, "runtimes", $rt, "**", "*.profraw"] | path join }
+        | each { |run| [$run, "**", $"($rt)*.profraw"] | path join }
         | each { |p| glob $p }
         | flatten
         | save --force $"($rt)-profraws.txt";
