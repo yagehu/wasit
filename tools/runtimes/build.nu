@@ -50,7 +50,9 @@ def main [...runtimes: string] {
 
     $activate = $"($activate)\n)\n"
     $activate_zsh = $"($activate_zsh)
-  $path)
+  $path
+)
+
 export PATH\n"
 
     $activate out> $"($source_prefix).nu"
