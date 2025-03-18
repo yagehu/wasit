@@ -10,7 +10,7 @@ comment = @{ ";" ~ (!NEWLINE ~ ANY)* ~ NEWLINE }
 
 id = @{ "$" ~ (ASCII_ALPHANUMERIC | "." | "-" | "_" | "'")+ }
 
-type_ref = { id | type }
+type_ref = { id | type | tuple }
 
 int_repr = { u8 | u16 | u32 | u64 }
 
@@ -83,6 +83,8 @@ record_field = { "(" ~ "field" ~ id ~ type_ref ~ ")" }
 
 list = { "(" ~ "list" ~ type_ref ~ ")" }
 
+tuple = { "(" ~ "tuple" ~ type_ref* ~ ")" }
+
 module = { "(" ~ "module" ~ id ~ (function | comment)* ~ ")" }
 
 function_name = @{ (ASCII_ALPHANUMERIC | "-" | "_")+ }
@@ -129,6 +131,7 @@ keyword =
   | "param"
   | "record"
   | "result"
+  | "tuple"
   }
 
 number = @{ "-"? ~ ASCII_DIGIT+ }

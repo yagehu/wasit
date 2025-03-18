@@ -211,7 +211,7 @@ impl Environment {
                     let case = &variant.cases[variant_value.case_idx];
 
                     if let (Some(payload), Some(payload_value)) = (&case.payload, &variant_value.payload) {
-                        passes_tdef = Some(payload.resolve(spec));
+                        passes_tdef = Some(payload.tref().unwrap().resolve(spec));
                         passes.push(payload_value);
                     }
                 },
@@ -283,7 +283,11 @@ impl Environment {
                 let case = &variant.cases[variant_value.case_idx];
 
                 if let (Some(payload), Some(payload_value)) = (&case.payload, &variant_value.payload) {
-                    self.register_result_value_resource_recursively(spec, payload.resolve(spec), payload_value);
+                    self.register_result_value_resource_recursively(
+                        spec,
+                        payload.tref().unwrap().resolve(spec),
+                        payload_value,
+                    );
                 }
             },
             | (WasiType::Variant(_), _) => panic!(),

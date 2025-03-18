@@ -339,6 +339,7 @@
 
 (typename $buf (@witx pointer u8))
 (typename $cbuf (@witx const_pointer u8))
+(typename $ptrbuf (@witx pointer $buf))
 
 ;;; A region of memory for scatter/gather reads.
 (typename $iovec
@@ -777,6 +778,29 @@
 )
 
 (module $wasi_snapshot_preview1
+  ;;; Read command-line argument data.
+  ;;;
+  ;;; The size of the array should match that returned by `args_sizes_get`.
+  ;;;
+  ;;; Each argument is expected to be `\0` terminated.
+  ;;;
+  ;;; The first argument should be a string containing the "name" of the
+  ;;; program. This need not be a usable filesystem path or even file name,
+  ;;; and may even be a fixed string. Subsequent arguments are the arguments
+  ;;; passed to the program by the user.
+  (@interface func (export "args_get")
+    (param $argv $ptrbuf)
+    (param $argv_buf $buf)
+    (result $error (expected (error $errno)))
+  )
+
+  ;;; Return command-line argument data sizes.
+  (@interface func (export "args_sizes_get")
+    ;;; Returns the number of arguments and the size of the argument string
+    ;;; data, or an error.
+    (result $error (expected (tuple $size $size) (error $errno)))
+  )
+
   ;;; Return the resolution of a clock.
   ;;; Implementations are required to provide a non-zero value for supported clocks. For unsupported clocks,
   ;;; return `errno::inval`.
@@ -1310,6 +1334,22 @@
           (@flags.get (param $oflags) $trunc)
           (@flags.get (param $fdflags) $append)
         ))
+
+        ;; (@or
+        ;;   (@and
+        ;;     (@value.eq
+        ;;       (@fs.file.type.get (param $fd) (param $path))
+        ;;       (@variant.const $filetype $file)
+        ;;     )
+        ;;     (@flags.get (param $fs_rights_base) $fd_read)
+        ;;     (@flags.get (param $fs_rights_base) $fd_write)
+        ;;   )
+
+        ;;   (@value.eq
+        ;;     (@fs.file.type.get (param $fd) (param $path))
+        ;;     (@variant.const $filetype $directory)
+        ;;   )
+        ;; )
 
         (@not (@flags.get (param $fdflags) $dsync))
         (@not (@flags.get (param $fdflags) $rsync))

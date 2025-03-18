@@ -123,6 +123,13 @@ pub enum TypeRef {
 }
 
 impl TypeRef {
+    fn anonymous(&self) -> Option<&WasiType> {
+        match self {
+            | TypeRef::Named(_) => None,
+            | TypeRef::Anonymous(wasi_type) => Some(wasi_type),
+        }
+    }
+
     fn alignment(&self, spec: &Spec) -> u32 {
         self.resolve(spec).wasi.alignment(spec)
     }
@@ -141,6 +148,7 @@ impl TypeRef {
                 | WasiType::U32 => spec.types.get_by_key("u32").unwrap(),
                 | WasiType::U64 => spec.types.get_by_key("u64").unwrap(),
                 | WasiType::Handle => spec.types.get_by_key("handle").unwrap(),
+                // | WasiType::Pointer(pointer) => {},
                 | _ => panic!("{:?}", wasi_type),
             },
         }
@@ -197,7 +205,7 @@ impl WasiType {
                     .unwrap()
                     .payload
                     .as_ref()
-                    .map(|payload| payload.resolve(spec).wasi.zero_value(spec)),
+                    .map(|payload| payload.tref().unwrap().resolve(spec).wasi.zero_value(spec)),
             })),
             | WasiType::Record(record) => WasiValue::Record(RecordValue {
                 members: record
@@ -212,11 +220,7 @@ impl WasiType {
         }
     }
 
-    pub(crate) fn arbitrary_value(
-        &self,
-        spec: &Spec,
-        u: &mut Unstructured,
-    ) -> Result<WasiValue, arbitrary::Error> {
+    pub(crate) fn arbitrary_value(&self, spec: &Spec, u: &mut Unstructured) -> Result<WasiValue, arbitrary::Error> {
         Ok(match self {
             | WasiType::S64 => WasiValue::S64(u.arbitrary()?),
             | WasiType::U8 => WasiValue::U8(u.arbitrary()?),
@@ -240,18 +244,13 @@ impl WasiType {
                     payload: case
                         .payload
                         .as_ref()
-                        .map(|payload_type| {
-                            payload_type.resolve_wasi(spec).arbitrary_value(spec, u)
-                        })
+                        .map(|payload| payload.tref().unwrap().resolve_wasi(spec).arbitrary_value(spec, u))
                         .transpose()?,
                 }))
             },
             | WasiType::Record(record) => {
                 // Special case: buf and buf_len in the same record.
-                if record.members.len() == 2
-                    && record.members[0].name == "buf"
-                    && record.members[1].name == "buf_len"
-                {
+                if record.members.len() == 2 && record.members[0].name == "buf" && record.members[1].name == "buf_len" {
                     let buf_len = u.choose_index(64)?;
                     let buf = u.bytes(buf_len)?;
                     let buf = buf.iter().map(|&b| WasiValue::U8(b)).collect_vec();
@@ -430,11 +429,7 @@ pub struct VariantType {
 }
 
 impl VariantType {
-    pub fn value_from_name(
-        &self,
-        case_name: &str,
-        payload: Option<WasiValue>,
-    ) -> Option<WasiValue> {
+    pub fn value_from_name(&self, case_name: &str, payload: Option<WasiValue>) -> Option<WasiValue> {
         Some(WasiValue::Variant(Box::new(VariantValue {
             case_idx: self
                 .cases
@@ -458,7 +453,7 @@ impl VariantType {
             .cases
             .iter()
             .filter_map(|case| case.payload.as_ref())
-            .map(|payload| payload.mem_size(spec))
+            .map(|payload| payload.tref().unwrap().mem_size(spec))
             .max()
             .unwrap_or(0);
 
@@ -475,16 +470,33 @@ impl VariantType {
         self.cases
             .iter()
             .filter_map(|case| case.payload.as_ref())
-            .map(|payload| payload.alignment(spec))
+            .map(|payload| payload.tref().unwrap().alignment(spec))
             .max()
             .unwrap_or(1)
     }
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
+pub enum VariantPayload {
+    TypeRef(TypeRef),
+
+    /// Can only occur in a result expression.
+    Tuple(Vec<TypeRef>),
+}
+
+impl VariantPayload {
+    pub(crate) fn tref(&self) -> Option<&TypeRef> {
+        match self {
+            | VariantPayload::TypeRef(tref) => Some(tref),
+            | VariantPayload::Tuple(_) => None,
+        }
+    }
+}
+
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct VariantCaseType {
     pub name:    String,
-    pub payload: Option<TypeRef>,
+    pub payload: Option<VariantPayload>,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -622,139 +634,128 @@ impl WasiValue {
     pub fn into_pb(self, spec: &Spec, tref: &TypeRef) -> wazzi_executor_pb_rust::Value {
         let which = match (&tref.resolve(spec).wasi, self) {
             | (_, Self::Handle(handle)) => wazzi_executor_pb_rust::value::Which::Handle(handle),
-            | (_, Self::S64(i)) => wazzi_executor_pb_rust::value::Which::Builtin(
-                wazzi_executor_pb_rust::value::Builtin {
+            | (_, Self::S64(i)) => {
+                wazzi_executor_pb_rust::value::Which::Builtin(wazzi_executor_pb_rust::value::Builtin {
                     which:          Some(wazzi_executor_pb_rust::value::builtin::Which::S64(i)),
                     special_fields: Default::default(),
-                },
-            ),
-            | (_, Self::U8(i)) => wazzi_executor_pb_rust::value::Which::Builtin(
-                wazzi_executor_pb_rust::value::Builtin {
+                })
+            },
+            | (_, Self::U8(i)) => {
+                wazzi_executor_pb_rust::value::Which::Builtin(wazzi_executor_pb_rust::value::Builtin {
                     which:          Some(wazzi_executor_pb_rust::value::builtin::Which::U8(i.into())),
                     special_fields: Default::default(),
-                },
-            ),
-            | (_, Self::U16(i)) => wazzi_executor_pb_rust::value::Which::Builtin(
-                wazzi_executor_pb_rust::value::Builtin {
+                })
+            },
+            | (_, Self::U16(i)) => {
+                wazzi_executor_pb_rust::value::Which::Builtin(wazzi_executor_pb_rust::value::Builtin {
                     which:          Some(wazzi_executor_pb_rust::value::builtin::Which::U16(i.into())),
                     special_fields: Default::default(),
-                },
-            ),
-            | (_, Self::U32(i)) => wazzi_executor_pb_rust::value::Which::Builtin(
-                wazzi_executor_pb_rust::value::Builtin {
+                })
+            },
+            | (_, Self::U32(i)) => {
+                wazzi_executor_pb_rust::value::Which::Builtin(wazzi_executor_pb_rust::value::Builtin {
                     which:          Some(wazzi_executor_pb_rust::value::builtin::Which::U32(i)),
                     special_fields: Default::default(),
-                },
-            ),
-            | (_, Self::U64(i)) => wazzi_executor_pb_rust::value::Which::Builtin(
-                wazzi_executor_pb_rust::value::Builtin {
+                })
+            },
+            | (_, Self::U64(i)) => {
+                wazzi_executor_pb_rust::value::Which::Builtin(wazzi_executor_pb_rust::value::Builtin {
                     which:          Some(wazzi_executor_pb_rust::value::builtin::Which::U64(i)),
                     special_fields: Default::default(),
-                },
-            ),
+                })
+            },
             | (WasiType::Record(record_type), Self::Record(record)) => {
                 wazzi_executor_pb_rust::value::Which::Record(wazzi_executor_pb_rust::value::Record {
-                    members: record
+                    members:        record
                         .members
                         .into_iter()
                         .zip(record_type.members.iter())
                         .zip(record_type.member_layout(spec))
-                        .map(|((value, member), member_layout)| {
-                            wazzi_executor_pb_rust::value::record::Member {
-                                name: member.name.clone(),
-                                value: Some(value.into_pb(spec, &member.tref)).into(),
-                                offset: member_layout.offset,
+                        .map(
+                            |((value, member), member_layout)| wazzi_executor_pb_rust::value::record::Member {
+                                name:           member.name.clone(),
+                                value:          Some(value.into_pb(spec, &member.tref)).into(),
+                                offset:         member_layout.offset,
                                 special_fields: Default::default(),
-                            }
-                        })
+                            },
+                        )
                         .collect(),
-                    size: record_type.mem_size(spec),
+                    size:           record_type.mem_size(spec),
                     special_fields: Default::default(),
                 })
-
             },
             | (WasiType::Flags(flags_type), Self::Flags(flags)) => {
-                wazzi_executor_pb_rust::value::Which::Bitflags(
-                    wazzi_executor_pb_rust::value::Bitflags {
-                        repr:           wazzi_executor_pb_rust::IntRepr::from(flags_type.repr)
-                            .into(),
-                        members:        flags_type
-                            .fields
-                            .iter()
-                            .zip(flags.fields)
-                            .map(|(field_name, field)| {
-                                wazzi_executor_pb_rust::value::bitflags::Member {
-                                    name:           field_name.to_owned(),
-                                    value:          field,
-                                    special_fields: Default::default(),
-                                }
-                            })
-                            .collect(),
-                        special_fields: Default::default(),
-                    },
-                )
+                wazzi_executor_pb_rust::value::Which::Bitflags(wazzi_executor_pb_rust::value::Bitflags {
+                    repr:           wazzi_executor_pb_rust::IntRepr::from(flags_type.repr).into(),
+                    members:        flags_type
+                        .fields
+                        .iter()
+                        .zip(flags.fields)
+                        .map(|(field_name, field)| wazzi_executor_pb_rust::value::bitflags::Member {
+                            name:           field_name.to_owned(),
+                            value:          field,
+                            special_fields: Default::default(),
+                        })
+                        .collect(),
+                    special_fields: Default::default(),
+                })
             },
             | (WasiType::Pointer(pointer), Self::Pointer(pointer_value)) => {
-                let items = pointer_value.items.into_iter().map(|item| {
-                    item.into_pb(spec, &pointer.item)
-                }).collect();
+                let items = pointer_value
+                    .items
+                    .into_iter()
+                    .map(|item| item.into_pb(spec, &pointer.item))
+                    .collect();
 
                 if pointer.r#const {
-                    wazzi_executor_pb_rust::value::Which::ConstPointer(
-                        wazzi_executor_pb_rust::value::Array {
-                            items,
-                            item_size: pointer.item.mem_size(spec),
-                            special_fields: Default::default()
-                        }
-                    )
+                    wazzi_executor_pb_rust::value::Which::ConstPointer(wazzi_executor_pb_rust::value::Array {
+                        items,
+                        item_size: pointer.item.mem_size(spec),
+                        special_fields: Default::default(),
+                    })
                 } else {
-                    wazzi_executor_pb_rust::value::Which::Pointer(
-                        wazzi_executor_pb_rust::value::Array {
-                            items,
-                            item_size: pointer.item.mem_size(spec),
-                            special_fields: Default::default()
-                        }
-                    )
+                    wazzi_executor_pb_rust::value::Which::Pointer(wazzi_executor_pb_rust::value::Array {
+                        items,
+                        item_size: pointer.item.mem_size(spec),
+                        special_fields: Default::default(),
+                    })
                 }
             },
             | (_, Self::Pointer(_pointer_value)) => unreachable!(),
             | (WasiType::List(list_type), Self::List(list)) => {
-                let items = list.items.into_iter().map(|item| {
-                    item.into_pb(spec, &list_type.item)
-                }).collect();
+                let items = list
+                    .items
+                    .into_iter()
+                    .map(|item| item.into_pb(spec, &list_type.item))
+                    .collect();
 
-                wazzi_executor_pb_rust::value::Which::Array(
-                    wazzi_executor_pb_rust::value::Array {
-                        items,
-                        item_size: list_type.item.mem_size(spec),
-                        special_fields: Default::default()
-                    }
-                )
+                wazzi_executor_pb_rust::value::Which::Array(wazzi_executor_pb_rust::value::Array {
+                    items,
+                    item_size: list_type.item.mem_size(spec),
+                    special_fields: Default::default(),
+                })
             },
             | (_, Self::String(string)) => wazzi_executor_pb_rust::value::Which::String(string),
             | (WasiType::Variant(variant_type), Self::Variant(variant)) => {
-                wazzi_executor_pb_rust::value::Which::Variant(Box::new(
-                    wazzi_executor_pb_rust::value::Variant {
-                        case_idx:       variant.case_idx as u64,
-                        size:           variant_type.mem_size(spec),
-                        tag_repr:       wazzi_executor_pb_rust::IntRepr::from(
-                            variant_type.tag_repr,
-                        )
-                        .into(),
-                        payload_offset: variant_type.payload_offset(spec),
-                        payload_option: Some(
-                            match &variant_type.cases.get(variant.case_idx).unwrap().payload {
-                                | Some(payload) => wazzi_executor_pb_rust::value::variant::Payload_option::PayloadSome(
-                                    Box::new(variant.payload.unwrap().into_pb(spec, &payload))
-                                ),
-                                | None => wazzi_executor_pb_rust::value::variant::Payload_option::PayloadNone(Default::default()),
-                            },
+                wazzi_executor_pb_rust::value::Which::Variant(Box::new(wazzi_executor_pb_rust::value::Variant {
+                    case_idx:       variant.case_idx as u64,
+                    size:           variant_type.mem_size(spec),
+                    tag_repr:       wazzi_executor_pb_rust::IntRepr::from(variant_type.tag_repr).into(),
+                    payload_offset: variant_type.payload_offset(spec),
+                    payload_option: Some(match &variant_type.cases.get(variant.case_idx).unwrap().payload {
+                        | Some(payload) => wazzi_executor_pb_rust::value::variant::Payload_option::PayloadSome(
+                            Box::new(variant.payload.unwrap().into_pb(spec, payload.tref().unwrap())),
                         ),
-                        special_fields: Default::default(),
-                    },
-                ))
+                        | None => {
+                            wazzi_executor_pb_rust::value::variant::Payload_option::PayloadNone(Default::default())
+                        },
+                    }),
+                    special_fields: Default::default(),
+                }))
             },
-            | (_, Self::Record(_)) | (_, Self::Flags(_)) | (_, Self::List(_)) | (_, Self::Variant(_)) => unreachable!("{:#?}", tref),
+            | (_, Self::Record(_)) | (_, Self::Flags(_)) | (_, Self::List(_)) | (_, Self::Variant(_)) => {
+                unreachable!("{:#?}", tref)
+            },
         };
 
         wazzi_executor_pb_rust::Value {
@@ -766,74 +767,45 @@ impl WasiValue {
     pub fn from_pb(value: wazzi_executor_pb_rust::Value, spec: &Spec, tdef: &TypeDef) -> Self {
         match (&tdef.wasi, value.which.unwrap()) {
             | (_, wazzi_executor_pb_rust::value::Which::Handle(handle)) => Self::Handle(handle),
-            | (_, wazzi_executor_pb_rust::value::Which::Builtin(builtin)) => {
-                match builtin.which.unwrap() {
-                    | wazzi_executor_pb_rust::value::builtin::Which::Char(_c) => panic!(),
-                    | wazzi_executor_pb_rust::value::builtin::Which::U8(i) => {
-                        Self::U8(i.try_into().unwrap())
-                    },
-                    | wazzi_executor_pb_rust::value::builtin::Which::U32(i) => Self::U32(i),
-                    | wazzi_executor_pb_rust::value::builtin::Which::U64(i) => Self::U64(i),
-                    | wazzi_executor_pb_rust::value::builtin::Which::S64(i) => Self::S64(i),
-                    | _ => todo!(),
-                }
+            | (_, wazzi_executor_pb_rust::value::Which::Builtin(builtin)) => match builtin.which.unwrap() {
+                | wazzi_executor_pb_rust::value::builtin::Which::Char(_c) => panic!(),
+                | wazzi_executor_pb_rust::value::builtin::Which::U8(i) => Self::U8(i.try_into().unwrap()),
+                | wazzi_executor_pb_rust::value::builtin::Which::U32(i) => Self::U32(i),
+                | wazzi_executor_pb_rust::value::builtin::Which::U64(i) => Self::U64(i),
+                | wazzi_executor_pb_rust::value::builtin::Which::S64(i) => Self::S64(i),
+                | _ => todo!(),
             },
-            | (_, wazzi_executor_pb_rust::value::Which::Bitflags(flags)) => {
-                Self::Flags(FlagsValue {
-                    fields: flags
+            | (_, wazzi_executor_pb_rust::value::Which::Bitflags(flags)) => Self::Flags(FlagsValue {
+                fields: flags.members.into_iter().map(|member| member.value).collect(),
+            }),
+            | (_, wazzi_executor_pb_rust::value::Which::String(string)) => Self::String(string),
+            | (WasiType::String, wazzi_executor_pb_rust::value::Which::Array(array)) => {
+                Self::String(array.items.iter().map(|item| item.builtin().u8() as u8).collect())
+            },
+            | (WasiType::Record(record), wazzi_executor_pb_rust::value::Which::Record(record_value)) => {
+                Self::Record(RecordValue {
+                    members: record
                         .members
-                        .into_iter()
-                        .map(|member| member.value)
+                        .iter()
+                        .zip(record_value.members)
+                        .map(|(member, member_value)| {
+                            WasiValue::from_pb(member_value.value.unwrap(), spec, member.tref.resolve(spec))
+                        })
                         .collect(),
                 })
             },
-            | (_, wazzi_executor_pb_rust::value::Which::String(string)) => Self::String(string),
-            | (WasiType::String, wazzi_executor_pb_rust::value::Which::Array(array)) => {
-                Self::String(
-                    array
-                        .items
-                        .iter()
-                        .map(|item| item.builtin().u8() as u8)
-                        .collect(),
-                )
-            },
-            | (
-                WasiType::Record(record),
-                wazzi_executor_pb_rust::value::Which::Record(record_value),
-            ) => Self::Record(RecordValue {
-                members: record
-                    .members
-                    .iter()
-                    .zip(record_value.members)
-                    .map(|(member, member_value)| {
-                        WasiValue::from_pb(
-                            member_value.value.unwrap(),
-                            spec,
-                            member.tref.resolve(spec),
-                        )
-                    })
-                    .collect(),
-            }),
-            | (
-                WasiType::Variant(variant_type),
-                wazzi_executor_pb_rust::value::Which::Variant(variant),
-            ) => {
+            | (WasiType::Variant(variant_type), wazzi_executor_pb_rust::value::Which::Variant(variant)) => {
                 let case_idx = variant.case_idx as usize;
-                let payload = variant_type.cases[case_idx]
-                    .payload
-                    .as_ref()
-                    .map(|payload_tref| {
-                        let tdef = payload_tref.resolve(spec);
+                let payload = variant_type.cases[case_idx].payload.as_ref().map(|payload| {
+                    let tdef = payload.tref().unwrap().resolve(spec);
 
-                        match variant.payload_option {
-                            | Some(
-                                wazzi_executor_pb_rust::value::variant::Payload_option::PayloadSome(
-                                    p,
-                                ),
-                            ) => Self::from_pb(*p, spec, tdef),
-                            | _ => panic!(),
-                        }
-                    });
+                    match variant.payload_option {
+                        | Some(wazzi_executor_pb_rust::value::variant::Payload_option::PayloadSome(p)) => {
+                            Self::from_pb(*p, spec, tdef)
+                        },
+                        | _ => panic!(),
+                    }
+                });
 
                 Self::Variant(Box::new(VariantValue { case_idx, payload }))
             },

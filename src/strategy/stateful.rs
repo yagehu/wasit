@@ -570,7 +570,7 @@ impl State {
                 &ctx,
                 path.iter()
                     .enumerate()
-                    .map(|(i, segment)| {
+                    .map(|(_i, segment)| {
                         Bool::and(
                             ctx,
                             &[&component
@@ -1396,6 +1396,34 @@ impl State {
                     .enumerate()
                     .find(|(_, param)| param.name == t.path)
                     .unwrap();
+
+                match params.unwrap().get(fd_param_idx) {
+                    | None => {
+                        // This is a part of an input contract.
+                        // Try to encode this term.
+
+                        // Assume just one preopen to keep things simple.
+                        let mut files = vec![FileEncodingRef::Directory(
+                            &decls.preopens.iter().next().unwrap().1.root,
+                        )];
+
+                        loop {
+                            while let Some(file) = files.pop() {
+                                // For each file, try to encode.
+
+                                if let FileEncodingRef::Directory(d) = file {
+                                    for (_name, child) in &d.children {
+                                        files.push(child.as_ref());
+                                    }
+                                }
+                            }
+                        }
+
+                        // TODO
+                    },
+                    | Some(_) => {},
+                }
+
                 let fd_resource_idx = params.unwrap().get(fd_param_idx).unwrap().as_resource();
                 let path_value = env.resolve_value(params.unwrap().get(path_param_idx).unwrap());
                 let fd_resource_idx = fd_resource_idx.unwrap();
@@ -1665,11 +1693,11 @@ impl State {
                 }
 
                 let payload = match &variant.cases[case_idx].payload {
-                    | Some(payload_tref) => Some(self.decode_to_wasi_value_inner(
+                    | Some(payload) => Some(self.decode_to_wasi_value_inner(
                         ctx,
                         spec,
                         types,
-                        payload_tref.resolve(spec),
+                        payload.tref().unwrap().resolve(spec),
                         &ParamDecl::Node(datatype.variants[case_idx].accessors[0].apply(&[decl.node()])),
                         model,
                     )),
@@ -1873,7 +1901,7 @@ impl<'ctx> StateTypes<'ctx> {
                     for case in &variant_type.cases {
                         let fields = match &case.payload {
                             | Some(payload) => {
-                                let payload_tdef = payload.resolve(spec);
+                                let payload_tdef = payload.tref().unwrap().resolve(spec);
 
                                 encode_type(
                                     ctx,
@@ -2292,6 +2320,8 @@ impl<'ctx> StateTypes<'ctx> {
                     let payload_tdef = variant.cases[variant_value.case_idx]
                         .payload
                         .as_ref()
+                        .unwrap()
+                        .tref()
                         .unwrap()
                         .resolve(spec);
 

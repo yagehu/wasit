@@ -1,6 +1,7 @@
 pub mod slang;
 
 use eyre::{eyre as err, Context as _, ContextCompat as _};
+use itertools::Itertools;
 use pest::{
     iterators::{Pair, Pairs},
     Parser as _,
@@ -21,6 +22,7 @@ use super::{
     Spec,
     TypeRef,
     VariantCaseType,
+    VariantPayload,
     VariantType,
     WasiType,
 };
@@ -61,8 +63,8 @@ pub(super) fn preview1(s: &str) -> Result<Spec, eyre::Error> {
                                 panic!("{target_type_name}");
                             },
                             | Rule::r#type => {
-                                let wasi = preview1_wasi_type(&spec, pair)
-                                    .wrap_err("failed to handle type pair")?;
+                                let wasi_type =
+                                    preview1_wasi_type(&spec, pair).wrap_err("failed to handle type pair")?;
                                 let mut state = None;
 
                                 while let Some(pair) = pairs.next() {
@@ -71,16 +73,13 @@ pub(super) fn preview1(s: &str) -> Result<Spec, eyre::Error> {
                                             let mut pairs = pair.into_inner();
                                             let annot = pairs.next().unwrap();
 
-                                            if annot.as_str().strip_prefix('@').unwrap() != "state"
-                                            {
+                                            if annot.as_str().strip_prefix('@').unwrap() != "state" {
                                                 continue;
                                             }
 
                                             let type_pair = pairs.next().unwrap();
-                                            let mut pairs =
-                                                Parser::parse(Rule::r#type, type_pair.as_str())?;
-                                            let state_type =
-                                                preview1_wasi_type(&spec, pairs.next().unwrap())?;
+                                            let mut pairs = Parser::parse(Rule::r#type, type_pair.as_str())?;
+                                            let state_type = preview1_wasi_type(&spec, pairs.next().unwrap())?;
 
                                             state = Some(state_type);
 
@@ -90,7 +89,7 @@ pub(super) fn preview1(s: &str) -> Result<Spec, eyre::Error> {
                                     }
                                 }
 
-                                spec.insert_type_def(name.to_string(), wasi, state);
+                                spec.insert_type_def(name.to_string(), wasi_type, state);
                             },
                             | _ => unreachable!(),
                         }
@@ -153,8 +152,7 @@ fn preview1_module(spec: &Spec, pairs: Pairs<'_, Rule>) -> Result<Interface, eyr
                         | _ => unreachable!(),
                     };
                     let tref_pair = pairs.next().unwrap();
-                    let tref =
-                        preview1_tref(spec, tref_pair).wrap_err("failed to handle param tref")?;
+                    let tref = preview1_tref(spec, tref_pair).wrap_err("failed to handle param tref")?[0].clone();
 
                     params.push(FunctionParam { name, tref });
                 },
@@ -166,24 +164,31 @@ fn preview1_module(spec: &Spec, pairs: Pairs<'_, Rule>) -> Result<Interface, eyr
                         | _ => unreachable!(),
                     };
                     let tref_pair = pairs.next().unwrap();
-                    let tref =
-                        preview1_tref(spec, tref_pair).wrap_err("failed to handle param tref")?;
+                    let tref = preview1_tref(spec, tref_pair).wrap_err("failed to handle param tref")?[0].clone();
 
                     match &tref.resolve_wasi(spec) {
-                        | WasiType::Variant(variant) => {
-                            match (variant.cases.first(), variant.cases.get(1)) {
-                                | (Some(c1), Some(c2)) if c1.name == "ok" && c2.name == "error" => {
-                                    r#return = Some(());
+                        | WasiType::Variant(variant) => match (variant.cases.first(), variant.cases.get(1)) {
+                            | (Some(c1), Some(c2)) if c1.name == "ok" && c2.name == "error" => {
+                                r#return = Some(());
 
-                                    if let Some(payload) = c1.payload.as_ref() {
-                                        results.push(FunctionResult {
+                                if let Some(payload) = c1.payload.as_ref() {
+                                    match payload {
+                                        | VariantPayload::TypeRef(tref) => results.push(FunctionResult {
                                             name: "ok".to_owned(),
-                                            tref: payload.to_owned(),
-                                        });
+                                            tref: tref.to_owned(),
+                                        }),
+                                        | VariantPayload::Tuple(trefs) => {
+                                            for (i, tref) in trefs.iter().enumerate() {
+                                                results.push(FunctionResult {
+                                                    name: format!("ok_{i}"),
+                                                    tref: tref.to_owned(),
+                                                });
+                                            }
+                                        },
                                     }
-                                },
-                                | _ => results.push(FunctionResult { name, tref }),
-                            }
+                                }
+                            },
+                            | _ => results.push(FunctionResult { name, tref }),
                         },
                         | _ => results.push(FunctionResult { name, tref }),
                     }
@@ -292,10 +297,7 @@ fn preview1_wasi_type(spec: &Spec, pair: Pair<'_, Rule>) -> Result<WasiType, eyr
                     | _ => return Err(err!("unexpected field {:?}", case_pair)),
                 };
 
-                cases.push(VariantCaseType {
-                    name,
-                    payload: None,
-                });
+                cases.push(VariantCaseType { name, payload: None });
             }
 
             WasiType::Variant(VariantType {
@@ -311,10 +313,7 @@ fn preview1_wasi_type(spec: &Spec, pair: Pair<'_, Rule>) -> Result<WasiType, eyr
                 | Rule::id => tag_pair.as_str().strip_prefix('$').unwrap(),
                 | _ => unreachable!(),
             };
-            let tag_type = spec
-                .types
-                .get_by_key(tag_name)
-                .wrap_err("unknown tag type")?;
+            let tag_type = spec.types.get_by_key(tag_name).wrap_err("unknown tag type")?;
             let tag = match &tag_type.wasi {
                 | WasiType::Variant(variant) => variant,
                 | _ => panic!(),
@@ -332,7 +331,7 @@ fn preview1_wasi_type(spec: &Spec, pair: Pair<'_, Rule>) -> Result<WasiType, eyr
 
                 cases.push(VariantCaseType {
                     name:    case_name_type.name.clone(),
-                    payload: Some(TypeRef::Named(case_type_name.to_string())),
+                    payload: Some(VariantPayload::TypeRef(TypeRef::Named(case_type_name.to_string()))),
                 });
             }
 
@@ -358,11 +357,16 @@ fn preview1_wasi_type(spec: &Spec, pair: Pair<'_, Rule>) -> Result<WasiType, eyr
                 cases:    vec![
                     VariantCaseType {
                         name:    "ok".to_owned(),
-                        payload: expected_pair.map(|p| preview1_tref(spec, p)).transpose()?,
+                        payload: expected_pair.map(|p| preview1_tref(spec, p)).transpose()?.map(|trefs| {
+                            match trefs.len() {
+                                | 1 => VariantPayload::TypeRef(trefs[0].to_owned()),
+                                | _ => VariantPayload::Tuple(trefs),
+                            }
+                        }),
                     },
                     VariantCaseType {
                         name:    "error".to_owned(),
-                        payload: Some(preview1_tref(spec, error_pair)?),
+                        payload: Some(VariantPayload::TypeRef(preview1_tref(spec, error_pair)?[0].clone())),
                     },
                 ],
             })
@@ -390,7 +394,7 @@ fn preview1_wasi_type(spec: &Spec, pair: Pair<'_, Rule>) -> Result<WasiType, eyr
                     | Rule::type_ref => tref_pair.into_inner().next().unwrap(),
                     | _ => unreachable!(),
                 };
-                let tref = preview1_tref(spec, tref_pair)?;
+                let tref = preview1_tref(spec, tref_pair)?[0].clone();
 
                 members.push(RecordMemberType { name, tref });
             }
@@ -400,26 +404,19 @@ fn preview1_wasi_type(spec: &Spec, pair: Pair<'_, Rule>) -> Result<WasiType, eyr
         | Rule::string_type => WasiType::String,
         | Rule::pointer => {
             let tref_pair = pair.into_inner().next().unwrap();
-            let item = preview1_tref(spec, tref_pair).wrap_err("failed to pointer type ref")?;
+            let item = preview1_tref(spec, tref_pair).wrap_err("failed to pointer type ref")?[0].clone();
 
-            WasiType::Pointer(Box::new(PointerType {
-                item,
-                r#const: false,
-            }))
+            WasiType::Pointer(Box::new(PointerType { item, r#const: false }))
         },
         | Rule::const_pointer => {
             let tref_pair = pair.into_inner().next().unwrap();
-            let item =
-                preview1_tref(spec, tref_pair).wrap_err("failed to const_pointer type ref")?;
+            let item = preview1_tref(spec, tref_pair).wrap_err("failed to const_pointer type ref")?[0].clone();
 
-            WasiType::Pointer(Box::new(PointerType {
-                item,
-                r#const: true,
-            }))
+            WasiType::Pointer(Box::new(PointerType { item, r#const: true }))
         },
         | Rule::list => {
             let tref_pair = pair.into_inner().next().unwrap();
-            let item = preview1_tref(spec, tref_pair).wrap_err("failed to handle list type ref")?;
+            let item = preview1_tref(spec, tref_pair).wrap_err("failed to handle list type ref")?[0].clone();
 
             WasiType::List(Box::new(ListType { item }))
         },
@@ -427,19 +424,21 @@ fn preview1_wasi_type(spec: &Spec, pair: Pair<'_, Rule>) -> Result<WasiType, eyr
     })
 }
 
-fn preview1_tref(spec: &Spec, pair: Pair<'_, Rule>) -> Result<TypeRef, eyre::Error> {
+fn preview1_tref(spec: &Spec, pair: Pair<'_, Rule>) -> Result<Vec<TypeRef>, eyre::Error> {
     match pair.as_rule() {
         | Rule::id => {
             let id = pair.as_str().strip_prefix('$').unwrap();
-            let _tdef = spec
-                .types
-                .get_by_key(id)
-                .wrap_err("type ref to non-existent type")?;
+            let _tdef = spec.types.get_by_key(id).wrap_err("type ref to non-existent type")?;
 
-            Ok(TypeRef::Named(id.to_string()))
+            Ok(vec![TypeRef::Named(id.to_string())])
         },
         | Rule::type_ref => preview1_tref(spec, pair.into_inner().next().unwrap()),
-        | Rule::r#type => Ok(TypeRef::Anonymous(preview1_wasi_type(spec, pair)?)),
+        | Rule::r#type => Ok(vec![TypeRef::Anonymous(preview1_wasi_type(spec, pair)?)]),
+        | Rule::tuple => Ok(pair
+            .into_inner()
+            .map(|pair| preview1_tref(spec, pair).unwrap())
+            .flatten()
+            .collect_vec()),
         | _ => unreachable!(
             "{:?} {:?} -> {}",
             pair.as_span().lines().collect::<Vec<_>>(),
