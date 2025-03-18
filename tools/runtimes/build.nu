@@ -4,6 +4,7 @@ use std
 
 use node.nu
 use wamr.nu
+use wasmer.nu
 use wasmedge.nu
 use wasmtime.nu
 
@@ -23,6 +24,7 @@ def main [...runtimes: string] {
         let path = match $name {
             "node" => { node $repo },
             "wamr" => { wamr $repo },
+            "wasmer" => { wasmer $repo },
             "wasmedge" => { wasmedge $repo $env.LLVM_16 $env.LLD_16 },
             "wasmtime" => { wasmtime $repo },
         }
