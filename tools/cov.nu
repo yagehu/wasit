@@ -5,6 +5,7 @@ def main [path: glob, runtime: string, --merge] {
         "node" => node_cov,
         "node-wasi" => node_wasi_cov,
         "wamr" => wamr_cov,
+        "wamr-wasi" => wamr_wasi_cov,
         "wasmedge" => wasmedge_cov,
         "wasmedge-wasi" => wasmedge_wasi_cov,
         "wasmtime" => wasmtime_cov,
@@ -82,12 +83,30 @@ def node_wasi_cov [] {
 }
 
 def wamr_cov [] {
-    let os = (uname | get kernel-name | str downcase)
+    let bin = which "iwasm" | first | get "path"
 
     {
         runtime: "wamr",
-        target: $"runtimes/wasm-micro-runtime/product-mini/platforms/($os)/build/iwasm",
+        target: $bin,
         options: [
+        ]
+    }
+}
+
+def wamr_wasi_cov [] {
+    let bin = which "iwasm" | first | get "path"
+
+    {
+        runtime: "wamr",
+        target: $bin,
+        options: [
+            "-ignore-filename-regex=/core/iwasm/aot/",
+            "-ignore-filename-regex=/core/iwasm/common/",
+            "-ignore-filename-regex=/core/iwasm/compilation/",
+            "-ignore-filename-regex=/core/iwasm/include/",
+            "-ignore-filename-regex=/core/iwasm/interpreter/",
+            "-ignore-filename-regex=/core/iwasm/libraries/libc-builtin",
+            "-ignore-filename-regex=/core/shared",
         ]
     }
 }
