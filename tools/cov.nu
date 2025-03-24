@@ -17,8 +17,7 @@ def main [path: glob, runtime: string, --merge] {
     let llvm_prefix = $env.LLVM? | default "/usr/local"
     let llvm_profdata = [$llvm_prefix, "bin", "llvm-profdata"] | path join
     let llvm_cov = [$llvm_prefix, "bin", "llvm-cov"] | path join
-    let prof_raws = ls $path
-        | get "name"
+    let prof_raws = glob --no-symlink $path
         | save --force $"($rt)-profraws.txt";
     let profdata = $"($rt).profdata"
 
@@ -28,6 +27,7 @@ def main [path: glob, runtime: string, --merge] {
 
     (
         ^$"($llvm_cov)" report
+            --all-blocks
             --color
             --show-branch-summary
             ...$cov_command.options
@@ -161,6 +161,9 @@ def wasmtime_cov [] {
         target: $bin,
         options: [
             "-Xdemangler=rustfilt"
+            "-ignore-filename-regex=/rustlib/"
+            "-ignore-filename-regex=/\\.cargo/registry/"
+            "-ignore-filename-regex=/cranelift/"
         ]
     }
 }

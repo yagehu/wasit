@@ -205,7 +205,7 @@ impl Fuzzer {
 
         if let Some(limit) = &time_limit {
             thread::Builder::new()
-                .name(format!("diva-timer"))
+                .name(format!("timer"))
                 .spawn({
                     let cancel = cancel.clone();
                     let limit = limit.to_owned();
@@ -299,7 +299,7 @@ impl Fuzzer {
                         let mmap = Arc::new(Mutex::new(MmapOptions::new().len(BUF_SIZE).map_anon().unwrap()));
 
                         thread::Builder::new()
-                            .name(format!("diva-buf-filler-{run_id}"))
+                            .name(format!("filler-{run_id}"))
                             .spawn_scoped(scope, {
                                 let run = run.clone();
                                 let fill_init = fill_init.clone();
@@ -381,7 +381,7 @@ impl Fuzzer {
                         let (diff_done_tx, diff_done_rx) = broadcast_queue(1);
 
                         thread::Builder::new()
-                            .name(format!("diva-strategy-{run_id}"))
+                            .name(format!("strat-{run_id}"))
                             .spawn_scoped(scope, {
                                 let data = data.to_vec();
                                 let env = env.clone();
@@ -562,7 +562,7 @@ impl Fuzzer {
                             })?;
 
                         thread::Builder::new()
-                            .name(format!("diva-diff-{run_id}"))
+                            .name(format!("diff-{run_id}"))
                             .spawn_scoped(scope, {
                                 let run = run.clone();
                                 let over = over.clone();
@@ -722,7 +722,7 @@ impl Fuzzer {
                         for (i, (runtime_name, mut store, executor)) in runtimes.into_iter().enumerate() {
                             runtime_threads.push(
                                 thread::Builder::new()
-                                    .name(format!("diva-driver-{run_id}-{runtime_name}"))
+                                    .name(format!("drv-{run_id}-{runtime_name}"))
                                     .spawn_scoped(scope, {
                                         let run = run.clone();
                                         let mmap = mmap.clone();

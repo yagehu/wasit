@@ -27,12 +27,7 @@ fn main() -> Result<(), eyre::Error> {
         .map(|entry| {
             (
                 entry.path(),
-                entry
-                    .file_name()
-                    .into_string()
-                    .unwrap()
-                    .parse::<usize>()
-                    .unwrap(),
+                entry.file_name().into_string().unwrap().parse::<usize>().unwrap(),
             )
         })
         .sorted_by(|(_, idx_0), (_, idx_1)| Ord::cmp(idx_0, idx_1))
@@ -75,12 +70,7 @@ fn main() -> Result<(), eyre::Error> {
             .map(|entry| {
                 (
                     entry.path(),
-                    entry
-                        .file_name()
-                        .into_string()
-                        .unwrap()
-                        .parse::<usize>()
-                        .unwrap(),
+                    entry.file_name().into_string().unwrap().parse::<usize>().unwrap(),
                 )
             })
             .sorted_by(|(_, idx_0), (_, idx_1)| Ord::cmp(idx_0, idx_1))
@@ -93,6 +83,10 @@ fn main() -> Result<(), eyre::Error> {
         println!("Analyzing run {runs}.");
 
         for (path, idx) in call_entries {
+            if !path.join("call.json").exists() {
+                break;
+            }
+
             trace_len += 1;
             total_num_calls += 1;
 
@@ -124,8 +118,7 @@ fn main() -> Result<(), eyre::Error> {
             if let Some(results) = call.results {
                 for result in results {
                     if let Some(resource_idx) = result.resource_idx {
-                        let resource_node_idx =
-                            graph.add_node(Node::Resource { idx: resource_idx });
+                        let resource_node_idx = graph.add_node(Node::Resource { idx: resource_idx });
 
                         resource_node_map.insert(resource_idx, resource_node_idx);
                         graph.add_edge(call_node_idx, resource_node_idx, Edge::Result);
@@ -154,17 +147,14 @@ fn main() -> Result<(), eyre::Error> {
             let mut max_depth = 0;
 
             for func_node_idx in funcs {
-                for child_resource_node_idx in
-                    graph.neighbors_directed(func_node_idx, Direction::Outgoing)
-                {
+                for child_resource_node_idx in graph.neighbors_directed(func_node_idx, Direction::Outgoing) {
                     let child_resource = graph.node_weight(child_resource_node_idx).unwrap();
                     let child_resource_idx = match child_resource {
                         | Node::Resource { idx } => *idx,
                         | Node::Call { .. } => unreachable!(),
                     };
 
-                    max_depth =
-                        max_depth.max(tree_depth(graph, resource_node_map, child_resource_idx));
+                    max_depth = max_depth.max(tree_depth(graph, resource_node_map, child_resource_idx));
                 }
             }
 
@@ -172,8 +162,7 @@ fn main() -> Result<(), eyre::Error> {
         }
 
         for &init_resource in &init_resources {
-            max_resource_depth_ =
-                max_resource_depth_.max(tree_depth(&graph, &resource_node_map, init_resource));
+            max_resource_depth_ = max_resource_depth_.max(tree_depth(&graph, &resource_node_map, init_resource));
         }
 
         for (resource_idx, node_idx) in resource_node_map {
@@ -181,9 +170,7 @@ fn main() -> Result<(), eyre::Error> {
                 continue;
             }
 
-            let calls = graph
-                .neighbors_directed(node_idx, Direction::Outgoing)
-                .count();
+            let calls = graph.neighbors_directed(node_idx, Direction::Outgoing).count();
 
             most_calls = most_calls.max(calls);
         }
@@ -208,10 +195,7 @@ fn main() -> Result<(), eyre::Error> {
     println!("# runs: {runs}");
     println!("max trace len: {max_trace_len}");
     println!("max trace len idx: {max_trace_len_idx}");
-    println!(
-        "average trace len: {:.2}",
-        total_num_calls as f64 / runs as f64
-    );
+    println!("average trace len: {:.2}", total_num_calls as f64 / runs as f64);
     println!(
         "average max calls involving one resource: {:2}",
         total_max_calls as f64 / runs as f64

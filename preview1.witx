@@ -778,22 +778,6 @@
 )
 
 (module $wasi_snapshot_preview1
-  ;;; Read command-line argument data.
-  ;;;
-  ;;; The size of the array should match that returned by `args_sizes_get`.
-  ;;;
-  ;;; Each argument is expected to be `\0` terminated.
-  ;;;
-  ;;; The first argument should be a string containing the "name" of the
-  ;;; program. This need not be a usable filesystem path or even file name,
-  ;;; and may even be a fixed string. Subsequent arguments are the arguments
-  ;;; passed to the program by the user.
-  (@interface func (export "args_get")
-    (param $argv $ptrbuf)
-    (param $argv_buf $buf)
-    (result $error (expected (error $errno)))
-  )
-
   ;;; Return command-line argument data sizes.
   (@interface func (export "args_sizes_get")
     ;;; Returns the number of arguments and the size of the argument string
@@ -1439,6 +1423,30 @@
           (@value.eq (@record.field (result $ok') $path) (param $path))
           (@value.eq (@int.const (@record.field (result $ok') $parent)) (@resource-id $fd))
         )
+
+        (@and
+          ; Frame condition: The file opened is a symlink and we explicitly don't follow it.
+          (@value.eq (@variant.const $filetype $symbolic_link) (@fs.file.type.get (param $fd) (param $path)))
+          (@not (@flags.get (param $dirflags) $symlink_follow))
+
+          (@value.eq (@int.const (@record.field (result $ok') $offset)) (@int.const (@u64.const 0)))
+          (@value.eq (@record.field (result $ok') $flags) (param $fdflags))
+          (@value.eq (@record.field (result $ok') $type) (@variant.const $filetype $symbolic_link))
+          (@value.eq (@record.field (result $ok') $path) (param $path))
+          (@value.eq (@int.const (@record.field (result $ok') $parent)) (@resource-id $fd))
+        )
+
+        (@and
+          ; Frame condition: The file opened is a symlink and we follow it.
+          (@value.eq (@variant.const $filetype $symbolic_link) (@fs.file.type.get (param $fd) (param $path)))
+          (@flags.get (param $dirflags) $symlink_follow)
+
+          (@value.eq (@int.const (@record.field (result $ok') $offset)) (@int.const (@u64.const 0)))
+          (@value.eq (@record.field (result $ok') $flags) (param $fdflags))
+          (@value.eq (@record.field (result $ok') $type) (@fs.file.type.getl (param $fd) (param $path)))
+          (@value.eq (@record.field (result $ok') $path) (param $path))
+          (@value.eq (@int.const (@record.field (result $ok') $parent)) (@resource-id $fd))
+        )
       )
     )
   )
@@ -1446,30 +1454,21 @@
   ;;; Remove a directory.
   ;;; Return `errno::notempty` if the directory is not empty.
   ;;; Note: This is similar to `unlinkat(fd, path, AT_REMOVEDIR)` in POSIX.
-  ;(@interface func (export "path_remove_directory")
-  ;  (param $fd $fd)
-  ;  ;;; The path to a directory to remove.
-  ;  (param $path $path)
-  ;  (result $error (expected (error $errno)))
-  ;  (@input
-  ;    (@and
-  ;      ; When generating path segments, if we generate one corresponding to a
-  ;      ; non-existent directory, the next segment shall not be `..`.
-  ;      ; This excludes uninteresting path normalization differences between
-  ;      ; Windows and Linux.
-  ;      ;(@no-nonexistent-dir-backtrack $fd $path)
-  ;    )
-  ;  )
-  ;)
+  (@interface func (export "path_remove_directory")
+    (param $fd $fd)
+    ;;; The path to a directory to remove.
+    (param $path $path)
+    (result $error (expected (error $errno)))
+  )
 
   ;;; Create a symbolic link.
   ;;; Note: This is similar to `symlinkat` in POSIX.
-  ;(@interface func (export "path_symlink")
-  ;  ;;; The contents of the symbolic link.
-  ;  (param $old_path $path)
-  ;  (param $fd $fd)
-  ;  ;;; The destination path at which to create the symbolic link.
-  ;  (param $new_path $path)
-  ;  (result $error (expected (error $errno)))
-  ;)
+  (@interface func (export "path_symlink")
+    ;;; The contents of the symbolic link.
+    (param $old_path $path)
+    (param $fd $fd)
+    ;;; The destination path at which to create the symbolic link.
+    (param $new_path $path)
+    (result $error (expected (error $errno)))
+  )
 )

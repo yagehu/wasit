@@ -126,40 +126,45 @@ impl State {
             };
 
             for child_node_idx in fds_graph_rev.neighbors_directed(node_idx, petgraph::Direction::Outgoing) {
-                let mut curr = FileEncodingRef::Directory(&dir);
-                let mut prevs = Vec::new();
+                // let mut curr = FileEncodingRef::Directory(&dir);
+                // let mut prevs = Vec::new();
                 let child_fd_resource_idx = *fds_graph_rev.node_weight(child_node_idx).unwrap();
                 let edge_idx = self.fds_graph.find_edge(child_node_idx, node_idx).unwrap();
-                let path = self.fds_graph.edge_weight(edge_idx).unwrap();
+                // let path = self.fds_graph.edge_weight(edge_idx).unwrap();
 
-                for component in PathBuf::from(path).components() {
-                    let component = component.as_os_str().to_str().unwrap();
+                // for component in PathBuf::from(path).components() {
+                //     let component = component.as_os_str().to_str().unwrap();
 
-                    match component {
-                        | "." => (),
-                        | ".." => curr = prevs.pop().unwrap(),
-                        | component => {
-                            let child = curr.directory().unwrap().children.get(component).unwrap();
+                //     match component {
+                //         | "." => (),
+                //         | ".." => curr = prevs.pop().unwrap(),
+                //         | component => {
+                //             let child = curr
+                //                 .directory()
+                //                 .expect("not a directory")
+                //                 .children
+                //                 .get(component)
+                //                 .expect("not such child");
 
-                            prevs.push(curr);
-
-                            curr = match child {
-                                | FileEncoding::Directory(d) => FileEncodingRef::Directory(d),
-                                | FileEncoding::RegularFile(f) => FileEncodingRef::RegularFile(f),
-                            }
-                        },
-                    }
-                }
+                //             prevs.push(curr);
+                //             curr = match child {
+                //                 | FileEncoding::Directory(d) => FileEncodingRef::Directory(d),
+                //                 | FileEncoding::RegularFile(f) => FileEncodingRef::RegularFile(f),
+                //                 | FileEncoding::Symlink(l) => FileEncodingRef::Symlink(l),
+                //             };
+                //         },
+                //     }
+                // }
 
                 let child_fd = decls.resources.get(&child_fd_resource_idx).unwrap();
 
                 fd_file_vec.push(child_fd.clone());
                 fd_file_map.insert(child_fd.clone(), fd_file_vec.len() - 1);
-                fd_file.push(curr.node().clone());
+                // fd_file.push(curr.node().clone());
 
-                if let FileEncodingRef::Directory(d) = curr {
-                    fd_dir_map.insert(child_fd, d.clone());
-                }
+                // if let FileEncodingRef::Directory(d) = curr {
+                //     fd_dir_map.insert(child_fd, d.clone());
+                // }
             }
         }
 
@@ -179,7 +184,7 @@ impl State {
 
                         match child {
                             | FileEncoding::Directory(d) => dirs.push(d),
-                            | FileEncoding::RegularFile(_f) => continue,
+                            | _ => continue,
                         }
                     }
                 }
@@ -260,7 +265,7 @@ impl State {
                     | Term::Binding(_) => todo!(),
                     | Term::True => (),
                     | Term::String(_) => (),
-                    | Term::Not(_t) => todo!(),
+                    | Term::Not(t) => scan_primed_in_output_contract(ctx, types, spec, function, &t.term, to_solves),
                     | Term::And(t) => {
                         for clause in &t.clauses {
                             scan_primed_in_output_contract(ctx, types, spec, function, clause, to_solves);
@@ -299,7 +304,9 @@ impl State {
                         }
                     },
                     | Term::ResourceId(_) => (),
-                    | Term::FlagsGet(_t) => todo!(),
+                    | Term::FlagsGet(t) => {
+                        scan_primed_in_output_contract(ctx, types, spec, function, &t.target, to_solves)
+                    },
                     | Term::ListLen(_t) => todo!(),
                     | Term::IntWrap(t) => scan_primed_in_output_contract(ctx, types, spec, function, &t.op, to_solves),
                     | Term::IntConst(_t) => (),
@@ -327,6 +334,7 @@ impl State {
                     },
                     | Term::FsFileSizeGet(_t) => (),
                     | Term::FsFileTypeGet(_t) => (),
+                    | Term::FsFileTypeGetl(_t) => (),
                     | Term::NoNonExistentDirBacktrack(_t) => todo!(),
                 }
             }
@@ -401,7 +409,7 @@ impl State {
 
                     match child {
                         | FileEncoding::Directory(d) => dirs.push(&d),
-                        | FileEncoding::RegularFile(_f) => (),
+                        | _ => (),
                     }
                 }
             }
@@ -410,6 +418,7 @@ impl State {
         {
             let mut all_dirs = decls.preopens.values().map(|preopen| &preopen.root.node).collect_vec();
             let mut all_files = vec![];
+            let mut all_symlinks = vec![];
 
             for (_idx, preopen) in decls.preopens.iter() {
                 let mut stack = vec![&preopen.root];
@@ -422,6 +431,7 @@ impl State {
                                 stack.push(&d);
                             },
                             | FileEncoding::RegularFile(f) => all_files.push(&f.node),
+                            | FileEncoding::Symlink(l) => all_symlinks.push(&l.node),
                         }
                     }
                 }
@@ -491,6 +501,16 @@ impl State {
                             clauses.push(
                                 types.file.variants[1].accessors[0]
                                     .apply(&[&f.node])
+                                    .as_int()
+                                    .unwrap()
+                                    ._eq(&Int::from_u64(ctx, idx)),
+                            );
+                            idx += 1;
+                        },
+                        | FileEncoding::Symlink(l) => {
+                            clauses.push(
+                                types.file.variants[2].accessors[0]
+                                    .apply(&[&l.node])
                                     .as_int()
                                     .unwrap()
                                     ._eq(&Int::from_u64(ctx, idx)),
@@ -605,6 +625,26 @@ impl State {
                                                     .as_string()
                                                     .unwrap()
                                                     ._eq(&z3::ast::String::from_str(ctx, "c").unwrap()),
+                                                &component.accessors[0]
+                                                    .apply(&[segment])
+                                                    .as_string()
+                                                    .unwrap()
+                                                    ._eq(&z3::ast::String::from_str(ctx, "d").unwrap()),
+                                                &component.accessors[0]
+                                                    .apply(&[segment])
+                                                    .as_string()
+                                                    .unwrap()
+                                                    ._eq(&z3::ast::String::from_str(ctx, "e").unwrap()),
+                                                &component.accessors[0]
+                                                    .apply(&[segment])
+                                                    .as_string()
+                                                    .unwrap()
+                                                    ._eq(&z3::ast::String::from_str(ctx, "f").unwrap()),
+                                                &component.accessors[0]
+                                                    .apply(&[segment])
+                                                    .as_string()
+                                                    .unwrap()
+                                                    ._eq(&z3::ast::String::from_str(ctx, "g").unwrap()),
                                                 &component.accessors[0]
                                                     .apply(&[segment])
                                                     .as_string()
@@ -1367,7 +1407,7 @@ impl State {
                                         .expect(&format!("{filename} {:#?}", d.children))
                                         .as_ref(),
                                 ),
-                                | FileEncodingRef::RegularFile(_f) => unreachable!(),
+                                | _ => unreachable!(),
                             },
                         }
                     }
@@ -1376,11 +1416,258 @@ impl State {
                 let size = match files.last().unwrap() {
                     | FileEncodingRef::Directory(_d) => unimplemented!(),
                     | FileEncodingRef::RegularFile(f) => f.size,
+                    | FileEncodingRef::Symlink(_l) => unimplemented!(),
                 };
 
                 (
                     Dynamic::from_ast(&Int::from_u64(ctx, size)),
                     Type::Wazzi(WazziType::Int),
+                )
+            },
+            | Term::FsFileTypeGetl(t) => {
+                let (fd_param_idx, _fd_function_param) = function
+                    .params
+                    .iter()
+                    .enumerate()
+                    .find(|(_, param)| param.name == t.fd)
+                    .unwrap();
+                let (path_param_idx, _path_function_param) = function
+                    .params
+                    .iter()
+                    .enumerate()
+                    .find(|(_, param)| param.name == t.path)
+                    .unwrap();
+
+                match params.unwrap().get(fd_param_idx) {
+                    | None => {
+                        // This is a part of an input contract.
+                        // Try to encode this term.
+
+                        // Assume just one preopen to keep things simple.
+                        let mut files = vec![FileEncodingRef::Directory(
+                            &decls.preopens.iter().next().unwrap().1.root,
+                        )];
+
+                        loop {
+                            while let Some(file) = files.pop() {
+                                // For each file, try to encode.
+
+                                if let FileEncodingRef::Directory(d) = file {
+                                    for (_name, child) in &d.children {
+                                        files.push(child.as_ref());
+                                    }
+                                }
+                            }
+                        }
+
+                        // TODO
+                    },
+                    | Some(_) => {},
+                }
+
+                let fd_resource_idx = params.unwrap().get(fd_param_idx).unwrap().as_resource();
+                let path_value = env.resolve_value(params.unwrap().get(path_param_idx).unwrap());
+                let fd_resource_idx = fd_resource_idx.unwrap();
+                let mut fd_resource = env.resources.get(fd_resource_idx).unwrap();
+                let fd_tdef = spec.types.get_by_key("fd").unwrap();
+                let fd_type = fd_tdef.state.as_ref().unwrap().record().unwrap();
+                let (parent_member_idx, _parent_member_type) = fd_type
+                    .members
+                    .iter()
+                    .enumerate()
+                    .find(|(_i, member)| member.name == "parent")
+                    .unwrap();
+                let (path_member_idx, _path_member_type) = fd_type
+                    .members
+                    .iter()
+                    .enumerate()
+                    .find(|(_i, member)| member.name == "path")
+                    .unwrap();
+                let mut curr_fd_resource_idx = fd_resource_idx;
+                let mut paths = vec![String::from_utf8(path_value.string().unwrap().to_vec()).unwrap()];
+
+                loop {
+                    let parent_resource_idx = ResourceIdx(
+                        fd_resource
+                            .state
+                            .record()
+                            .unwrap()
+                            .members
+                            .get(parent_member_idx)
+                            .unwrap()
+                            .u64()
+                            .unwrap() as usize,
+                    );
+
+                    if curr_fd_resource_idx == parent_resource_idx {
+                        break;
+                    }
+
+                    paths.push(
+                        String::from_utf8(
+                            fd_resource
+                                .state
+                                .record()
+                                .unwrap()
+                                .members
+                                .get(path_member_idx)
+                                .unwrap()
+                                .string()
+                                .unwrap()
+                                .to_vec(),
+                        )
+                        .unwrap(),
+                    );
+                    curr_fd_resource_idx = parent_resource_idx;
+                    fd_resource = env.resources.get(curr_fd_resource_idx).unwrap();
+                }
+
+                let preopen_fd_resource_idx = curr_fd_resource_idx;
+                let (_preopen_resource_idx, preopen) = decls
+                    .preopens
+                    .iter()
+                    .find(|&(&resource_idx, _preopen)| resource_idx == preopen_fd_resource_idx)
+                    .unwrap();
+                let file = FileEncodingRef::Directory(&preopen.root);
+                let mut files = vec![file];
+
+                for path in paths.iter().rev() {
+                    let mut path_stack = vec![(
+                        Path::new(path)
+                            .components()
+                            .map(|c| String::from_utf8(c.as_os_str().as_encoded_bytes().to_vec()).unwrap())
+                            .collect_vec(),
+                        0,
+                    )];
+
+                    while let Some((components, i)) = path_stack.last_mut() {
+                        let component = match components.get(*i) {
+                            | None => {
+                                path_stack.pop();
+                                continue;
+                            },
+                            | Some(component) => component,
+                        };
+                        let f = files.last().unwrap();
+
+                        *i += 1;
+
+                        match component.as_str() {
+                            | ".." => {
+                                files.pop();
+                            },
+                            | "." => (),
+                            | filename => match f {
+                                | FileEncodingRef::Directory(d) => files.push(
+                                    d.children
+                                        .get(filename)
+                                        .expect(&format!("{filename} {:#?}", d.children))
+                                        .as_ref(),
+                                ),
+                                | FileEncodingRef::Symlink(l) => {
+                                    path_stack.push((
+                                        Path::new(&l.content)
+                                            .components()
+                                            .map(|c| {
+                                                String::from_utf8(c.as_os_str().as_encoded_bytes().to_vec()).unwrap()
+                                            })
+                                            .collect_vec(),
+                                        0,
+                                    ));
+                                    files.pop();
+                                },
+                                | _ => unreachable!("{}, {:#?}", filename, f),
+                            },
+                        }
+                    }
+                }
+
+                let filetype_tdef = spec.types.get_by_key("filetype").unwrap();
+                let case_idx = loop {
+                    match files.last().unwrap() {
+                        | FileEncodingRef::Symlink(l) => {
+                            let mut path_stack = vec![(
+                                Path::new(&l.content)
+                                    .components()
+                                    .map(|c| String::from_utf8(c.as_os_str().as_encoded_bytes().to_vec()).unwrap())
+                                    .collect_vec(),
+                                0,
+                            )];
+
+                            while let Some((components, i)) = path_stack.last_mut() {
+                                let component = match components.get(*i) {
+                                    | None => {
+                                        path_stack.pop();
+                                        continue;
+                                    },
+                                    | Some(component) => component,
+                                };
+                                let f = files.last().unwrap();
+
+                                *i += 1;
+
+                                match component.as_str() {
+                                    | ".." => {
+                                        files.pop();
+                                    },
+                                    | "." => (),
+                                    | filename => match f {
+                                        | FileEncodingRef::Directory(d) => files.push(
+                                            d.children
+                                                .get(filename)
+                                                .expect(&format!("{filename} {:#?}", d.children))
+                                                .as_ref(),
+                                        ),
+                                        | FileEncodingRef::Symlink(l) => {
+                                            path_stack.push((
+                                                Path::new(&l.content)
+                                                    .components()
+                                                    .map(|c| {
+                                                        String::from_utf8(c.as_os_str().as_encoded_bytes().to_vec())
+                                                            .unwrap()
+                                                    })
+                                                    .collect_vec(),
+                                                0,
+                                            ));
+                                            files.pop();
+                                        },
+                                        | _ => unreachable!("{}, {:#?}", filename, f),
+                                    },
+                                }
+                            }
+                        },
+                        | FileEncodingRef::Directory(_d) => {
+                            break filetype_tdef
+                                .wasi
+                                .variant()
+                                .unwrap()
+                                .cases
+                                .iter()
+                                .enumerate()
+                                .find(|(_i, case)| case.name == "directory")
+                                .unwrap()
+                                .0
+                        },
+                        | FileEncodingRef::RegularFile(_f) => {
+                            break filetype_tdef
+                                .wasi
+                                .variant()
+                                .unwrap()
+                                .cases
+                                .iter()
+                                .enumerate()
+                                .find(|(_i, case)| case.name == "regular_file")
+                                .unwrap()
+                                .0
+                        },
+                    }
+                };
+
+                (
+                    types.resources.get("filetype").unwrap().variants[case_idx]
+                        .constructor
+                        .apply(&[]),
+                    Type::Wasi(filetype_tdef.to_owned()),
                 )
             },
             | Term::FsFileTypeGet(t) => {
@@ -1491,13 +1778,27 @@ impl State {
                 let mut files = vec![file];
 
                 for path in paths.iter().rev() {
-                    let path = Path::new(path);
+                    let mut path_stack = vec![(
+                        Path::new(path)
+                            .components()
+                            .map(|c| String::from_utf8(c.as_os_str().as_encoded_bytes().to_vec()).unwrap())
+                            .collect_vec(),
+                        0,
+                    )];
 
-                    for component in path.components() {
-                        let filename = String::from_utf8(component.as_os_str().as_encoded_bytes().to_vec()).unwrap();
+                    while let Some((components, i)) = path_stack.last_mut() {
+                        let component = match components.get(*i) {
+                            | None => {
+                                path_stack.pop();
+                                continue;
+                            },
+                            | Some(component) => component,
+                        };
                         let f = files.last().unwrap();
 
-                        match filename.as_str() {
+                        *i += 1;
+
+                        match component.as_str() {
                             | ".." => {
                                 files.pop();
                             },
@@ -1509,7 +1810,19 @@ impl State {
                                         .expect(&format!("{filename} {:#?}", d.children))
                                         .as_ref(),
                                 ),
-                                | FileEncodingRef::RegularFile(_f) => unreachable!(),
+                                | FileEncodingRef::Symlink(l) => {
+                                    path_stack.push((
+                                        Path::new(&l.content)
+                                            .components()
+                                            .map(|c| {
+                                                String::from_utf8(c.as_os_str().as_encoded_bytes().to_vec()).unwrap()
+                                            })
+                                            .collect_vec(),
+                                        0,
+                                    ));
+                                    files.pop();
+                                },
+                                | _ => unreachable!("{}, {:#?}", filename, f),
                             },
                         }
                     }
@@ -1538,6 +1851,18 @@ impl State {
                             .iter()
                             .enumerate()
                             .find(|(_i, case)| case.name == "regular_file")
+                            .unwrap()
+                            .0
+                    },
+                    | FileEncodingRef::Symlink(_l) => {
+                        filetype_tdef
+                            .wasi
+                            .variant()
+                            .unwrap()
+                            .cases
+                            .iter()
+                            .enumerate()
+                            .find(|(_i, case)| case.name == "symbolic_link")
                             .unwrap()
                             .0
                     },
@@ -2043,6 +2368,10 @@ impl<'ctx> StateTypes<'ctx> {
                 "regular-file",
                 vec![("regular-file-id", z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))],
             )
+            .variant(
+                "symlink",
+                vec![("symlink-id", z3::DatatypeAccessor::Sort(z3::Sort::int(ctx)))],
+            )
             .finish();
 
         Self {
@@ -2443,7 +2772,7 @@ fn no_nonexistent_dir_backtrack<'ctx>(
 
                 match child {
                     | FileEncoding::Directory(d) => dirs.push(d),
-                    | FileEncoding::RegularFile(_f) => (),
+                    | _ => (),
                 }
             }
         }
@@ -2705,7 +3034,7 @@ fn no_nonexistent_dir_backtrack<'ctx>(
 
                         match child {
                             | FileEncoding::Directory(d) => dirs.push(d),
-                            | FileEncoding::RegularFile(_f) => (),
+                            | _ => (),
                         }
                     }
                 }
@@ -3051,7 +3380,10 @@ impl<'u, 'data, 'ctx> CallStrategy for StatefulStrategy<'u, 'data, 'ctx> {
         match solver.check() {
             | z3::SatResult::Sat => (),
             | _ => {
-                return Err(err!("failed to solve output contract"));
+                return Err(err!(
+                    "failed to solve output contract {:?}",
+                    std::thread::current().name()
+                ));
             },
         }
 
@@ -3151,6 +3483,7 @@ struct PreopenFsEncoding<'ctx> {
 enum File {
     Directory(Directory),
     RegularFile(RegularFile),
+    Symlink(Symlink),
 }
 
 impl File {
@@ -3162,16 +3495,20 @@ impl File {
                 FileEncoding::Directory(dir)
             },
             | File::RegularFile(regular_file) => FileEncoding::RegularFile(regular_file.declare(ctx, types)),
+            | File::Symlink(symlink) => FileEncoding::Symlink(symlink.declare(ctx, types)),
         }
     }
 
     fn ingest(dir: &Dir, path: &Path) -> Result<Self, eyre::Error> {
-        let metadata = fs::metadata(path)?;
+        let metadata = fs::symlink_metadata(path)?;
+        let file_type = metadata.file_type();
 
-        if metadata.file_type().is_dir() {
+        if file_type.is_dir() {
             Ok(Self::Directory(Directory::ingest(path)?))
-        } else if metadata.file_type().is_file() {
+        } else if file_type.is_file() {
             Ok(Self::RegularFile(RegularFile::ingest(dir, path)?))
+        } else if file_type.is_symlink() {
+            Ok(Self::Symlink(Symlink::ingest(dir, path)?))
         } else {
             unimplemented!("unsupported file type")
         }
@@ -3182,6 +3519,7 @@ impl File {
 enum FileEncoding<'ctx> {
     Directory(DirectoryEncoding<'ctx>),
     RegularFile(RegularFileEncoding<'ctx>),
+    Symlink(SymlinkEncoding<'ctx>),
 }
 
 impl<'ctx> FileEncoding<'ctx> {
@@ -3189,6 +3527,7 @@ impl<'ctx> FileEncoding<'ctx> {
         match self {
             | FileEncoding::Directory(d) => &d.node,
             | FileEncoding::RegularFile(f) => &f.node,
+            | FileEncoding::Symlink(l) => &l.node,
         }
     }
 
@@ -3196,6 +3535,7 @@ impl<'ctx> FileEncoding<'ctx> {
         match self {
             | FileEncoding::Directory(d) => FileEncodingRef::Directory(d),
             | FileEncoding::RegularFile(f) => FileEncodingRef::RegularFile(f),
+            | FileEncoding::Symlink(l) => FileEncodingRef::Symlink(l),
         }
     }
 }
@@ -3204,13 +3544,14 @@ impl<'ctx> FileEncoding<'ctx> {
 enum FileEncodingRef<'ctx, 'a> {
     Directory(&'a DirectoryEncoding<'ctx>),
     RegularFile(&'a RegularFileEncoding<'ctx>),
+    Symlink(&'a SymlinkEncoding<'ctx>),
 }
 
 impl<'ctx, 'a> FileEncodingRef<'ctx, 'a> {
     fn directory(&self) -> Option<&'a DirectoryEncoding<'ctx>> {
         match self {
             | &FileEncodingRef::Directory(d) => Some(d),
-            | FileEncodingRef::RegularFile(_) => None,
+            | _ => None,
         }
     }
 
@@ -3218,6 +3559,7 @@ impl<'ctx, 'a> FileEncodingRef<'ctx, 'a> {
         match self {
             | FileEncodingRef::Directory(d) => &d.node,
             | FileEncodingRef::RegularFile(f) => &f.node,
+            | FileEncodingRef::Symlink(l) => &l.node,
         }
     }
 }
@@ -3301,10 +3643,36 @@ impl RegularFile {
     }
 }
 
+#[derive(PartialEq, Eq, Clone, Debug)]
+struct Symlink(String);
+
+impl Symlink {
+    fn declare<'ctx>(&self, ctx: &'ctx z3::Context, types: &StateTypes<'ctx>) -> SymlinkEncoding<'ctx> {
+        let node = Dynamic::fresh_const(ctx, "file--", &types.file.sort);
+
+        SymlinkEncoding {
+            node,
+            content: self.0.clone(),
+        }
+    }
+
+    fn ingest(dir: &Dir, path: &Path) -> Result<Self, io::Error> {
+        Ok(Self(
+            String::from_utf8(dir.read_link(path)?.as_os_str().as_encoded_bytes().to_vec()).unwrap(),
+        ))
+    }
+}
+
 #[derive(Clone, Debug)]
 struct RegularFileEncoding<'ctx> {
     node: Dynamic<'ctx>,
     size: u64,
+}
+
+#[derive(Clone, Debug)]
+struct SymlinkEncoding<'ctx> {
+    node:    Dynamic<'ctx>,
+    content: String,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]

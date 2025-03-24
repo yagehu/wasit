@@ -629,8 +629,8 @@ static void handle_call(Request__Call * call) {
         case WASI_FUNC__ARGS_GET: {
             void * p0_argv_ptr = value_ptr_new(call->params[0]);
             void * p1_argv_buf_ptr = value_ptr_new(call->params[1]);
-            int32_t p0_argv = (int32_t) (* (void **) p0_argv_ptr);
-            int32_t p1_argv_buf = (int32_t) (* (void **) p1_argv_buf_ptr);
+            int32_t p0_argv = * (int32_t *) p0_argv_ptr;
+            int32_t p1_argv_buf = * (int32_t *) p1_argv_buf_ptr;
 
             response.errno_some = __imported_wasi_snapshot_preview1_args_get(
                 p0_argv,

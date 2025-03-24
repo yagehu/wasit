@@ -34,6 +34,7 @@ term =
 
   | fs_file_size_get
   | fs_file_type_get
+  | fs_file_type_getl
 
   | no_nonexistent_dir_backtrack
   }
@@ -116,6 +117,14 @@ fs_file_size_get =
 fs_file_type_get =
   { "("
   ~ "@fs.file.type.get"
+  ~ "(" ~ "param" ~ id ~ ")"
+  ~ "(" ~ "param" ~ id ~ ")"
+  ~ ")"
+  }
+
+fs_file_type_getl =
+  { "("
+  ~ "@fs.file.type.getl"
   ~ "(" ~ "param" ~ id ~ ")"
   ~ "(" ~ "param" ~ id ~ ")"
   ~ ")"

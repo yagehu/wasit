@@ -38,6 +38,7 @@ pub(crate) enum Term {
 
     FsFileSizeGet(Box<FsFileSizeGet>),
     FsFileTypeGet(FsFileTypeGet),
+    FsFileTypeGetl(FsFileTypeGet),
     NoNonExistentDirBacktrack(Box<NoNonExistentDirBacktrack>),
 }
 
@@ -374,6 +375,13 @@ pub(super) fn to_term(pair: Pair<'_, Rule>) -> Result<Term, eyre::Error> {
             let path = pairs.next().unwrap().as_str().strip_prefix('$').unwrap().to_string();
 
             Term::FsFileTypeGet(FsFileTypeGet { fd, path })
+        },
+        | Rule::fs_file_type_getl => {
+            let mut pairs = pair.into_inner();
+            let fd = pairs.next().unwrap().as_str().strip_prefix('$').unwrap().to_string();
+            let path = pairs.next().unwrap().as_str().strip_prefix('$').unwrap().to_string();
+
+            Term::FsFileTypeGetl(FsFileTypeGet { fd, path })
         },
         | Rule::no_nonexistent_dir_backtrack => {
             let mut pairs = pair.into_inner();
