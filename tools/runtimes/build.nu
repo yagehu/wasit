@@ -5,8 +5,11 @@ use std
 use node.nu
 use wamr.nu
 use wasmer.nu
+use wasmer-sancov.nu
 use wasmedge.nu
+use wasmedge-sancov.nu
 use wasmtime.nu
+use wasmtime-sancov.nu
 
 def main [...runtimes: string] {
     mut paths = []
@@ -25,8 +28,12 @@ def main [...runtimes: string] {
             "node" => { node $repo },
             "wamr" => { wamr $repo },
             "wasmer" => { wasmer $repo },
+            "wasmer-sancov" => { wasmer-sancov $repo },
             "wasmedge" => { wasmedge $repo $env.LLVM_16 $env.LLD_16 },
+            "wasmedge-sancov" => { wasmedge-sancov $repo $env.LLVM_16 $env.LLD_16 },
             "wasmtime" => { wasmtime $repo },
+            "wasmtime-sancov" => { wasmtime-sancov $repo },
+            _ => { error make { msg: "unknown build configuration" } }
         }
 
         $paths = ($paths | append $path)
