@@ -3,7 +3,9 @@
 use std
 
 use node.nu
+use node-sancov.nu
 use wamr.nu
+use wamr-sancov.nu
 use wasmer.nu
 use wasmer-sancov.nu
 use wasmedge.nu
@@ -26,7 +28,9 @@ def main [...runtimes: string] {
         let repo = $runtime | str substring ($i + 1)..
         let path = match $name {
             "node" => { node $repo },
+            "node-sancov" => { node-sancov $repo },
             "wamr" => { wamr $repo },
+            "wamr-sancov" => { wamr-sancov $repo },
             "wasmer" => { wasmer $repo },
             "wasmer-sancov" => { wasmer-sancov $repo },
             "wasmedge" => { wasmedge $repo $env.LLVM_16 $env.LLD_16 },
