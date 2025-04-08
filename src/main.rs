@@ -68,6 +68,9 @@ impl TypedValueParser for HumantimeParser {
 
 #[derive(Parser, Debug)]
 struct Cmd {
+    #[arg(long)]
+    data: Option<PathBuf>,
+
     #[arg()]
     config: PathBuf,
 
@@ -172,7 +175,11 @@ fn main() -> Result<(), eyre::Error> {
         runtimes,
     );
 
-    fuzzer.fuzz_loop(cmd.fuzzer_count, cmd.time_limit)?;
+    if let Some(data) = cmd.data {
+        fuzzer.fuzz(data)?;
+    } else {
+        fuzzer.fuzz_loop(cmd.fuzzer_count, cmd.time_limit)?;
+    }
 
     Ok(())
 }
@@ -198,6 +205,693 @@ impl Fuzzer {
             store: Arc::new(store),
             runtimes: runtimes.into_iter().collect(),
         }
+    }
+
+    pub fn fuzz(&mut self, data: PathBuf) -> Result<(), eyre::Error> {
+        let data = fs::read(data)?;
+        let store = self.store.clone();
+        let spec = self.spec.clone();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let strategy = self.strategy.clone();
+        let runtime_initializers = Arc::new(self.runtimes.clone());
+        let over = Arc::new(AtomicBool::new(false));
+
+        thread::scope(|scope| -> Result<(), eyre::Error> {
+            let run = store.new_run()?;
+            let run_id: usize = run.id.parse().unwrap();
+            let spec = Spec::preview1(&spec).wrap_err("failed to init spec")?;
+            let mut initializers: Vec<(String, EnvironmentInitializer)> = Default::default();
+            let mut runtimes: Vec<_> = Default::default();
+            let mut run = run.start_setup();
+
+            for (runtime_name, runtime) in runtime_initializers.iter() {
+                let store: RuntimeStore<Call> = run
+                    .new_runtime(runtime_name.to_string(), "-")
+                    .wrap_err("failed to init runtime store")?;
+                let stderr = fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(store.path.join("stderr"))
+                    .wrap_err("failed to open stderr file")?;
+                let executor = RunningExecutor::from_wasi_runner(
+                    runtime.as_ref(),
+                    Path::new("target")
+                        .join("release")
+                        .join("wazzi-executor.wasm")
+                        .canonicalize()
+                        .unwrap()
+                        .as_ref(),
+                    &store.path,
+                    Arc::new(Mutex::new(stderr)),
+                    vec![MappedDir {
+                        name:      "base".to_string(),
+                        host_path: store.base.clone(),
+                    }],
+                )
+                .unwrap();
+                let initializer = runtime.initialize_state(
+                    runtime_name.clone(),
+                    &spec,
+                    &executor,
+                    vec![MappedDir {
+                        name:      "base".to_string(),
+                        host_path: store.base.clone(),
+                    }],
+                )?;
+
+                initializers.push((runtime_name.to_string(), initializer));
+                runtimes.push((runtime_name.to_string(), store, executor));
+            }
+
+            let run = Arc::new(Mutex::new(run.start_run()));
+            let n_runtimes = runtimes.len();
+            let rts = initializers.iter().map(|(name, _)| name.to_string()).collect_vec();
+            let (env, rtctxs, preopens) =
+                apply_env_initializers(&spec, &initializers.into_iter().map(|p| p.1).collect_vec());
+            let env = Arc::new(RwLock::new(env));
+            let rtctxs = Arc::new(RwLock::new(rtctxs));
+            let fill_init = Arc::new((Mutex::new((0, 0usize)), Condvar::new()));
+            let (fill_done_tx, fill_done_rx) = broadcast_queue(1);
+            let mmap = Arc::new(Mutex::new(MmapOptions::new().len(BUF_SIZE).map_anon().unwrap()));
+
+            thread::Builder::new()
+                .name(format!("filler-{run_id}"))
+                .spawn_scoped(scope, {
+                    let run = run.clone();
+                    let fill_init = fill_init.clone();
+                    let mmap = mmap.clone();
+                    let over = over.clone();
+                    let cancel = cancel.clone();
+
+                    move || {
+                        run.lock().unwrap().configure_progress_logging();
+
+                        'outer: loop {
+                            loop {
+                                let (mu, cond) = &*fill_init;
+                                let state = mu.lock().unwrap();
+                                let gen = state.1;
+                                let (mut state, result) = cond
+                                    .wait_timeout_while(state, Duration::from_micros(100), |(ready, g)| {
+                                        *ready != n_runtimes && gen == *g
+                                    })
+                                    .unwrap();
+
+                                if over.load(atomic::Ordering::SeqCst) {
+                                    break 'outer;
+                                }
+
+                                if cancel.load(atomic::Ordering::SeqCst) {
+                                    over.store(true, atomic::Ordering::SeqCst);
+                                    break 'outer;
+                                }
+
+                                if result.timed_out() {
+                                    continue;
+                                }
+
+                                state.0 = 0;
+                                state.1 = state.1.wrapping_add(1);
+
+                                break;
+                            }
+
+                            thread_rng().fill_bytes(&mut mmap.lock().unwrap());
+                            run.lock().unwrap().write_data(&mmap.lock().unwrap()).unwrap();
+                            fill_done_tx.try_send(()).unwrap();
+                        }
+
+                        tracing::info!("Fuzz over. Stopping thread.");
+                    }
+                })
+                .wrap_err("failed to spawn buf filler thread")?;
+
+            let select_func_init = Arc::new((Mutex::new((0, 0usize)), Condvar::new()));
+            let (select_func_done_tx, select_func_done_rx) = broadcast_queue(1);
+            let prep_params_init = Arc::new((Mutex::new((0, 0usize)), Condvar::new()));
+            let (prep_params_done_tx, prep_params_done_rx) = broadcast_queue(1);
+            let lift_results_init = Arc::new((
+                Mutex::new((0, 0usize, HashMap::<String, Option<Vec<WasiValue>>>::new(), None::<i32>)),
+                Condvar::new(),
+            ));
+            let (lift_results_done_tx, lift_results_done_rx) = broadcast_queue(1);
+            let solve_output_contract_init = Arc::new((Mutex::new((0, 0usize)), Condvar::new()));
+            let (solve_output_contract_done_tx, solve_output_contract_done_rx) = broadcast_queue(1);
+            let diff_init = Arc::new((Mutex::new((0, 0usize, None)), Condvar::new()));
+            let (diff_done_tx, diff_done_rx) = broadcast_queue(1);
+
+            thread::Builder::new()
+                .name(format!("strat-{run_id}"))
+                .spawn_scoped(scope, {
+                    let data = data.clone();
+                    let env = env.clone();
+                    let run = run.clone();
+                    let spec = spec.clone();
+                    let over = over.clone();
+                    let select_func_init = select_func_init.clone();
+                    let prep_params_init = prep_params_init.clone();
+                    let lift_results_init_pair = lift_results_init.clone();
+                    let solve_output_contract_init = solve_output_contract_init.clone();
+                    let rtctxs = rtctxs.clone();
+
+                    move || {
+                        run.lock().unwrap().configure_progress_logging();
+
+                        let mut u = Unstructured::new(&data);
+                        let cfg = z3::Config::new();
+                        let ctx = z3::Context::new(&cfg);
+                        let mut strategy = strategy.into_call_strategy(&mut u, &ctx, preopens);
+
+                        'outer: loop {
+                            loop {
+                                let (mu, cond) = &*select_func_init;
+                                let state = mu.lock().unwrap();
+                                let gen = state.1;
+                                let (mut state, result) = cond
+                                    .wait_timeout_while(state, Duration::from_micros(100), |(select, g)| {
+                                        *select != n_runtimes && *g == gen
+                                    })
+                                    .unwrap();
+
+                                if over.load(atomic::Ordering::SeqCst) {
+                                    break 'outer;
+                                }
+
+                                if result.timed_out() {
+                                    continue;
+                                }
+
+                                state.0 = 0;
+                                state.1 = state.1.wrapping_add(1);
+                                break;
+                            }
+
+                            let function = strategy.select_function(&spec, &env.read().unwrap()).unwrap();
+
+                            select_func_done_tx.try_send(function.to_owned()).unwrap();
+
+                            loop {
+                                let (mu, cond) = &*prep_params_init;
+                                let state = mu.lock().unwrap();
+                                let gen = state.1;
+                                let (mut state, result) = cond
+                                    .wait_timeout_while(state, Duration::from_micros(100), |(ready, g)| {
+                                        (*ready != n_runtimes) && *g == gen
+                                    })
+                                    .unwrap();
+
+                                if over.load(atomic::Ordering::SeqCst) {
+                                    break 'outer;
+                                }
+
+                                if result.timed_out() {
+                                    continue;
+                                }
+
+                                state.0 = 0;
+                                state.1 = state.1.wrapping_add(1);
+
+                                break;
+                            }
+
+                            let params = strategy
+                                .prepare_arguments(&spec, function, &env.read().unwrap())
+                                .unwrap();
+
+                            prep_params_done_tx.try_send(params.clone()).unwrap();
+
+                            let (results, errno) = loop {
+                                let (mu, cond) = &*lift_results_init_pair;
+                                let state = mu.lock().unwrap();
+                                let gen = state.1;
+                                let (mut state, result) = cond
+                                    .wait_timeout_while(
+                                        state,
+                                        Duration::from_micros(100),
+                                        |(ready, g, _results, _errno)| (*ready != n_runtimes) && *g == gen,
+                                    )
+                                    .unwrap();
+                                let mut results = HashMap::new();
+
+                                if over.load(atomic::Ordering::SeqCst) {
+                                    break 'outer;
+                                }
+
+                                if result.timed_out() {
+                                    continue;
+                                }
+
+                                state.0 = 0;
+                                state.1 = state.1.wrapping_add(1);
+                                std::mem::swap(&mut state.2, &mut results);
+
+                                break (results, state.3.take());
+                            };
+
+                            let mut resource_idxs = Vec::new();
+
+                            if errno.is_none() || errno.unwrap() == 0 {
+                                for (i, _result) in function.results.iter().enumerate() {
+                                    let mut result_values = Vec::new();
+                                    let tdef = function.results.get(i).unwrap().tref.resolve(&spec);
+
+                                    for rt in rts.iter() {
+                                        let results = results.get(rt).unwrap();
+
+                                        if let Some(results) = results {
+                                            result_values.push(results.get(i).unwrap());
+                                        }
+                                    }
+
+                                    let mut rtctxs = rtctxs.write().unwrap();
+                                    let ctxs = rtctxs.iter_mut().zip(result_values).collect_vec();
+                                    let resource_idx = env.write().unwrap().lift_recursively(&spec, ctxs, tdef);
+
+                                    resource_idxs.push(resource_idx);
+                                }
+                            }
+
+                            lift_results_done_tx.try_send(resource_idxs.clone()).unwrap();
+
+                            loop {
+                                let (mu, cond) = &*solve_output_contract_init;
+                                let state = mu.lock().unwrap();
+                                let gen = state.1;
+                                let (mut state, result) = cond
+                                    .wait_timeout_while(state, Duration::from_millis(100), |(ready, g)| {
+                                        (*ready != n_runtimes) && *g == gen
+                                    })
+                                    .unwrap();
+
+                                if over.load(atomic::Ordering::SeqCst) {
+                                    tracing::info!("Fuzz over. Stopping thread.");
+                                    break 'outer;
+                                }
+
+                                if result.timed_out() {
+                                    continue;
+                                }
+
+                                state.0 = 0;
+                                state.1 = state.1.wrapping_add(1);
+
+                                break;
+                            }
+
+                            if errno.is_none() || errno.unwrap() == 0 {
+                                let result_values = results.get(rts.first().unwrap()).unwrap().clone();
+
+                                strategy
+                                    .handle_results(
+                                        &spec,
+                                        function,
+                                        &mut env.write().unwrap(),
+                                        params,
+                                        resource_idxs,
+                                        result_values.as_ref().map(Vec::as_slice),
+                                    )
+                                    .unwrap();
+                            }
+
+                            solve_output_contract_done_tx.try_send(()).unwrap();
+                        }
+
+                        tracing::info!("Strategy thread exiting.");
+                    }
+                })?;
+
+            thread::Builder::new()
+                .name(format!("diff-{run_id}"))
+                .spawn_scoped(scope, {
+                    let run = run.clone();
+                    let over = over.clone();
+                    let cancel = cancel.clone();
+                    let diff_init = diff_init.clone();
+
+                    move || -> Result<(), FuzzError> {
+                        run.lock().unwrap().configure_progress_logging();
+
+                        loop {
+                            let errnos: Vec<_> = loop {
+                                let (mu, cond) = &*diff_init;
+                                let state = mu.lock().unwrap();
+                                let gen = state.1;
+                                let (mut state, result) = cond
+                                    .wait_timeout_while(state, Duration::from_micros(100), |(ready, g, _)| {
+                                        *ready != n_runtimes && gen == *g
+                                    })
+                                    .unwrap();
+
+                                if over.load(atomic::Ordering::SeqCst) || cancel.load(atomic::Ordering::SeqCst) {
+                                    return Ok(());
+                                }
+
+                                if result.timed_out() {
+                                    continue;
+                                }
+
+                                state.0 = 0;
+                                state.1 = state.1.wrapping_add(1);
+
+                                break state.2.take().unwrap();
+                            };
+
+                            let first = errnos.first().unwrap();
+
+                            for (_runtime_name, errno) in errnos.iter().skip(1) {
+                                match (first.1, errno) {
+                                    | (None, None) => continue,
+                                    | (None, Some(_)) | (Some(_), None) => {
+                                        tracing::info!("Errno diff found.");
+                                        diff_done_tx.try_send(DiffResult::Errno).unwrap();
+                                        return Ok(());
+                                    },
+                                    | (Some(l), &Some(r)) => {
+                                        if (l == 0 && r != 0) || (l != 0 && r == 0) {
+                                            tracing::info!("Errno diff found.");
+                                            diff_done_tx.try_send(DiffResult::Errno).unwrap();
+                                            return Ok(());
+                                        }
+                                    },
+                                }
+                            }
+
+                            let runtimes = run
+                                .lock()
+                                .unwrap()
+                                .runtimes::<Call>()
+                                .wrap_err("failed to resume runtimes")?
+                                .collect::<Vec<_>>();
+
+                            'outer: for (i, runtime_0) in runtimes.iter().enumerate() {
+                                let call_0 = runtime_0
+                                    .trace()
+                                    .last_call()
+                                    .wrap_err("failed to get last call")
+                                    .unwrap()
+                                    .unwrap()
+                                    .read_call()
+                                    .wrap_err("failed to read action")
+                                    .unwrap()
+                                    .unwrap();
+
+                                for j in (i + 1)..runtimes.len() {
+                                    let runtime_1 = runtimes.get(j).unwrap();
+                                    let call_1 = runtime_1
+                                        .trace()
+                                        .last_call()
+                                        .wrap_err("failed to get last call")
+                                        .unwrap()
+                                        .unwrap()
+                                        .read_call()
+                                        .wrap_err("failed to read action")
+                                        .unwrap()
+                                        .unwrap();
+
+                                    match (call_0.errno, call_1.errno) {
+                                        | (None, None) => {},
+                                        | (Some(errno_0), Some(errno_1))
+                                            if errno_0 == 0 && errno_1 == 0 || errno_0 != 0 && errno_1 != 0 => {},
+                                        | _ => {
+                                            tracing::error!(
+                                                runtime_a = runtime_0.name(),
+                                                runtime_b = runtime_1.name(),
+                                                runtime_a_errno = call_0.errno,
+                                                runtime_b_errno = call_1.errno,
+                                                "Errno diff found!"
+                                            );
+
+                                            over.store(true, atomic::Ordering::SeqCst);
+                                            break 'outer;
+                                        },
+                                    }
+
+                                    let runtime_0_walk = WalkDir::new(&runtime_0.base)
+                                        .sort_by_file_name()
+                                        .min_depth(1)
+                                        .into_iter();
+                                    let runtime_1_walk = WalkDir::new(&runtime_1.base)
+                                        .sort_by_file_name()
+                                        .min_depth(1)
+                                        .into_iter();
+
+                                    for pair in runtime_0_walk.zip_longest(runtime_1_walk) {
+                                        match pair {
+                                            | EitherOrBoth::Both(a, b) => {
+                                                let a = a.wrap_err("failed to read dir entry")?;
+                                                let b = b.wrap_err("failed to read dir entry")?;
+
+                                                if a.depth() != b.depth()
+                                                    || a.file_type() != b.file_type()
+                                                    || a.file_name() != b.file_name()
+                                                    || (a.file_type().is_file()
+                                                        && fs::read(a.path()).wrap_err("failed to read file")?
+                                                            != fs::read(b.path()).wrap_err("failed to read file")?)
+                                                {
+                                                    tracing::error!("Fs diff found.");
+                                                    diff_done_tx.try_send(DiffResult::Filesystem).unwrap();
+                                                    return Ok(());
+                                                }
+                                            },
+                                            | EitherOrBoth::Left(_) | EitherOrBoth::Right(_) => {
+                                                tracing::error!("Fs diff found.");
+                                                diff_done_tx.try_send(DiffResult::Filesystem).unwrap();
+                                                return Ok(());
+                                            },
+                                        }
+                                    }
+                                }
+                            }
+
+                            diff_done_tx.try_send(DiffResult::Ok).unwrap();
+                        }
+                    }
+                })
+                .wrap_err("failed to spawn differ thread")?;
+
+            let mut runtime_threads = Vec::new();
+
+            for (i, (runtime_name, mut store, executor)) in runtimes.into_iter().enumerate() {
+                runtime_threads.push(
+                    thread::Builder::new()
+                        .name(format!("drv-{run_id}-{runtime_name}"))
+                        .spawn_scoped(scope, {
+                            let data = data.clone();
+                            let run = run.clone();
+                            let over = over.clone();
+                            let cancel = cancel.clone();
+                            let diff_init = diff_init.clone();
+                            let diff_done_rx = diff_done_rx.add_stream();
+                            let select_func_init = select_func_init.clone();
+                            let select_func_done_rx = select_func_done_rx.add_stream();
+                            let prep_params_init = prep_params_init.clone();
+                            let prep_params_done_rx = prep_params_done_rx.add_stream();
+                            let lift_results_init = lift_results_init.clone();
+                            let lift_results_done_rx = lift_results_done_rx.add_stream();
+                            let solve_output_contract_init = solve_output_contract_init.clone();
+                            let solve_output_contract_done_rx = solve_output_contract_done_rx.add_stream();
+                            let spec = spec.clone();
+                            let rtctxs = rtctxs.clone();
+                            let runtime_name = runtime_name.clone();
+
+                            move || -> Result<(), FuzzError> {
+                                run.lock().unwrap().configure_progress_logging();
+
+                                let mut iteration = 0;
+                                let u = Unstructured::new(&data);
+
+                                loop {
+                                    if cancel.load(atomic::Ordering::SeqCst) {
+                                        tracing::info!("Cancelling fuzz run.");
+                                        over.store(true, atomic::Ordering::SeqCst);
+                                        return Err(FuzzError::Time);
+                                    }
+
+                                    {
+                                        // Let the strategy thread select a function.
+
+                                        let (mu, cond) = &*select_func_init;
+                                        let mut state = mu.lock().unwrap();
+
+                                        state.0 += 1;
+
+                                        if state.0 == n_runtimes {
+                                            cond.notify_all();
+                                        }
+                                    }
+
+                                    let function = select_func_done_rx.recv().unwrap();
+
+                                    tracing::info!(
+                                        run_id = run_id,
+                                        iteration = iteration,
+                                        function = function.name,
+                                        "Calling function."
+                                    );
+                                    iteration += 1;
+
+                                    {
+                                        let (mu, cond) = &*prep_params_init;
+                                        let mut state = mu.lock().unwrap();
+
+                                        state.0 += 1;
+
+                                        if state.0 == n_runtimes {
+                                            // Dispatch to strategy thread to select a function.
+                                            cond.notify_all();
+                                        }
+                                    }
+
+                                    let params = match prep_params_done_rx.recv() {
+                                        | Ok(x) => x,
+                                        | Err(_) => {
+                                            tracing::info!("Strategy thread terminated. Stopping fuzz run.");
+                                            over.store(true, atomic::Ordering::SeqCst);
+                                            break;
+                                        },
+                                    };
+                                    let (errno, results) = execute_call(
+                                        &spec,
+                                        rtctxs.read().unwrap().get(i).unwrap(),
+                                        store.trace_mut(),
+                                        &function,
+                                        params.clone(),
+                                        &executor,
+                                    )
+                                    .unwrap();
+
+                                    {
+                                        let (mu, cond) = &*lift_results_init;
+                                        let mut state = mu.lock().unwrap();
+
+                                        state.0 += 1;
+                                        state.2.insert(runtime_name.clone(), results.clone());
+                                        state.3 = errno;
+
+                                        if state.0 == n_runtimes {
+                                            cond.notify_all();
+                                        }
+                                    }
+
+                                    let resource_idxs = match lift_results_done_rx.recv() {
+                                        | Ok(x) => x,
+                                        | Err(_) => {
+                                            tracing::info!("Strategy thread terminated. Stopping fuzz run.");
+                                            over.store(true, atomic::Ordering::SeqCst);
+                                            break;
+                                        },
+                                    };
+
+                                    store
+                                        .trace_mut()
+                                        .end_call(&Call {
+                                            function: function.name,
+                                            errno:    errno,
+                                            params:   params
+                                                .iter()
+                                                .map(|p| {
+                                                    let (value, resource_idx) =
+                                                        rtctxs.read().unwrap().get(i).unwrap().lower(p.clone());
+
+                                                    MaybeResourceValue { value, resource_idx }
+                                                })
+                                                .collect_vec(),
+                                            results:  results.map(|results| {
+                                                results
+                                                    .iter()
+                                                    .zip(resource_idxs)
+                                                    .map(|(value, resource_idx)| MaybeResourceValue {
+                                                        value: value.to_owned(),
+                                                        resource_idx,
+                                                    })
+                                                    .collect_vec()
+                                            }),
+                                        })
+                                        .unwrap();
+
+                                    if u.is_empty() {
+                                        panic!();
+                                    }
+
+                                    {
+                                        // Start diff when all runtimes ready.
+
+                                        let (mu, cond) = &*diff_init;
+                                        let mut state = mu.lock().unwrap();
+
+                                        state.0 += 1;
+
+                                        let errno = (runtime_name.clone(), errno);
+
+                                        match &mut state.2 {
+                                            | Some(results) => results.push(errno),
+                                            | None => state.2 = Some(vec![errno]),
+                                        }
+
+                                        if state.0 == n_runtimes {
+                                            cond.notify_all();
+                                        }
+                                    }
+
+                                    let diff_result = match diff_done_rx.recv() {
+                                        | Ok(result) => result,
+                                        | Err(_) => {
+                                            tracing::info!("Diff thread terminated. Stopping fuzz run.");
+                                            over.store(true, atomic::Ordering::SeqCst);
+                                            break;
+                                        },
+                                    };
+
+                                    match diff_result {
+                                        | DiffResult::Ok => (),
+                                        | DiffResult::Errno => {
+                                            tracing::info!("Errno diff found. Stopping fuzz run.");
+                                            over.store(true, atomic::Ordering::SeqCst);
+                                            break;
+                                        },
+                                        | DiffResult::Filesystem => {
+                                            tracing::info!("Filesystem diff found. Stopping fuzz run.");
+                                            over.store(true, atomic::Ordering::SeqCst);
+                                            break;
+                                        },
+                                    }
+                                    {
+                                        let (mu, cond) = &*solve_output_contract_init;
+                                        let mut state = mu.lock().unwrap();
+
+                                        state.0 += 1;
+
+                                        if state.0 == n_runtimes {
+                                            cond.notify_all();
+                                        }
+                                    }
+
+                                    match solve_output_contract_done_rx.recv() {
+                                        | Ok(_) => (),
+                                        | Err(_) => {
+                                            tracing::info!("Diff thread terminated. Stopping fuzz run.");
+                                            over.store(true, atomic::Ordering::SeqCst);
+                                            break;
+                                        },
+                                    }
+                                }
+
+                                Ok(())
+                            }
+                        })
+                        .wrap_err(format!("failed to spawn {runtime_name}"))?,
+                );
+            }
+
+            fill_done_rx.unsubscribe();
+            select_func_done_rx.unsubscribe();
+            prep_params_done_rx.unsubscribe();
+            lift_results_done_rx.unsubscribe();
+            solve_output_contract_done_rx.unsubscribe();
+            diff_done_rx.unsubscribe();
+
+            Ok(())
+        })
     }
 
     pub fn fuzz_loop(&mut self, fuzzer_count: usize, time_limit: Option<Duration>) -> Result<(), eyre::Error> {

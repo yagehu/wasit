@@ -22,6 +22,7 @@ export def --env main [repo: path, --clean] -> path {
             "-C llvm-args=-sanitizer-coverage-pc-table"
             "-C llvm-args=-sanitizer-coverage-trace-pc-guard"
             "-C llvm-args=-sanitizer-coverage-prune-blocks=0"
+            "-C llvm-args=-sanitizer-coverage-allowlist=wasmtime-cov-allowlist.txt"
         ] | str join " "
 
         (

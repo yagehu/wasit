@@ -13,15 +13,32 @@ use petgraph::{
     graph::{DiGraph, NodeIndex},
     Direction,
 };
+use serde::Serialize;
 use wazzi::{Call, ResourceIdx};
+
+#[derive(Serialize, PartialEq, Eq, Clone, Debug)]
+struct Analysis {
+    runs: Vec<RunMetadata>,
+}
+
+#[derive(Serialize, PartialEq, Eq, Clone, Debug)]
+struct RunMetadata {
+    id:     usize,
+    ncalls: usize,
+}
 
 fn main() -> Result<(), eyre::Error> {
     color_eyre::install()?;
 
+    let mut runs = Vec::new();
     let cmd = Command::parse();
     let entries = fs::read_dir(&cmd.dir)?
         .collect::<Result<Vec<_>, _>>()
         .wrap_err("failed to read directory entries")?;
+
+    fs::create_dir(&cmd.out_dir)?;
+
+    let out_dir = cmd.out_dir.canonicalize()?;
     let entries = entries
         .into_iter()
         .map(|entry| {
@@ -32,7 +49,7 @@ fn main() -> Result<(), eyre::Error> {
         })
         .sorted_by(|(_, idx_0), (_, idx_1)| Ord::cmp(idx_0, idx_1))
         .collect_vec();
-    let mut runs = 0;
+    let mut nruns = 0;
     let mut total_num_calls = 0;
     let mut max_trace_len = 0;
     let mut max_trace_len_idx = 0;
@@ -79,8 +96,9 @@ fn main() -> Result<(), eyre::Error> {
         let mut graph = DiGraph::new();
         let mut resource_node_map = HashMap::new();
         let mut init_resources = HashSet::new();
+        let ncalls = call_entries.len();
 
-        println!("Analyzing run {runs}.");
+        println!("Analyzing run {nruns}.");
 
         for (path, idx) in call_entries {
             if !path.join("call.json").exists() {
@@ -126,6 +144,8 @@ fn main() -> Result<(), eyre::Error> {
                 }
             }
         }
+
+        runs.push(RunMetadata { id: run_idx, ncalls });
 
         let mut most_calls = 0;
         let mut max_resource_depth_ = 0;
@@ -189,21 +209,42 @@ fn main() -> Result<(), eyre::Error> {
         total_max_calls += most_calls;
         max_resource_depth = max_resource_depth.max(max_resource_depth_);
         total_max_resource_depth += max_resource_depth_;
-        runs += 1;
+        nruns += 1;
     }
 
-    println!("# runs: {runs}");
+    let analysis = Analysis { runs };
+
+    serde_json::to_writer(
+        fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(out_dir.join("all.json"))?,
+        &analysis,
+    )?;
+
+    let mut runs = csv::Writer::from_writer(
+        fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(out_dir.join("runs.csv"))?,
+    );
+
+    for run in &analysis.runs {
+        runs.serialize(&run)?;
+    }
+
+    println!("# runs: {nruns}");
     println!("max trace len: {max_trace_len}");
     println!("max trace len idx: {max_trace_len_idx}");
-    println!("average trace len: {:.2}", total_num_calls as f64 / runs as f64);
+    println!("average trace len: {:.2}", total_num_calls as f64 / nruns as f64);
     println!(
         "average max calls involving one resource: {:2}",
-        total_max_calls as f64 / runs as f64
+        total_max_calls as f64 / nruns as f64
     );
     println!("max resource depth: {:.2}", max_resource_depth,);
     println!(
         "average max resource depth {:.2}",
-        total_max_resource_depth as f64 / runs as f64
+        total_max_resource_depth as f64 / nruns as f64
     );
 
     Ok(())
@@ -213,6 +254,9 @@ fn main() -> Result<(), eyre::Error> {
 struct Command {
     #[arg()]
     dir: PathBuf,
+
+    #[arg()]
+    out_dir: PathBuf,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]

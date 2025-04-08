@@ -3,6 +3,7 @@ use std::{
     fs,
     io,
     path::{Path, PathBuf},
+    thread,
 };
 
 use arbitrary::Unstructured;
@@ -1565,6 +1566,7 @@ impl State {
                                         .as_ref(),
                                 ),
                                 | FileEncodingRef::Symlink(l) => {
+                                    *i -= 1;
                                     path_stack.push((
                                         Path::new(&l.content)
                                             .components()
@@ -1584,7 +1586,7 @@ impl State {
 
                 let filetype_tdef = spec.types.get_by_key("filetype").unwrap();
                 let case_idx = loop {
-                    match files.last().unwrap() {
+                    match files.pop().unwrap() {
                         | FileEncodingRef::Symlink(l) => {
                             let mut path_stack = vec![(
                                 Path::new(&l.content)
@@ -1619,6 +1621,7 @@ impl State {
                                                 .as_ref(),
                                         ),
                                         | FileEncodingRef::Symlink(l) => {
+                                            *i -= 1;
                                             path_stack.push((
                                                 Path::new(&l.content)
                                                     .components()
@@ -1807,10 +1810,11 @@ impl State {
                                 | FileEncodingRef::Directory(d) => files.push(
                                     d.children
                                         .get(filename)
-                                        .expect(&format!("{filename} {:#?}", d.children))
+                                        .expect(&format!("{filename} {:#?} {:?}", d.children, thread::current().name()))
                                         .as_ref(),
                                 ),
                                 | FileEncodingRef::Symlink(l) => {
+                                    *i -= 1;
                                     path_stack.push((
                                         Path::new(&l.content)
                                             .components()
@@ -1822,7 +1826,7 @@ impl State {
                                     ));
                                     files.pop();
                                 },
-                                | _ => unreachable!("{}, {:#?}", filename, f),
+                                | _ => unreachable!("{}, {:#?}, {:?}", filename, f, thread::current().name()),
                             },
                         }
                     }

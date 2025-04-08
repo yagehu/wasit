@@ -1,6 +1,6 @@
 #!/usr/bin/env nu
 
-def main [path: glob, runtime: string, --merge] {
+def main [path: glob, runtime: string] {
     let cov_command = match $runtime {
         "node" => node_cov,
         "node-wasi" => node_wasi_cov,
@@ -15,33 +15,12 @@ def main [path: glob, runtime: string, --merge] {
     }
     let rt = $cov_command.runtime
     let llvm_prefix = $env.LLVM? | default "/usr/local"
-    let llvm_profdata = [$llvm_prefix, "bin", "llvm-profdata"] | path join
-    let llvm_cov = [$llvm_prefix, "bin", "llvm-cov"] | path join
-    let prof_raws = glob --no-symlink $path
-        | save --force $"($rt)-profraws.txt";
-    let profdata = $"($rt).profdata"
+    let sancov = [$llvm_prefix, "bin", "sancov"] | path join
+    let raws = glob --no-symlink $path
 
-    if $merge {
-        ^$"($llvm_profdata)" merge -sparse -o $profdata $"--input-files=($rt)-profraws.txt"
-    }
+    print $raws
 
-    (
-        ^$"($llvm_cov)" report
-            --color
-            --show-branch-summary
-            ...$cov_command.options
-            $"-instr-profile=($profdata)"
-            $cov_command.target
-    )
-
-    (
-        ^$"($llvm_cov)" show
-            --show-branch-summary
-            ...$cov_command.options
-            $"-instr-profile=($profdata)"
-            $cov_command.target
-            out> $"($rt).cov"
-    )
+    ^$sancov -print ...$raws | lines | sort | uniq | length
 }
 
 def node_cov [] {
@@ -50,7 +29,6 @@ def node_cov [] {
     {
         runtime: "node",
         target: $bin,
-        options: []
     }
 }
 
@@ -117,7 +95,6 @@ def wasmedge_cov [] {
     {
         runtime: "wasmedge",
         target: $lib,
-        options: []
     }
 }
 
@@ -158,12 +135,6 @@ def wasmtime_cov [] {
     {
         runtime: "wasmtime",
         target: $bin,
-        options: [
-            "-Xdemangler=rustfilt"
-            "-ignore-filename-regex=/rustlib/"
-            "-ignore-filename-regex=/\\.cargo/registry/"
-            "-ignore-filename-regex=/cranelift/"
-        ]
     }
 }
 

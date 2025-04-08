@@ -1285,26 +1285,12 @@
     (result $error (expected $fd (error $errno)))
     (@input
       (@and
-        (@flags.get (param $oflags) $creat)
-
         ; In general, the behavior of O_EXCL is undefined
         ; if it is used without O_CREAT.
         (@not (@and
           (@not (@flags.get (param $oflags) $creat))
           (@flags.get (param $oflags) $excl)
         ))
-
-        ; $path should be non-empty.
-        ;(@int.gt (@list.len (param $path)) 0)
-
-        ; $path should not be absolute (begin with a `/`).
-        ;(@not (@value.eq (@str.at (param $path) 0) "/"))
-
-        ; When generating path segments, if we generate one corresponding to a
-        ; non-existent directory, the next segment shall not be `..`.
-        ; This excludes uninteresting path normalization differences between
-        ; Windows and Linux.
-        ;(@no-nonexistent-dir-backtrack $fd $path)
 
         (@not (@and
           (@flags.get (param $oflags) $directory)
@@ -1319,32 +1305,16 @@
           (@flags.get (param $fdflags) $append)
         ))
 
-        ;; (@or
-        ;;   (@and
-        ;;     (@value.eq
-        ;;       (@fs.file.type.get (param $fd) (param $path))
-        ;;       (@variant.const $filetype $file)
-        ;;     )
-        ;;     (@flags.get (param $fs_rights_base) $fd_read)
-        ;;     (@flags.get (param $fs_rights_base) $fd_write)
-        ;;   )
-
-        ;;   (@value.eq
-        ;;     (@fs.file.type.get (param $fd) (param $path))
-        ;;     (@variant.const $filetype $directory)
-        ;;   )
-        ;; )
-
         (@not (@flags.get (param $fdflags) $dsync))
         (@not (@flags.get (param $fdflags) $rsync))
         (@not (@flags.get (param $fdflags) $sync))
         (@flags.get (param $fs_rights_base) $fd_datasync)
-        (@flags.get (param $fs_rights_base) $fd_read)
+        ;;(@flags.get (param $fs_rights_base) $fd_read)
         (@flags.get (param $fs_rights_base) $fd_seek)
         (@flags.get (param $fs_rights_base) $fd_fdstat_set_flags)
         (@flags.get (param $fs_rights_base) $fd_sync)
         (@flags.get (param $fs_rights_base) $fd_tell)
-        (@flags.get (param $fs_rights_base) $fd_write)
+        ;;(@flags.get (param $fs_rights_base) $fd_write)
         (@flags.get (param $fs_rights_base) $fd_advise)
         (@flags.get (param $fs_rights_base) $fd_allocate)
         (@flags.get (param $fs_rights_base) $path_create_directory)
@@ -1369,12 +1339,12 @@
         (@not (@flags.get (param $fs_rights_base) $sock_shutdown))
         (@not (@flags.get (param $fs_rights_base) $sock_accept))
         (@flags.get (param $fs_rights_inheriting) $fd_datasync)
-        (@flags.get (param $fs_rights_inheriting) $fd_read)
+        ;;(@flags.get (param $fs_rights_inheriting) $fd_read)
         (@flags.get (param $fs_rights_inheriting) $fd_seek)
         (@flags.get (param $fs_rights_inheriting) $fd_fdstat_set_flags)
         (@flags.get (param $fs_rights_inheriting) $fd_sync)
         (@flags.get (param $fs_rights_inheriting) $fd_tell)
-        (@flags.get (param $fs_rights_inheriting) $fd_write)
+        ;;(@flags.get (param $fs_rights_inheriting) $fd_write)
         (@flags.get (param $fs_rights_inheriting) $fd_advise)
         (@flags.get (param $fs_rights_inheriting) $fd_allocate)
         (@flags.get (param $fs_rights_inheriting) $path_create_directory)

@@ -7,8 +7,7 @@ export def --env main [repo: path, --clean] -> path {
         $env.RUSTFLAGS = "-C instrument-coverage -Z coverage-options=branch"
 
         rustup override set --path $repo nightly
-        make -C $repo build-wasmer
-        # cargo +nightly -Z unstable-options -C $repo build --release
+        cargo +nightly -Z unstable-options -C $repo build --release
     }
 
     let build_dir = $repo | path join "target" "release"

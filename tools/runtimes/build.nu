@@ -13,7 +13,7 @@ use wasmedge-sancov.nu
 use wasmtime.nu
 use wasmtime-sancov.nu
 
-def main [...runtimes: string] {
+def main [--clean, ...runtimes: string] {
     mut paths = []
 
     for $runtime in $runtimes {
@@ -29,13 +29,13 @@ def main [...runtimes: string] {
         let path = match $name {
             "node" => { node $repo },
             "node-sancov" => { node-sancov $repo },
-            "wamr" => { wamr $repo },
+            "wamr" => { wamr $repo --clean=$clean },
             "wamr-sancov" => { wamr-sancov $repo },
-            "wasmer" => { wasmer $repo },
+            "wasmer" => { wasmer $repo --clean=$clean },
             "wasmer-sancov" => { wasmer-sancov $repo },
-            "wasmedge" => { wasmedge $repo $env.LLVM_16 $env.LLD_16 },
+            "wasmedge" => { wasmedge $repo $env.LLVM_16 $env.LLD_16 --clean=$clean },
             "wasmedge-sancov" => { wasmedge-sancov $repo $env.LLVM_16 $env.LLD_16 },
-            "wasmtime" => { wasmtime $repo },
+            "wasmtime" => { wasmtime $repo --clean=$clean },
             "wasmtime-sancov" => { wasmtime-sancov $repo },
             _ => { error make { msg: "unknown build configuration" } }
         }
