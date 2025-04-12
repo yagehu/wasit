@@ -1,17 +1,25 @@
 #!/usr/bin/env nu
 
-export def --env main [repo: path] -> path {
+export def --env main [repo: path, --clean, --cov] -> path {
     let repo = $repo | path expand
     let build_dir = $repo | path join "build"
+
+    if $clean {
+        cd $repo
+        make clean
+    }
 
     do {
         cd $repo
 
         $env.CC = "clang"
         $env.CXX = "clang++"
-        $env.CFLAGS = "-fprofile-instr-generate -fcoverage-mapping"
-        $env.CXXFLAGS = "-fprofile-instr-generate -fcoverage-mapping"
-        $env.LDFLAGS = "-fprofile-instr-generate -fcoverage-mapping -fuse-ld=lld"
+
+        if $cov {
+            $env.CFLAGS = "-fprofile-instr-generate -fcoverage-mapping"
+            $env.CXXFLAGS = "-fprofile-instr-generate -fcoverage-mapping"
+            $env.LDFLAGS = "-fprofile-instr-generate -fcoverage-mapping -fuse-ld=lld"
+        }
 
         ./configure --ninja
 

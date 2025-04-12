@@ -13,7 +13,7 @@ use wasmedge-sancov.nu
 use wasmtime.nu
 use wasmtime-sancov.nu
 
-def main [--clean, ...runtimes: string] {
+def main [--clean, --cov, ...runtimes: string] {
     mut paths = []
 
     for $runtime in $runtimes {
@@ -27,15 +27,15 @@ def main [--clean, ...runtimes: string] {
         let name = $runtime | str substring 0..($i - 1)
         let repo = $runtime | str substring ($i + 1)..
         let path = match $name {
-            "node" => { node $repo },
+            "node" => { node $repo --cov=$cov },
             "node-sancov" => { node-sancov $repo },
-            "wamr" => { wamr $repo --clean=$clean },
+            "wamr" => { wamr $repo --clean=$clean --cov=$cov },
             "wamr-sancov" => { wamr-sancov $repo },
-            "wasmer" => { wasmer $repo --clean=$clean },
+            "wasmer" => { wasmer $repo --clean=$clean --cov=$cov },
             "wasmer-sancov" => { wasmer-sancov $repo },
-            "wasmedge" => { wasmedge $repo $env.LLVM_16 $env.LLD_16 --clean=$clean },
+            "wasmedge" => { wasmedge $repo $env.LLVM_16 $env.LLD_16 --clean=$clean --cov=$cov },
             "wasmedge-sancov" => { wasmedge-sancov $repo $env.LLVM_16 $env.LLD_16 },
-            "wasmtime" => { wasmtime $repo --clean=$clean },
+            "wasmtime" => { wasmtime $repo --clean=$clean --cov=$cov },
             "wasmtime-sancov" => { wasmtime-sancov $repo },
             _ => { error make { msg: "unknown build configuration" } }
         }

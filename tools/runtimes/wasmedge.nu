@@ -1,6 +1,6 @@
 #!/usr/bin/env nu
 
-export def --env main [repo: path, llvm_16: path, lld_16: path, --clean] -> path {
+export def --env main [repo: path, llvm_16: path, lld_16: path, --clean, --cov] -> path {
     let repo = $repo | path expand
     let build_dir = $repo | path join "build"
 
@@ -15,9 +15,12 @@ export def --env main [repo: path, llvm_16: path, lld_16: path, --clean] -> path
         $env.CXX = "clang++"
         $env.LLVM_DIR = $llvm_16
         $env.LLD_DIR = $lld_16
-        $env.CFLAGS = "-fprofile-instr-generate -fcoverage-mapping"
-        $env.CXXFLAGS = "-fprofile-instr-generate -fcoverage-mapping"
-        $env.LDFLAGS = "-fprofile-instr-generate -fcoverage-mapping -fuse-ld=lld"
+
+        if $cov {
+            $env.CFLAGS = "-fprofile-instr-generate -fcoverage-mapping"
+            $env.CXXFLAGS = "-fprofile-instr-generate -fcoverage-mapping"
+            $env.LDFLAGS = "-fprofile-instr-generate -fcoverage-mapping -fuse-ld=lld"
+        }
 
         cmake -DCMAKE_BUILD_TYPE=Debug -B $build_dir -S $repo
 

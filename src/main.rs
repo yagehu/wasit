@@ -1,5 +1,3 @@
-#![feature(trait_upcasting)]
-
 use std::{
     collections::{BTreeMap, HashMap},
     fs,
@@ -45,7 +43,7 @@ use wazzi::{
     StatelessStrategy,
 };
 use wazzi_runners::{MappedDir, Node, RunningExecutor, Wamr, Wasmedge, Wasmer, Wasmtime, Wazero};
-use wazzi_store::{RuntimeStore, Store};
+use wazzi_store::Store;
 
 static BUF_SIZE: usize = 131072;
 
@@ -85,6 +83,9 @@ struct Cmd {
 
     #[arg(short = 'c', default_value = "1")]
     fuzzer_count: usize,
+
+    #[arg(long, default_value_t = false)]
+    silent: bool,
 }
 
 #[derive(clap::ValueEnum, Serialize, Deserialize, PartialEq, Eq, Clone, Copy, Debug)]
@@ -111,26 +112,30 @@ impl Strategy {
 fn main() -> Result<(), eyre::Error> {
     color_eyre::install()?;
 
-    let mut subscriber = tracing_subscriber::fmt::layer()
-        .with_thread_names(true)
-        .with_writer(io::stderr);
+    let cmd = Cmd::parse();
 
-    if !stderr().is_terminal() {
-        subscriber.set_ansi(false);
+    if !cmd.silent {
+        let mut subscriber = tracing_subscriber::fmt::layer()
+            .with_thread_names(true)
+            .with_writer(io::stderr);
+
+        if !stderr().is_terminal() {
+            subscriber.set_ansi(false);
+        }
+
+        tracing::subscriber::set_global_default(
+            tracing_subscriber::Registry::default()
+                .with(
+                    EnvFilter::builder()
+                        .with_env_var("DIVA_LOG_LEVEL")
+                        .with_default_directive(LevelFilter::INFO.into())
+                        .from_env_lossy(),
+                )
+                .with(ErrorLayer::default())
+                .with(subscriber),
+        )
+        .wrap_err("failed to configure tracing")?;
     }
-
-    tracing::subscriber::set_global_default(
-        tracing_subscriber::Registry::default()
-            .with(
-                EnvFilter::builder()
-                    .with_env_var("DIVA_LOG_LEVEL")
-                    .with_default_directive(LevelFilter::INFO.into())
-                    .from_env_lossy(),
-            )
-            .with(ErrorLayer::default())
-            .with(subscriber),
-    )
-    .wrap_err("failed to configure tracing")?;
 
     let orig_hook = panic::take_hook();
 
@@ -140,7 +145,6 @@ fn main() -> Result<(), eyre::Error> {
         process::exit(1);
     }));
 
-    let cmd = Cmd::parse();
     let config: FuzzConfig = serde_yml::from_reader(
         fs::OpenOptions::new()
             .read(true)
@@ -173,6 +177,7 @@ fn main() -> Result<(), eyre::Error> {
         cmd.strategy,
         store,
         runtimes,
+        cmd.silent,
     );
 
     if let Some(data) = cmd.data {
@@ -186,6 +191,7 @@ fn main() -> Result<(), eyre::Error> {
 
 #[derive(Debug)]
 struct Fuzzer {
+    silent:   bool,
     spec:     String,
     strategy: Strategy,
     store:    Arc<Store>,
@@ -198,8 +204,10 @@ impl Fuzzer {
         strategy: Strategy,
         store: Store,
         runtimes: impl IntoIterator<Item = (String, Box<dyn Runtime>)>,
+        silent: bool,
     ) -> Self {
         Self {
+            silent,
             spec,
             strategy,
             store: Arc::new(store),
@@ -208,6 +216,7 @@ impl Fuzzer {
     }
 
     pub fn fuzz(&mut self, data: PathBuf) -> Result<(), eyre::Error> {
+        let log_trace = !self.silent;
         let data = fs::read(data)?;
         let store = self.store.clone();
         let spec = self.spec.clone();
@@ -217,53 +226,57 @@ impl Fuzzer {
         let over = Arc::new(AtomicBool::new(false));
 
         thread::scope(|scope| -> Result<(), eyre::Error> {
-            let run = store.new_run()?;
-            let run_id: usize = run.id.parse().unwrap();
+            let (run_id, mut run) = store.new_run::<Call>()?;
             let spec = Spec::preview1(&spec).wrap_err("failed to init spec")?;
             let mut initializers: Vec<(String, EnvironmentInitializer)> = Default::default();
             let mut runtimes: Vec<_> = Default::default();
-            let mut run = run.start_setup();
 
             for (runtime_name, runtime) in runtime_initializers.iter() {
-                let store: RuntimeStore<Call> = run
-                    .new_runtime(runtime_name.to_string(), "-")
+                let store = run
+                    .new_runtime(runtime_name.to_string(), log_trace)
                     .wrap_err("failed to init runtime store")?;
-                let stderr = fs::OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(store.path.join("stderr"))
-                    .wrap_err("failed to open stderr file")?;
-                let executor = RunningExecutor::from_wasi_runner(
-                    runtime.as_ref(),
-                    Path::new("target")
-                        .join("release")
-                        .join("wazzi-executor.wasm")
-                        .canonicalize()
-                        .unwrap()
-                        .as_ref(),
-                    &store.path,
-                    Arc::new(Mutex::new(stderr)),
-                    vec![MappedDir {
-                        name:      "base".to_string(),
-                        host_path: store.base.clone(),
-                    }],
-                )
-                .unwrap();
-                let initializer = runtime.initialize_state(
-                    runtime_name.clone(),
-                    &spec,
-                    &executor,
-                    vec![MappedDir {
-                        name:      "base".to_string(),
-                        host_path: store.base.clone(),
-                    }],
-                )?;
+                let executor = {
+                    let store = store.read().unwrap();
+                    let stderr = fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(store.root_path().join("stderr"))
+                        .wrap_err("failed to open stderr file")?;
+                    let executor = RunningExecutor::from_wasi_runner(
+                        runtime.as_ref(),
+                        Path::new("target")
+                            .join("release")
+                            .join("wazzi-executor.wasm")
+                            .canonicalize()
+                            .unwrap()
+                            .as_ref(),
+                        store.root_path(),
+                        Arc::new(Mutex::new(stderr)),
+                        vec![MappedDir {
+                            name:      "base".to_string(),
+                            host_path: store.base_path().to_path_buf(),
+                        }],
+                    )
+                    .unwrap();
+                    let initializer = runtime.initialize_state(
+                        runtime_name.clone(),
+                        &spec,
+                        &executor,
+                        vec![MappedDir {
+                            name:      "base".to_string(),
+                            host_path: store.base_path().to_path_buf(),
+                        }],
+                    )?;
 
-                initializers.push((runtime_name.to_string(), initializer));
+                    initializers.push((runtime_name.to_string(), initializer));
+
+                    executor
+                };
+
                 runtimes.push((runtime_name.to_string(), store, executor));
             }
 
-            let run = Arc::new(Mutex::new(run.start_run()));
+            let run = Arc::new(Mutex::new(run));
             let n_runtimes = runtimes.len();
             let rts = initializers.iter().map(|(name, _)| name.to_string()).collect_vec();
             let (env, rtctxs, preopens) =
@@ -284,7 +297,7 @@ impl Fuzzer {
                     let cancel = cancel.clone();
 
                     move || {
-                        run.lock().unwrap().configure_progress_logging();
+                        run.lock().unwrap().configure_progress_logging(!self.silent);
 
                         'outer: loop {
                             loop {
@@ -355,7 +368,7 @@ impl Fuzzer {
                     let rtctxs = rtctxs.clone();
 
                     move || {
-                        run.lock().unwrap().configure_progress_logging();
+                        run.lock().unwrap().configure_progress_logging(log_trace);
 
                         let mut u = Unstructured::new(&data);
                         let cfg = z3::Config::new();
@@ -529,7 +542,7 @@ impl Fuzzer {
                     let diff_init = diff_init.clone();
 
                     move || -> Result<(), FuzzError> {
-                        run.lock().unwrap().configure_progress_logging();
+                        run.lock().unwrap().configure_progress_logging(log_trace);
 
                         loop {
                             let errnos: Vec<_> = loop {
@@ -576,37 +589,17 @@ impl Fuzzer {
                                 }
                             }
 
-                            let runtimes = run
-                                .lock()
-                                .unwrap()
-                                .runtimes::<Call>()
-                                .wrap_err("failed to resume runtimes")?
-                                .collect::<Vec<_>>();
+                            let run = run.lock().unwrap();
+                            let runtimes = run.runtime_stores().collect::<Vec<_>>();
 
-                            'outer: for (i, runtime_0) in runtimes.iter().enumerate() {
-                                let call_0 = runtime_0
-                                    .trace()
-                                    .last_call()
-                                    .wrap_err("failed to get last call")
-                                    .unwrap()
-                                    .unwrap()
-                                    .read_call()
-                                    .wrap_err("failed to read action")
-                                    .unwrap()
-                                    .unwrap();
+                            'outer: for (i, (runtime_0_name, runtime_0)) in runtimes.iter().enumerate() {
+                                let runtime_0 = runtime_0.read().unwrap();
+                                let call_0 = runtime_0.last_call().unwrap();
 
                                 for j in (i + 1)..runtimes.len() {
-                                    let runtime_1 = runtimes.get(j).unwrap();
-                                    let call_1 = runtime_1
-                                        .trace()
-                                        .last_call()
-                                        .wrap_err("failed to get last call")
-                                        .unwrap()
-                                        .unwrap()
-                                        .read_call()
-                                        .wrap_err("failed to read action")
-                                        .unwrap()
-                                        .unwrap();
+                                    let (runtime_1_name, runtime_1) = runtimes.get(j).unwrap();
+                                    let runtime_1 = runtime_1.read().unwrap();
+                                    let call_1 = runtime_1.last_call().unwrap();
 
                                     match (call_0.errno, call_1.errno) {
                                         | (None, None) => {},
@@ -614,8 +607,8 @@ impl Fuzzer {
                                             if errno_0 == 0 && errno_1 == 0 || errno_0 != 0 && errno_1 != 0 => {},
                                         | _ => {
                                             tracing::error!(
-                                                runtime_a = runtime_0.name(),
-                                                runtime_b = runtime_1.name(),
+                                                runtime_a = runtime_0_name,
+                                                runtime_b = runtime_1_name,
                                                 runtime_a_errno = call_0.errno,
                                                 runtime_b_errno = call_1.errno,
                                                 "Errno diff found!"
@@ -626,11 +619,11 @@ impl Fuzzer {
                                         },
                                     }
 
-                                    let runtime_0_walk = WalkDir::new(&runtime_0.base)
+                                    let runtime_0_walk = WalkDir::new(&runtime_0.base_path())
                                         .sort_by_file_name()
                                         .min_depth(1)
                                         .into_iter();
-                                    let runtime_1_walk = WalkDir::new(&runtime_1.base)
+                                    let runtime_1_walk = WalkDir::new(&runtime_1.base_path())
                                         .sort_by_file_name()
                                         .min_depth(1)
                                         .into_iter();
@@ -671,11 +664,12 @@ impl Fuzzer {
 
             let mut runtime_threads = Vec::new();
 
-            for (i, (runtime_name, mut store, executor)) in runtimes.into_iter().enumerate() {
+            for (i, (runtime_name, store, executor)) in runtimes.into_iter().enumerate() {
                 runtime_threads.push(
                     thread::Builder::new()
                         .name(format!("drv-{run_id}-{runtime_name}"))
                         .spawn_scoped(scope, {
+                            let run_id = run_id.clone();
                             let data = data.clone();
                             let run = run.clone();
                             let over = over.clone();
@@ -695,7 +689,7 @@ impl Fuzzer {
                             let runtime_name = runtime_name.clone();
 
                             move || -> Result<(), FuzzError> {
-                                run.lock().unwrap().configure_progress_logging();
+                                run.lock().unwrap().configure_progress_logging(log_trace);
 
                                 let mut iteration = 0;
                                 let u = Unstructured::new(&data);
@@ -753,7 +747,6 @@ impl Fuzzer {
                                     let (errno, results) = execute_call(
                                         &spec,
                                         rtctxs.read().unwrap().get(i).unwrap(),
-                                        store.trace_mut(),
                                         &function,
                                         params.clone(),
                                         &executor,
@@ -783,8 +776,9 @@ impl Fuzzer {
                                     };
 
                                     store
-                                        .trace_mut()
-                                        .end_call(&Call {
+                                        .write()
+                                        .unwrap()
+                                        .record_call(Call {
                                             function: function.name,
                                             errno:    errno,
                                             params:   params
@@ -895,6 +889,7 @@ impl Fuzzer {
     }
 
     pub fn fuzz_loop(&mut self, fuzzer_count: usize, time_limit: Option<Duration>) -> Result<(), eyre::Error> {
+        let enable_logging = !self.silent;
         let cancel = Arc::new(AtomicBool::new(false));
 
         if let Some(limit) = &time_limit {
@@ -927,6 +922,9 @@ impl Fuzzer {
 
             pool.execute({
                 let store = self.store.clone();
+                let (run_id, run) = store.new_run::<Call>()?;
+                let run = Arc::new(Mutex::new(run));
+                let run_ = run.clone();
                 let spec = self.spec.clone();
                 let cancel = cancel.clone();
                 let strategy = self.strategy.clone();
@@ -935,53 +933,57 @@ impl Fuzzer {
 
                 move || {
                     thread::scope(|scope| -> Result<(), eyre::Error> {
-                        let run = store.new_run()?;
-                        let run_id: usize = run.id.parse().unwrap();
                         let spec = Spec::preview1(&spec).wrap_err("failed to init spec")?;
                         let mut initializers: Vec<(String, EnvironmentInitializer)> = Default::default();
                         let mut runtimes: Vec<_> = Default::default();
-                        let mut run = run.start_setup();
 
                         for (runtime_name, runtime) in runtime_initializers.iter() {
-                            let store: RuntimeStore<Call> = run
-                                .new_runtime(runtime_name.to_string(), "-")
+                            let mut run = run.lock().unwrap();
+                            let store = run
+                                .new_runtime(runtime_name.to_string(), enable_logging)
                                 .wrap_err("failed to init runtime store")?;
-                            let stderr = fs::OpenOptions::new()
-                                .write(true)
-                                .create_new(true)
-                                .open(store.path.join("stderr"))
-                                .wrap_err("failed to open stderr file")?;
-                            let executor = RunningExecutor::from_wasi_runner(
-                                runtime.as_ref(),
-                                Path::new("target")
-                                    .join("release")
-                                    .join("wazzi-executor.wasm")
-                                    .canonicalize()
-                                    .unwrap()
-                                    .as_ref(),
-                                &store.path,
-                                Arc::new(Mutex::new(stderr)),
-                                vec![MappedDir {
-                                    name:      "base".to_string(),
-                                    host_path: store.base.clone(),
-                                }],
-                            )
-                            .unwrap();
-                            let initializer = runtime.initialize_state(
-                                runtime_name.clone(),
-                                &spec,
-                                &executor,
-                                vec![MappedDir {
-                                    name:      "base".to_string(),
-                                    host_path: store.base.clone(),
-                                }],
-                            )?;
+                            let executor = {
+                                let store = store.read().unwrap();
+                                let stderr = fs::OpenOptions::new()
+                                    .write(true)
+                                    .create_new(true)
+                                    .open(store.root_path().join("stderr"))
+                                    .wrap_err("failed to open stderr file")?;
+                                let executor = RunningExecutor::from_wasi_runner(
+                                    runtime.as_ref(),
+                                    Path::new("target")
+                                        .join("release")
+                                        .join("wazzi-executor.wasm")
+                                        .canonicalize()
+                                        .unwrap()
+                                        .as_ref(),
+                                    &store.root_path(),
+                                    Arc::new(Mutex::new(stderr)),
+                                    vec![MappedDir {
+                                        name:      "base".to_string(),
+                                        host_path: store.base_path().to_path_buf(),
+                                    }],
+                                )
+                                .unwrap();
+                                let initializer = runtime.initialize_state(
+                                    runtime_name.clone(),
+                                    &spec,
+                                    &executor,
+                                    vec![MappedDir {
+                                        name:      "base".to_string(),
+                                        host_path: store.base_path().to_path_buf(),
+                                    }],
+                                )?;
 
-                            initializers.push((runtime_name.to_string(), initializer));
+                                initializers.push((runtime_name.to_string(), initializer));
+
+                                executor
+                            };
+
                             runtimes.push((runtime_name.to_string(), store, executor));
                         }
 
-                        let run = Arc::new(Mutex::new(run.start_run()));
+                        let run = run.clone();
                         let n_runtimes = runtimes.len();
                         let rts = initializers.iter().map(|(name, _)| name.to_string()).collect_vec();
                         let (env, rtctxs, preopens) =
@@ -1002,7 +1004,7 @@ impl Fuzzer {
                                 let cancel = cancel.clone();
 
                                 move || {
-                                    run.lock().unwrap().configure_progress_logging();
+                                    run.lock().unwrap().configure_progress_logging(enable_logging);
 
                                     'outer: loop {
                                         loop {
@@ -1089,7 +1091,7 @@ impl Fuzzer {
                                 let rtctxs = rtctxs.clone();
 
                                 move || {
-                                    run.lock().unwrap().configure_progress_logging();
+                                    run.lock().unwrap().configure_progress_logging(enable_logging);
 
                                     let mut u = Unstructured::new(&data);
                                     let cfg = z3::Config::new();
@@ -1122,7 +1124,13 @@ impl Fuzzer {
 
                                         let function = strategy.select_function(&spec, &env.read().unwrap()).unwrap();
 
-                                        select_func_done_tx.try_send(function.to_owned()).unwrap();
+                                        match select_func_done_tx.try_send(function.to_owned()) {
+                                            | Ok(_) => (),
+                                            | Err(err) => {
+                                                over.store(true, atomic::Ordering::Release);
+                                                break;
+                                            },
+                                        }
 
                                         loop {
                                             let (mu, cond) = &*prep_params_init;
@@ -1264,7 +1272,7 @@ impl Fuzzer {
                                 let diff_init = diff_init.clone();
 
                                 move || -> Result<(), FuzzError> {
-                                    run.lock().unwrap().configure_progress_logging();
+                                    run.lock().unwrap().configure_progress_logging(enable_logging);
 
                                     loop {
                                         let errnos: Vec<_> = loop {
@@ -1315,37 +1323,17 @@ impl Fuzzer {
                                             }
                                         }
 
-                                        let runtimes = run
-                                            .lock()
-                                            .unwrap()
-                                            .runtimes::<Call>()
-                                            .wrap_err("failed to resume runtimes")?
-                                            .collect::<Vec<_>>();
+                                        let run = run.lock().unwrap();
+                                        let runtimes = run.runtime_stores().collect::<Vec<_>>();
 
-                                        'outer: for (i, runtime_0) in runtimes.iter().enumerate() {
-                                            let call_0 = runtime_0
-                                                .trace()
-                                                .last_call()
-                                                .wrap_err("failed to get last call")
-                                                .unwrap()
-                                                .unwrap()
-                                                .read_call()
-                                                .wrap_err("failed to read action")
-                                                .unwrap()
-                                                .unwrap();
+                                        'outer: for (i, (runtime_0_name, runtime_0)) in runtimes.iter().enumerate() {
+                                            let runtime_0 = runtime_0.read().unwrap();
+                                            let call_0 = runtime_0.last_call().unwrap();
 
                                             for j in (i + 1)..runtimes.len() {
-                                                let runtime_1 = runtimes.get(j).unwrap();
-                                                let call_1 = runtime_1
-                                                    .trace()
-                                                    .last_call()
-                                                    .wrap_err("failed to get last call")
-                                                    .unwrap()
-                                                    .unwrap()
-                                                    .read_call()
-                                                    .wrap_err("failed to read action")
-                                                    .unwrap()
-                                                    .unwrap();
+                                                let (runtime_1_name, runtime_1) = runtimes.get(j).unwrap();
+                                                let runtime_1 = runtime_1.read().unwrap();
+                                                let call_1 = runtime_1.last_call().unwrap();
 
                                                 match (call_0.errno, call_1.errno) {
                                                     | (None, None) => {},
@@ -1354,8 +1342,8 @@ impl Fuzzer {
                                                             || errno_0 != 0 && errno_1 != 0 => {},
                                                     | _ => {
                                                         tracing::error!(
-                                                            runtime_a = runtime_0.name(),
-                                                            runtime_b = runtime_1.name(),
+                                                            runtime_a = runtime_0_name,
+                                                            runtime_b = runtime_1_name,
                                                             runtime_a_errno = call_0.errno,
                                                             runtime_b_errno = call_1.errno,
                                                             "Errno diff found!"
@@ -1366,11 +1354,11 @@ impl Fuzzer {
                                                     },
                                                 }
 
-                                                let runtime_0_walk = WalkDir::new(&runtime_0.base)
+                                                let runtime_0_walk = WalkDir::new(&runtime_0.base_path())
                                                     .sort_by_file_name()
                                                     .min_depth(1)
                                                     .into_iter();
-                                                let runtime_1_walk = WalkDir::new(&runtime_1.base)
+                                                let runtime_1_walk = WalkDir::new(&runtime_1.base_path())
                                                     .sort_by_file_name()
                                                     .min_depth(1)
                                                     .into_iter();
@@ -1413,12 +1401,13 @@ impl Fuzzer {
 
                         let mut runtime_threads = Vec::new();
 
-                        for (i, (runtime_name, mut store, executor)) in runtimes.into_iter().enumerate() {
+                        for (i, (runtime_name, store, executor)) in runtimes.into_iter().enumerate() {
                             runtime_threads.push(
                                 thread::Builder::new()
                                     .name(format!("drv-{run_id}-{runtime_name}"))
                                     .spawn_scoped(scope, {
                                         let run = run.clone();
+                                        let run_id = run_id.clone();
                                         let mmap = mmap.clone();
                                         let over = over.clone();
                                         let cancel = cancel.clone();
@@ -1439,7 +1428,7 @@ impl Fuzzer {
                                         let runtime_name = runtime_name.clone();
 
                                         move || -> Result<(), FuzzError> {
-                                            run.lock().unwrap().configure_progress_logging();
+                                            run.lock().unwrap().configure_progress_logging(enable_logging);
 
                                             let mut iteration = 0;
                                             let mut u = Unstructured::new(data);
@@ -1464,7 +1453,16 @@ impl Fuzzer {
                                                     }
                                                 }
 
-                                                let function = select_func_done_rx.recv().unwrap();
+                                                let function = match select_func_done_rx.recv() {
+                                                    | Ok(x) => x,
+                                                    | Err(_) => {
+                                                        tracing::info!(
+                                                            "Strategy thread terminated. Stopping fuzz run."
+                                                        );
+                                                        over.store(true, atomic::Ordering::SeqCst);
+                                                        break;
+                                                    },
+                                                };
 
                                                 tracing::info!(
                                                     run_id = run_id,
@@ -1499,7 +1497,6 @@ impl Fuzzer {
                                                 let (errno, results) = execute_call(
                                                     &spec,
                                                     rtctxs.read().unwrap().get(i).unwrap(),
-                                                    store.trace_mut(),
                                                     &function,
                                                     params.clone(),
                                                     &executor,
@@ -1531,8 +1528,9 @@ impl Fuzzer {
                                                 };
 
                                                 store
-                                                    .trace_mut()
-                                                    .end_call(&Call {
+                                                    .write()
+                                                    .unwrap()
+                                                    .record_call(Call {
                                                         function: function.name,
                                                         errno:    errno,
                                                         params:   params
@@ -1665,12 +1663,22 @@ impl Fuzzer {
                         Ok(())
                     })
                     .unwrap();
+
+                    run_.lock().unwrap().finish();
                 }
             });
         }
 
         tracing::info!(active_count = pool.active_count(), "Waiting for fuzz runs to complete.");
         pool.join();
+
+        serde_json::to_writer_pretty(
+            fs::OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .open(self.store.root_path().join("metadata.json"))?,
+            &self.store.metadata(),
+        )?;
 
         Ok(())
     }

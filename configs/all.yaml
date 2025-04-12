@@ -1,0 +1,7 @@
+spec: preview1.witx
+runtimes:
+  - name: node
+  - name: wamr
+  - name: wasmedge
+  - name: wasmtime
+  - name: wazero

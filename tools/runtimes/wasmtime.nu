@@ -1,10 +1,16 @@
 #!/usr/bin/env nu
 
-export def --env main [repo: path, --clean] -> path {
+export def --env main [repo: path, --clean, --cov] -> path {
     let repo = $repo | path expand
 
+    if $clean {
+        cargo +nightly -Z unstable-options -C $repo clean
+    }
+
     do {
-        $env.RUSTFLAGS = "-C instrument-coverage -Z coverage-options=branch"
+        if $cov {
+            $env.RUSTFLAGS = "-C instrument-coverage -Z coverage-options=branch"
+        }
 
         cargo +nightly -Z unstable-options -C $repo build --release
     }

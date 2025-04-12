@@ -20,7 +20,6 @@ use serde::{Deserialize, Serialize};
 use spec::{Function, RecordValue, Spec, TypeDef, WasiType, WasiValue};
 use wazzi_executor_pb_rust::WasiFunc;
 use wazzi_runners::RunningExecutor;
-use wazzi_store::TraceStore;
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct EnvironmentInitializer {
@@ -350,26 +349,10 @@ impl RuntimeContext {
 pub fn execute_call(
     spec: &Spec,
     rtctx: &RuntimeContext,
-    store: &mut TraceStore<Call>,
     function: &Function,
     params: Vec<HighLevelValue>,
     executor: &RunningExecutor,
 ) -> Result<(Option<i32>, Option<Vec<WasiValue>>), eyre::Error> {
-    store.begin_call(&Call {
-        function: function.name.clone(),
-        errno:    None,
-        params:   params
-            .clone()
-            .into_iter()
-            .map(|value| {
-                let (value, resource_idx) = rtctx.lower(value);
-
-                MaybeResourceValue { value, resource_idx }
-            })
-            .collect_vec(),
-        results:  None,
-    })?;
-
     let response = executor.call(wazzi_executor_pb_rust::request::Call {
         func:           WasiFunc::try_from(function.name.as_str())
             .map_err(|_| err!("unknown WASI function name"))?
