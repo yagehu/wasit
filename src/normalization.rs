@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, path::PathBuf};
 
 use dyn_clone::{clone_trait_object, DynClone};
 use wazzi_runners::{MappedDir, Node, Wamr, WasiRunner, Wasmedge, Wasmer, Wasmtime, Wazero};
@@ -117,12 +117,10 @@ fn initialize(
                     which:          Some(pb::value::Which::Array(pb::value::Array {
                         items:          vec![
                             pb::Value {
-                                which:          Some(pb::value::Which::Builtin(
-                                    pb::value::Builtin {
-                                        which:          Some(pb::value::builtin::Which::U8(0)),
-                                        special_fields: Default::default(),
-                                    }
-                                )),
+                                which:          Some(pb::value::Which::Builtin(pb::value::Builtin {
+                                    which:          Some(pb::value::builtin::Which::U8(0)),
+                                    special_fields: Default::default(),
+                                })),
                                 special_fields: Default::default(),
                             };
                             pr_name_len as usize
@@ -147,21 +145,15 @@ fn initialize(
         assert_eq!(call.errno_some(), 0);
 
         let full_dir_name = String::from_utf8(
-            WasiValue::from_pb(
-                call.params[1].clone(),
-                spec,
-                spec.types.get_by_key("path").unwrap(),
-            )
-            .string()
-            .unwrap()
-            .to_vec(),
+            WasiValue::from_pb(call.params[1].clone(), spec, spec.types.get_by_key("path").unwrap())
+                .string()
+                .unwrap()
+                .to_vec(),
         )
         .unwrap();
-        let dir_name = full_dir_name
-            .rsplit_once('/')
-            .unwrap_or(("", full_dir_name.as_str()))
-            .1
-            .to_string();
+        let full_dir_name = PathBuf::from(full_dir_name);
+
+        let dir_name = full_dir_name.file_name().unwrap().to_string_lossy().to_string();
         let dir = mapped_dirs.iter().find(|dir| dir.name == dir_name).unwrap();
 
         preopens.push((dir_name, dir.host_path.clone(), WasiValue::Handle(fd)));
@@ -282,9 +274,7 @@ impl InitializeState for Wasmer<'_> {
                         .value(HashSet::new())
                         .into_pb(spec, &TypeRef::Named("lookupflags".to_string())),
                     pb::Value {
-                        which:          Some(pb::value::Which::String(
-                            dir.name.clone().into_bytes(),
-                        )),
+                        which:          Some(pb::value::Which::String(dir.name.clone().into_bytes())),
                         special_fields: Default::default(),
                     },
                     spec.get_wasi_type("oflags")
@@ -322,11 +312,7 @@ impl InitializeState for Wasmer<'_> {
             preopens.push((
                 dir.name.clone(),
                 dir.host_path.clone(),
-                WasiValue::from_pb(
-                    call.results[0].clone(),
-                    spec,
-                    spec.types.get_by_key("fd").unwrap(),
-                ),
+                WasiValue::from_pb(call.results[0].clone(), spec, spec.types.get_by_key("fd").unwrap()),
             ));
         }
 

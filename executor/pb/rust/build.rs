@@ -3,10 +3,7 @@ use wazzi_compile_time::root;
 fn main() {
     let root = root();
     let schema_dir = root.join("executor");
-    let schema_file = schema_dir
-        .join("wazzi-executor.proto")
-        .canonicalize()
-        .unwrap();
+    let schema_file = schema_dir.join("wazzi-executor.proto");
 
     println!("cargo::rerun-if-changed={}", schema_file.display());
 

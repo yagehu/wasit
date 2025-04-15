@@ -1,7 +1,8 @@
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     fs,
-    io,
+    io::{self, Read},
+    os::windows::fs::OpenOptionsExt,
     path::{Path, PathBuf},
     thread,
 };
@@ -10,7 +11,6 @@ use arbitrary::Unstructured;
 use eyre::{eyre as err, Context};
 use idxspace::IndexSpace;
 use itertools::Itertools;
-use openat::Dir;
 use petgraph::{data::DataMap as _, graph::DiGraph, visit::IntoNeighborsDirected};
 use z3::{
     ast::{lambda_const, Ast, Bool, Dynamic, Int, Seq},
@@ -3473,7 +3473,7 @@ struct PreopenFs {
 impl PreopenFs {
     fn new(path: &Path) -> Result<Self, eyre::Error> {
         Ok(Self {
-            root: Directory::ingest(path)?,
+            root: Directory::ingest_abs(path)?,
         })
     }
 }
@@ -3503,12 +3503,17 @@ impl File {
         }
     }
 
-    fn ingest(dir: &Dir, path: &Path) -> Result<Self, eyre::Error> {
-        let metadata = fs::symlink_metadata(path)?;
+    fn ingest(dir: &mut fs::File, path: &Path) -> Result<Self, eyre::Error> {
+        let file = fs_at::OpenOptions::default()
+            .read(true)
+            .follow(false)
+            .open_at(dir, path)
+            .wrap_err(format!("file `{}`", path.display()))?;
+        let metadata = file.metadata()?;
         let file_type = metadata.file_type();
 
         if file_type.is_dir() {
-            Ok(Self::Directory(Directory::ingest(path)?))
+            Ok(Self::Directory(Directory::ingest(dir, path)?))
         } else if file_type.is_file() {
             Ok(Self::RegularFile(RegularFile::ingest(dir, path)?))
         } else if file_type.is_symlink() {
@@ -3587,22 +3592,64 @@ impl Directory {
         DirectoryEncoding { node, children }
     }
 
-    fn ingest(path: &Path) -> Result<Self, eyre::Error> {
+    fn ingest_abs(path: &Path) -> Result<Self, eyre::Error> {
         let mut paths: Vec<PathBuf> = Default::default();
 
         for entry in fs::read_dir(path).wrap_err("failed to read dir")? {
             let entry = entry?;
 
-            paths.push(entry.path());
+            paths.push(PathBuf::from(entry.file_name()));
         }
 
         paths.sort();
 
         let mut children = IndexSpace::new();
-        let dir = Dir::open(path)?;
+        let mut open_options = fs::OpenOptions::new();
+
+        open_options.read(true);
+
+        if cfg!(windows) {
+            open_options.custom_flags(0x02000000);
+        }
+
+        let mut dir = open_options.open(path)?;
 
         for path in &paths {
-            let file = File::ingest(&dir, &path)?;
+            let file = File::ingest(&mut dir, &path)?;
+
+            children.push(
+                String::from_utf8(path.file_name().unwrap().as_encoded_bytes().to_vec()).unwrap(),
+                file,
+            );
+        }
+
+        Ok(Self { children })
+    }
+
+    fn ingest(dir: &mut fs::File, path: &Path) -> Result<Self, eyre::Error> {
+        let mut open_options = fs_at::OpenOptions::default();
+
+        open_options.read(true);
+
+        let mut dir = open_options.open_dir_at(dir, path)?;
+        let mut paths: Vec<PathBuf> = Default::default();
+
+        for entry in fs_at::read_dir(&mut dir).wrap_err("failed to read dir")? {
+            let entry = entry?;
+
+            if entry.name() == "." || entry.name() == ".." {
+                continue;
+            }
+
+            paths.push(PathBuf::from(entry.name()));
+        }
+
+        paths.sort();
+
+        let mut children = IndexSpace::new();
+
+        for path in &paths {
+            let file = File::ingest(&mut dir, &path)?;
 
             children.push(
                 String::from_utf8(path.file_name().unwrap().as_encoded_bytes().to_vec()).unwrap(),
@@ -3638,11 +3685,11 @@ impl RegularFile {
         RegularFileEncoding { node, size: self.size }
     }
 
-    fn ingest(dir: &Dir, path: &Path) -> Result<Self, io::Error> {
-        let file = dir.metadata(path)?;
+    fn ingest(dir: &fs::File, path: &Path) -> Result<Self, io::Error> {
+        let file = fs_at::OpenOptions::default().read(true).open_at(dir, path)?;
 
         Ok(Self {
-            size: file.len() as u64,
+            size: file.metadata()?.len() as u64,
         })
     }
 }
@@ -3660,10 +3707,13 @@ impl Symlink {
         }
     }
 
-    fn ingest(dir: &Dir, path: &Path) -> Result<Self, io::Error> {
-        Ok(Self(
-            String::from_utf8(dir.read_link(path)?.as_os_str().as_encoded_bytes().to_vec()).unwrap(),
-        ))
+    fn ingest(dir: &fs::File, path: &Path) -> Result<Self, io::Error> {
+        let mut file = fs_at::OpenOptions::default().follow(false).open_at(dir, path)?;
+        let mut link = String::new();
+
+        file.read_to_string(&mut link)?;
+
+        Ok(Self(link))
     }
 }
 

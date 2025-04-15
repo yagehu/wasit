@@ -10,6 +10,7 @@ use std::{
     },
 };
 
+use dunce::canonicalize;
 use serde::{de::DeserializeOwned, Serialize};
 use tracing_subscriber::layer::SubscriberExt as _;
 
@@ -28,7 +29,7 @@ pub struct Store {
 impl Store {
     pub fn new(path: &Path) -> Result<Self, io::Error> {
         Ok(Self {
-            path:   path.canonicalize()?,
+            path:   canonicalize(path)?,
             next:   Arc::new(AtomicUsize::new(0)),
             ncalls: Arc::new(AtomicUsize::new(0)),
         })
@@ -49,7 +50,7 @@ impl Store {
                 path:           path.clone(),
                 data_next_idx:  0,
                 data_dir:       path.join("data"),
-                runtimes_dir:   path.canonicalize()?.join("runtimes"),
+                runtimes_dir:   canonicalize(path)?.join("runtimes"),
                 runtimes:       Default::default(),
                 tracing_guards: Vec::new(),
                 total_ncalls:   self.ncalls.clone(),
@@ -160,7 +161,7 @@ impl<T> RuntimeStore<T> {
         fs::create_dir(path)?;
         fs::create_dir(&path.join("base"))?;
 
-        let root_path = path.canonicalize()?;
+        let root_path = path.to_path_buf();
         let base_path = root_path.join("base");
         let log_trace = match log_trace {
             | true => {

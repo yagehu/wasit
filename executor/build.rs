@@ -1,39 +1,20 @@
 use std::{env, fs, path::PathBuf, process};
 
 fn main() {
-    let src_dir = PathBuf::from(".").canonicalize().unwrap();
+    let src_dir = PathBuf::from(".");
 
-    println!(
-        "cargo::rerun-if-changed={}",
-        src_dir.join("main.c").display()
-    );
+    println!("cargo::rerun-if-changed={}", src_dir.join("main.c").display());
 
     let root_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("..");
-    let target_dir = root_dir
-        .join("target")
-        .join(env::var("PROFILE").unwrap())
-        .canonicalize()
-        .unwrap();
-    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap())
-        .canonicalize()
-        .unwrap();
-    let protobuf_c_dir = root_dir
-        .join("executor")
-        .join("protobuf-c")
-        .join("upstream")
-        .canonicalize()
-        .unwrap();
+    let target_dir = root_dir.join("target").join(env::var("PROFILE").unwrap());
+    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let protobuf_c_dir = root_dir.join("executor").join("protobuf-c").join("upstream");
     let wasi_sdk = PathBuf::from(env::var("WASI_SDK").unwrap());
-    let clang = wasi_sdk.join("bin").join("clang").canonicalize().unwrap();
+    let clang = wasi_sdk.join("bin").join("clang");
+
     let mut child = process::Command::new(clang)
         .arg("--sysroot")
-        .arg(
-            wasi_sdk
-                .join("share")
-                .join("wasi-sysroot")
-                .canonicalize()
-                .unwrap(),
-        )
+        .arg(wasi_sdk.join("share").join("wasi-sysroot"))
         .args([src_dir.join("main.c")])
         .args(["-Wall", "-Werror", "-Wpedantic"])
         .arg("-I")
@@ -43,6 +24,8 @@ fn main() {
         .args(["-lwazzi-executor-pb", "-lprotobuf-c"])
         .arg("-L")
         .arg(&target_dir)
+        .arg("-L")
+        .arg(&target_dir.join("protoc-c-wasm").join("lib"))
         .arg("-o")
         .arg(out_dir.join("wazzi-executor.wasm"))
         .spawn()

@@ -244,12 +244,7 @@ impl Fuzzer {
                         .wrap_err("failed to open stderr file")?;
                     let executor = RunningExecutor::from_wasi_runner(
                         runtime.as_ref(),
-                        Path::new("target")
-                            .join("release")
-                            .join("wazzi-executor.wasm")
-                            .canonicalize()
-                            .unwrap()
-                            .as_ref(),
+                        Path::new("target").join("release").join("wazzi-executor.wasm").as_ref(),
                         store.root_path(),
                         Arc::new(Mutex::new(stderr)),
                         vec![MappedDir {
@@ -744,6 +739,9 @@ impl Fuzzer {
                                             break;
                                         },
                                     };
+                                    if function.name == "path_open" {
+                                        println!("{:#?}", params);
+                                    }
                                     let (errno, results) = execute_call(
                                         &spec,
                                         rtctxs.read().unwrap().get(i).unwrap(),
@@ -951,12 +949,7 @@ impl Fuzzer {
                                     .wrap_err("failed to open stderr file")?;
                                 let executor = RunningExecutor::from_wasi_runner(
                                     runtime.as_ref(),
-                                    Path::new("target")
-                                        .join("release")
-                                        .join("wazzi-executor.wasm")
-                                        .canonicalize()
-                                        .unwrap()
-                                        .as_ref(),
+                                    Path::new("target").join("release").join("wazzi-executor.wasm").as_ref(),
                                     &store.root_path(),
                                     Arc::new(Mutex::new(stderr)),
                                     vec![MappedDir {
@@ -1126,7 +1119,7 @@ impl Fuzzer {
 
                                         match select_func_done_tx.try_send(function.to_owned()) {
                                             | Ok(_) => (),
-                                            | Err(err) => {
+                                            | Err(_err) => {
                                                 over.store(true, atomic::Ordering::Release);
                                                 break;
                                             },

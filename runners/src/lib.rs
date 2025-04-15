@@ -12,6 +12,7 @@ use std::{
     thread,
 };
 
+use dunce::canonicalize;
 use eyre::Context;
 use protobuf::Message as _;
 use serde::{Deserialize, Serialize};
@@ -285,7 +286,7 @@ impl WasiRunner for Wasmtime<'_> {
         }
 
         command
-            .arg(wasm_path)
+            .arg(canonicalize(wasm_path).unwrap())
             .current_dir(working_dir)
             .stdin(process::Stdio::piped())
             .stdout(process::Stdio::piped())
@@ -336,7 +337,7 @@ impl WasiRunner for Wamr<'_> {
 
         command
             .arg("--stack-size=1000000")
-            .arg(wasm_path)
+            .arg(canonicalize(wasm_path).unwrap())
             .stdin(process::Stdio::piped())
             .stdout(process::Stdio::piped())
             .stderr(process::Stdio::piped())

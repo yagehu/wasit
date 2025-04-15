@@ -1,6 +1,6 @@
 #!/usr/bin/env nu
 
-export def --env main [repo: path, --clean, --cov] -> path {
+export def main [repo: path, --clean, --cov] -> path {
     let repo = $repo | path expand
     let build_dir = $repo | path join "build"
 
