@@ -44,6 +44,8 @@ z3 = { git = "https://github.com/yagehu/z3.rs.git", branch = "wazzi" }
 z3-sys = { git = "https://github.com/yagehu/z3.rs.git", branch = "wazzi" }
 threadpool = "1.8.1"
 actix-rt = "2.10.0"
+libc = "0.2.172"
+rustix = { version = "1.0.5", features = ["fs"] }
 
 [build-dependencies]
 

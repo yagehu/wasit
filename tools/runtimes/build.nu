@@ -12,6 +12,7 @@ use wasmedge.nu
 use wasmedge-sancov.nu
 use wasmtime.nu
 use wasmtime-sancov.nu
+use wazero.nu
 
 def main [--clean, --cov, ...runtimes: string] {
     mut paths = []
@@ -37,6 +38,7 @@ def main [--clean, --cov, ...runtimes: string] {
             "wasmedge-sancov" => { wasmedge-sancov $repo $env.LLVM_16 $env.LLD_16 },
             "wasmtime" => { wasmtime $repo --clean=$clean --cov=$cov },
             "wasmtime-sancov" => { wasmtime-sancov $repo },
+            "wazero" => { wazero $repo },
             _ => { error make { msg: "unknown build configuration" } }
         }
 

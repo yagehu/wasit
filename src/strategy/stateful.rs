@@ -2,7 +2,6 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     fs,
     io::{self, Read},
-    os::windows::fs::OpenOptionsExt,
     path::{Path, PathBuf},
     thread,
 };
@@ -3504,11 +3503,34 @@ impl File {
     }
 
     fn ingest(dir: &mut fs::File, path: &Path) -> Result<Self, eyre::Error> {
+        for entry in fs_at::read_dir(dir)? {
+            let entry = entry?;
+
+            //entry.name()
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        let file = match fs_at::OpenOptions::default()
+            .read(true)
+            .follow(false)
+            .open_at(dir, path)
+        {
+            | Ok(file) => file,
+            | Err(err) => {
+                if err.raw_os_error().unwrap() == libc::ELOOP {
+                    return Ok(Self::Symlink(Symlink::ingest(dir, path)?));
+                }
+
+                return Err(err!(err).wrap_err(format!("file `{}`", path.display())));
+            },
+        };
+        #[cfg(target_os = "windows")]
         let file = fs_at::OpenOptions::default()
             .read(true)
             .follow(false)
             .open_at(dir, path)
-            .wrap_err(format!("file `{}`", path.display()))?;
+            .wrap_err(format!("file `{}`", path.display()));
+
         let metadata = file.metadata()?;
         let file_type = metadata.file_type();
 
@@ -3608,7 +3630,10 @@ impl Directory {
 
         open_options.read(true);
 
-        if cfg!(windows) {
+        #[cfg(target_os = "windows")]
+        {
+            use os::windows::fs::OpenOptionsExt as _;
+
             open_options.custom_flags(0x02000000);
         }
 
@@ -3707,6 +3732,16 @@ impl Symlink {
         }
     }
 
+    #[cfg(not(target_os = "windows"))]
+    fn ingest(dir: &fs::File, path: &Path) -> Result<Self, io::Error> {
+        use std::os::fd::AsFd;
+
+        let link = rustix::fs::readlinkat(dir.as_fd(), path, [])?;
+
+        Ok(Self(link.to_str().unwrap().to_string()))
+    }
+
+    #[cfg(target_os = "windows")]
     fn ingest(dir: &fs::File, path: &Path) -> Result<Self, io::Error> {
         let mut file = fs_at::OpenOptions::default().follow(false).open_at(dir, path)?;
         let mut link = String::new();

@@ -22,7 +22,7 @@ export def --env main [repo: path, --clean, --cov] -> path {
             $env.LDFLAGS = "-fprofile-instr-generate -fcoverage-mapping -fuse-ld=lld"
         }
 
-        cmake -DCMAKE_BUILD_TYPE=Release -B $build_dir -S $src_dir
+        cmake -DCMAKE_BUILD_TYPE=Release -B $build_dir -S $src_dir -DWAMR_BUILD_REF_TYPES=1
         cmake --build $build_dir
     }
 

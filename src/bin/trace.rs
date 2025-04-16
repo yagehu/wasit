@@ -32,7 +32,7 @@ fn main() -> Result<(), eyre::Error> {
 
     let mut runs = Vec::new();
     let cmd = Command::parse();
-    let entries = fs::read_dir(&cmd.dir)?
+    let entries = fs::read_dir(cmd.dir.join("runs"))?
         .collect::<Result<Vec<_>, _>>()
         .wrap_err("failed to read directory entries")?;
 
@@ -80,17 +80,17 @@ fn main() -> Result<(), eyre::Error> {
         let runtimes = runtimes.as_ref().unwrap();
         let runtime = runtimes.first().unwrap();
         let trace_dir = runtimes_dir.join(runtime).join("trace");
-        let call_entries = fs::read_dir(&trace_dir)
-            .unwrap()
+        let call_entries = fs::read_dir(&trace_dir)?
+            .collect::<Result<Vec<_>, _>>()?
             .into_iter()
-            .map(|entry| entry.unwrap())
-            .map(|entry| {
+            .map(|entry| entry.file_name().into_string().unwrap())
+            .map(|file_name| {
                 (
-                    entry.path(),
-                    entry.file_name().into_string().unwrap().parse::<usize>().unwrap(),
+                    file_name.strip_suffix(".json").unwrap().parse::<usize>().unwrap(),
+                    file_name,
                 )
             })
-            .sorted_by(|(_, idx_0), (_, idx_1)| Ord::cmp(idx_0, idx_1))
+            .sorted_by(|(i, _), (j, _)| Ord::cmp(i, j))
             .collect_vec();
         let mut trace_len = 0;
         let mut graph = DiGraph::new();
@@ -100,15 +100,11 @@ fn main() -> Result<(), eyre::Error> {
 
         println!("Analyzing run {nruns}.");
 
-        for (path, idx) in call_entries {
-            if !path.join("call.json").exists() {
-                break;
-            }
-
+        for (idx, file_name) in call_entries {
             trace_len += 1;
             total_num_calls += 1;
 
-            let call_file = File::open(path.join("call.json")).unwrap();
+            let call_file = File::open(trace_dir.join(file_name)).unwrap();
             let call: Call = serde_json::from_reader(&call_file).unwrap();
             let call_node_idx = graph.add_node(Node::Call {
                 idx,

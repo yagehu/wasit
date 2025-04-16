@@ -739,9 +739,6 @@ impl Fuzzer {
                                             break;
                                         },
                                     };
-                                    if function.name == "path_open" {
-                                        println!("{:#?}", params);
-                                    }
                                     let (errno, results) = execute_call(
                                         &spec,
                                         rtctxs.read().unwrap().get(i).unwrap(),
