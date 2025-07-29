@@ -56,11 +56,11 @@ publish = false
 [workspace]
 resolver = "2"
 members = [
-    "collect",
     "compile-time",
     "executor",
     "executor/pb/c",
     "executor/pb/rust",
+    "executor/protobuf-c/autogen",
     "executor/protobuf-c/build",
     "executor/protobuf-c/wasm",
     "idxspace",
@@ -76,6 +76,7 @@ wazzi-executor.path = "executor"
 wazzi-executor-pb-c.path = "executor/pb/c"
 wazzi-executor-pb-rust.path = "executor/pb/rust"
 wazzi-executor-protobuf-c.path = "executor/protobuf-c/build"
+wazzi-executor-protobuf-c-autogen.path = "executor/protobuf-c/autogen"
 wazzi-executor-protobuf-c-wasm.path = "executor/protobuf-c/wasm"
 wazzi-runners.path = "runners"
 wazzi-store.path = "store"

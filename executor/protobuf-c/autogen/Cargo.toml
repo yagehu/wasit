@@ -1,0 +1,8 @@
+[package]
+name = "wazzi-executor-protobuf-c-autogen"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[build-dependencies]
+wazzi-compile-time.workspace = true

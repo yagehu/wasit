@@ -1,6 +1,6 @@
 #!/usr/bin/env nu
 
-export def --env main [repo: path] -> path {
+export def --env main [repo: path] {
     let repo = $repo | path expand
 
     do {

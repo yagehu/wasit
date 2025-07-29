@@ -4,7 +4,7 @@ use std::{
     ffi::OsString,
     fmt,
     fs,
-    io,
+    io::{self, read_to_string},
     ops::DerefMut as _,
     path::{Path, PathBuf},
     process,
@@ -179,7 +179,7 @@ impl WasiRunner for Wasmedge<'_> {
         }
 
         command
-            .arg(wasm_path)
+            .arg(canonicalize(wasm_path).unwrap())
             .stdin(process::Stdio::piped())
             .stdout(process::Stdio::piped())
             .stderr(process::Stdio::piped())
@@ -390,7 +390,7 @@ impl WasiRunner for Wazero<'_> {
         }
 
         command
-            .arg(wasm_path)
+            .arg(canonicalize(wasm_path).unwrap())
             .stdin(process::Stdio::piped())
             .stdout(process::Stdio::piped())
             .stderr(process::Stdio::piped())

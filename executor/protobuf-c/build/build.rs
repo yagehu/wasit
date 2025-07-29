@@ -79,8 +79,8 @@ fn main() {
                 );
         }
 
-        command.env("CC", "clang");
-        command.env("CXX", "clang++");
+        // command.env("CC", "clang");
+        // command.env("CXX", "clang++");
 
         #[cfg(target_os = "macos")]
         command.env("LDFLAGS", "-framework CoreFoundation");

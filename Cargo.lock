@@ -2203,10 +2203,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "wazzi-collect"
-version = "0.1.0"
-
-[[package]]
 name = "wazzi-compile-time"
 version = "0.1.0"
 
@@ -2243,6 +2239,14 @@ name = "wazzi-executor-protobuf-c"
 version = "0.1.0"
 dependencies = [
  "wazzi-compile-time",
+ "wazzi-executor-protobuf-c-autogen",
+]
+
+[[package]]
+name = "wazzi-executor-protobuf-c-autogen"
+version = "0.1.0"
+dependencies = [
+ "wazzi-compile-time",
 ]
 
 [[package]]
@@ -2250,6 +2254,7 @@ name = "wazzi-executor-protobuf-c-wasm"
 version = "0.1.0"
 dependencies = [
  "wazzi-compile-time",
+ "wazzi-executor-protobuf-c-autogen",
 ]
 
 [[package]]

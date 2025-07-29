@@ -56,13 +56,6 @@ fn main() {
                 .success());
         },
         | _ => {
-            assert!(process::Command::new(PathBuf::new().join(".").join("autogen.sh"))
-                .spawn()
-                .unwrap()
-                .wait()
-                .unwrap()
-                .success());
-
             let mut protobuf = None;
 
             if let Ok(p) = env::var("PROTOBUF") {
@@ -95,11 +88,12 @@ fn main() {
 
             assert!(cmd
                 .env("PROTOC", &protoc)
-                .env("CC", &wasi_sdk_bin_dir.join("clang"))
-                .env("AR", &wasi_sdk_bin_dir.join("ar"))
-                .env("LD", &wasi_sdk_bin_dir.join("wasm-ld"))
-                .env("NM", &wasi_sdk_bin_dir.join("nm"))
-                .env("RANLIB", &wasi_sdk_bin_dir.join("ranlib"))
+                .env("CC", wasi_sdk_bin_dir.join("clang"))
+                .env("CXX", wasi_sdk_bin_dir.join("clang++"))
+                .env("AR", wasi_sdk_bin_dir.join("ar"))
+                .env("LD", wasi_sdk_bin_dir.join("wasm-ld"))
+                .env("NM", wasi_sdk_bin_dir.join("nm"))
+                .env("RANLIB", wasi_sdk_bin_dir.join("ranlib"))
                 .env(
                     "CFLAGS",
                     format!(

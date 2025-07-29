@@ -1,6 +1,6 @@
 #!/usr/bin/env nu
 
-export def --env main [repo: path, --clean, --cov] -> path {
+export def --env main [repo: path, --clean, --cov] {
     let repo = $repo | path expand
 
     if $clean {

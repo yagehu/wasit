@@ -3,15 +3,10 @@
 use std
 
 use node.nu
-use node-sancov.nu
 use wamr.nu
-use wamr-sancov.nu
 use wasmer.nu
-use wasmer-sancov.nu
 use wasmedge.nu
-use wasmedge-sancov.nu
 use wasmtime.nu
-use wasmtime-sancov.nu
 use wazero.nu
 
 def main [--clean, --cov, ...runtimes: string] {
@@ -29,15 +24,10 @@ def main [--clean, --cov, ...runtimes: string] {
         let repo = $runtime | str substring ($i + 1)..
         let path = match $name {
             "node" => { node $repo --cov=$cov },
-            "node-sancov" => { node-sancov $repo },
             "wamr" => { wamr $repo --clean=$clean --cov=$cov },
-            "wamr-sancov" => { wamr-sancov $repo },
             "wasmer" => { wasmer $repo --clean=$clean --cov=$cov },
-            "wasmer-sancov" => { wasmer-sancov $repo },
             "wasmedge" => { wasmedge $repo $env.LLVM_16 $env.LLD_16 --clean=$clean --cov=$cov },
-            "wasmedge-sancov" => { wasmedge-sancov $repo $env.LLVM_16 $env.LLD_16 },
             "wasmtime" => { wasmtime $repo --clean=$clean --cov=$cov },
-            "wasmtime-sancov" => { wasmtime-sancov $repo },
             "wazero" => { wazero $repo },
             _ => { error make { msg: "unknown build configuration" } }
         }

@@ -4,7 +4,8 @@ version = "0.1.0"
 edition.workspace = true
 publish = false
 
-[dependencies]
+[target.'cfg(not(windows))'.build-dependencies]
+wazzi-executor-protobuf-c-autogen.workspace = true
 
 [build-dependencies]
 wazzi-compile-time.workspace = true

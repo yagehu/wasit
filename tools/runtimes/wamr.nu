@@ -1,6 +1,6 @@
 #!/usr/bin/env nu
 
-export def --env main [repo: path, --clean, --cov] -> path {
+export def --env main [repo: path, --clean, --cov] {
     let repo = $repo | path expand
     let os = (uname | get kernel-name | str downcase)
     let src_dir = $repo | path join "product-mini" "platforms" $os
@@ -22,7 +22,7 @@ export def --env main [repo: path, --clean, --cov] -> path {
             $env.LDFLAGS = "-fprofile-instr-generate -fcoverage-mapping -fuse-ld=lld"
         }
 
-        cmake -DCMAKE_BUILD_TYPE=Release -B $build_dir -S $src_dir -DWAMR_BUILD_REF_TYPES=1
+        cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=Release -B $build_dir -S $src_dir -DWAMR_BUILD_REF_TYPES=1
         cmake --build $build_dir
     }
 
